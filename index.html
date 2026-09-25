@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>OẲN TÙ TÌ V2 - 9x9 Strategy Battle</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <!-- Loading Screen -->
+  <div id="loading" class="screen active">
+    <div class="loading-content">
+      <h1 class="loading-title">OẲN TÙ TÌ V2</h1>
+      <p class="loading-subtitle">9×9 STRATEGY BATTLE</p>
+      <div class="loading-spinner"></div>
+      <p class="loading-text">Đang kết nối PlayHTML...</p>
+    </div>
+  </div>
+
+  <!-- Lobby Screen -->
+  <div id="lobby" class="screen">
+    <div class="lobby-card">
+      <h1>OẲN TÙ TÌ V2</h1>
+      <p class="subtitle">CHỌN CHẾ ĐỘ • BẮT ĐẦU TRẬN ĐẤU</p>
+
+      <div class="form-group">
+        <label>Tên của bạn</label>
+        <input type="text" id="player-name" placeholder="Nhập tên..." maxlength="20" autocomplete="off">
+      </div>
+
+      <div class="form-group">
+        <label>Chọn chế độ chơi</label>
+        <div class="mode-select">
+          <div class="mode-card selected" data-mode="2p">
+            <span class="mode-icon">⚔️</span>
+            <span class="mode-title">2 NGƯỜI CHƠI</span>
+            <span class="mode-desc">1 bàn cờ, đấu 1 vs 1</span>
+          </div>
+          <div class="mode-card" data-mode="arena">
+            <span class="mode-icon">🏟️</span>
+            <span class="mode-title">ĐẤU TRƯỜNG 4 BÀN</span>
+            <span class="mode-desc">4 bàn cờ, 8 người chơi</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label>Mã phòng</label>
+        <div class="room-input-group">
+          <input type="text" id="room-id" placeholder="Room ID" readonly>
+          <button id="generate-room" title="Tạo mã mới">🔄</button>
+        </div>
+        <button id="copy-link" class="secondary-btn">📋 Sao chép link phòng</button>
+      </div>
+
+      <button id="join-btn" class="primary-btn">VÀO PHÒNG</button>
+
+      <div id="lobby-status" class="status-msg" style="display:none"></div>
+    </div>
+  </div>
+
+  <!-- Game Screen: 2 người chơi -->
+  <div id="game" class="screen">
+    <header class="game-header">
+      <h1>OẲN TÙ TÌ V2</h1>
+      <div class="room-info">
+        <a href="?" id="back-link" class="back-link">← Đổi chế độ</a>
+        <span>Room: <strong id="room-display"></strong></span>
+      </div>
+    </header>
+
+    <main class="game-main">
+      <div class="player-panel" id="player1-panel">
+        <div class="player-header">
+          <h3>PLAYER 1</h3>
+          <div class="player-name" id="p1-name">Đang chờ...</div>
+        </div>
+        <div class="piece-counts">
+          <div class="piece-stat">
+            <span class="piece-icon">🥊</span>
+            <span class="piece-count" id="p1-dam">0</span>
+          </div>
+          <div class="piece-stat">
+            <span class="piece-icon">🍃</span>
+            <span class="piece-count" id="p1-la">0</span>
+          </div>
+          <div class="piece-stat">
+            <span class="piece-icon">✂️</span>
+            <span class="piece-count" id="p1-keo">0</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="board-section">
+        <div class="board-wrapper">
+          <div class="coord-header" id="coord-header"></div>
+          <div class="board-row">
+            <div class="coord-side" id="coord-side"></div>
+            <div class="board" id="board"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="player-panel player2-panel" id="player2-panel">
+        <div class="player-header">
+          <h3>PLAYER 2</h3>
+          <div class="player-name" id="p2-name">Đang chờ...</div>
+        </div>
+        <div class="piece-counts">
+          <div class="piece-stat">
+            <span class="piece-icon">🥊</span>
+            <span class="piece-count" id="p2-dam">0</span>
+          </div>
+          <div class="piece-stat">
+            <span class="piece-icon">🍃</span>
+            <span class="piece-count" id="p2-la">0</span>
+          </div>
+          <div class="piece-stat">
+            <span class="piece-icon">✂️</span>
+            <span class="piece-count" id="p2-keo">0</span>
+          </div>
+        </div>
+      </div>
+    </main>
+
+    <div class="turn-indicator" id="turn-indicator">ĐANG CHỜ....</div>
+
+    <div class="rules-panel">
+      <h4>📖 LUẬT CHƠI</h4>
+      <ul>
+        <li>Mỗi quân đi đúng 1 ô theo 8 hướng</li>
+        <li>🥊 Đấm ăn ✂️ Kéo</li>
+        <li>✂️ Kéo ăn 🍃 Lá</li>
+        <li>🍃 Lá ăn 🥊 Đấm</li>
+        <li>Hai quân cùng loại không ăn nhau</li>
+        <li>Ăn hết 1 loại quân đối phương → thắng</li>
+        <li>Đưa quân vào a1 hoặc i9 → thắng</li>
+      </ul>
+    </div>
+
+    <footer class="game-footer">
+      <span>Room: <span id="room-display-footer"></span></span>
+      <span>👥 <span id="player-count">0</span>/2</span>
+      <span id="spectator-info"></span>
+      <span>Turn: <span id="turn-count">0</span></span>
+      <button id="reset-btn" style="display:none">🔄 Chơi lại</button>
+    </footer>
+  </div>
+
+  <!-- Arena Screen: 4 bàn / 8 người chơi -->
+  <div id="arena" class="screen">
+    <header class="game-header">
+      <h1>OẲN TÙ TÌ V2 — ĐẤU TRƯỜNG</h1>
+      <div class="room-info">
+        <a href="?" id="arena-back-link" class="back-link">← Đổi chế độ</a>
+        <span>Room: <strong id="arena-room-display"></strong></span>
+      </div>
+    </header>
+
+    <div class="arena-grid" id="arena-grid"></div>
+  </div>
+
+  <!-- Toast dùng chung cho mọi màn hình (position: fixed) -->
+  <div id="toast-container"></div>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>
