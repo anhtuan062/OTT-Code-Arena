@@ -212,32 +212,45 @@ describe('FileTournamentRepository - Recovery Tests', () => {
     });
   });
 
-  describe('Tournament listing and deletion', () => {
-    it('should list tournaments', async () => {
-      await repository.save(createTestTournament('list-1', 'Tournament 1'));
-      await repository.save(createTestTournament('list-2', 'Tournament 2'));
+describe('Tournament listing and deletion', () => {
+  it('should list tournaments', async () => {
+    const tournament1 = {
+      ...createTestTournament('list-1', 'Tournament 1'),
+      createdAt: '2026-01-01T10:00:00.000Z',
+    };
 
-      const tournaments = await repository.list();
-      expect(tournaments).toHaveLength(2);
-      // Should be sorted by createdAt descending
-      expect(tournaments[0].tournamentId).toBe('list-2');
-    });
+    const tournament2 = {
+      ...createTestTournament('list-2', 'Tournament 2'),
+      createdAt: '2026-01-01T11:00:00.000Z',
+    };
 
-    it('should delete tournament', async () => {
-      await repository.save(createTestTournament('delete-1', 'To Delete'));
+    await repository.save(tournament1);
+    await repository.save(tournament2);
 
-      let exists = await repository.exists('delete-1');
-      expect(exists).toBe(true);
+    const tournaments = await repository.list();
 
-      await repository.delete('delete-1');
+    expect(tournaments).toHaveLength(2);
 
-      exists = await repository.exists('delete-1');
-      expect(exists).toBe(false);
-
-      const loaded = await repository.load('delete-1');
-      expect(loaded).toBeNull();
-    });
+    // Should be sorted by createdAt descending
+    expect(tournaments[0].tournamentId).toBe('list-2');
+    expect(tournaments[1].tournamentId).toBe('list-1');
   });
+
+  it('should delete tournament', async () => {
+    await repository.save(createTestTournament('delete-1', 'To Delete'));
+
+    let exists = await repository.exists('delete-1');
+    expect(exists).toBe(true);
+
+    await repository.delete('delete-1');
+
+    exists = await repository.exists('delete-1');
+    expect(exists).toBe(false);
+
+    const loaded = await repository.load('delete-1');
+    expect(loaded).toBeNull();
+  });
+});
 
   describe('Corrupted file handling', () => {
     it('should throw on invalid JSON', async () => {
