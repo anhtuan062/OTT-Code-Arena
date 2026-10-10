@@ -1,0 +1,735 @@
+/**
+ * Tournament Manager - Application API
+ *
+ * High-level API for tournament lifecycle management.
+ * Integrates scheduling, scoring, persistence, and match execution.
+ */
+
+import {
+  Tournament,
+  TournamentParticipant,
+  TournamentBot,
+  TournamentMatchConfig,
+  TournamentScoringConfig,
+  TournamentRound,
+  TournamentPairing,
+  TournamentMatchRecord,
+  TournamentStanding,
+  TournamentFormat,
+  TournamentStatus,
+  PairingStatus,
+  TerminationReason,
+  Player,
+  DEFAULT_TOURNAMENT_MATCH_CONFIG,
+  DEFAULT_SCORING_CONFIG,
+  VALID_STATUS_TRANSITIONS,
+  MIN_PARTICIPANTS,
+} from './types.js';
+
+import {
+  generateRoundRobinSchedule,
+  validateRoundRobinSchedule,
+  getNextEligiblePairing,
+  getPendingPairings,
+  isScheduleComplete,
+  findPairing,
+  markPairingInProgress,
+  markPairingCompleted,
+  generatePairingId,
+} from './scheduling.js';
+
+import {
+  computeStandings,
+  computeParticipantResults,
+  analyzeMatchForParticipant,
+  getTournamentStats,
+} from './scoring.js';
+
+import {
+  TournamentRepository,
+  FileTournamentRepository,
+  createTournament,
+  validateTournament,
+  TournamentStorageConfig,
+} from './persistence.js';
+
+import {
+  MatchExecutor,
+  MockMatchExecutor,
+  MatchRunnerExecutor,
+  ExecutedMatchResult,
+  createMatchRunnerExecutor,
+} from './executor.js';
+
+import type { MatchConfig, BotDefinition } from '@match-runner/types.js';
+import { MatchReplay, MatchResult, MatchRunner } from '@match-runner/index.js';
+import type { BotExecutor } from '@bot-executor/types.js';
+
+/**
+ * Tournament application configuration
+ */
+export interface TournamentAppConfig {
+  repository: TournamentRepository;
+  executor: MatchExecutor;
+  defaultMatchConfig?: Partial<TournamentMatchConfig>;
+  defaultScoringConfig?: Partial<TournamentScoringConfig>;
+  storageDir?: string;
+}
+
+/**
+ * Result of API operations
+ */
+export interface TournamentOperationResult<T> {
+  success: boolean;
+  data?: T;
+  error?: string;
+}
+
+/**
+ * Main tournament application class
+ */
+export class TournamentManager {
+  private repository: TournamentRepository;
+  private executor: MatchExecutor;
+  private defaultMatchConfig: TournamentMatchConfig;
+  private defaultScoringConfig: TournamentScoringConfig;
+
+  constructor(config: TournamentAppConfig) {
+    this.repository = config.repository;
+    this.executor = config.executor;
+    this.defaultMatchConfig = { ...DEFAULT_TOURNAMENT_MATCH_CONFIG, ...config.defaultMatchConfig };
+    this.defaultScoringConfig = { ...DEFAULT_SCORING_CONFIG, ...config.defaultScoringConfig };
+  }
+
+  /**
+   * Create a new tournament
+   */
+  async createTournament(
+    tournamentId: string,
+    name: string,
+    format: TournamentFormat = 'single_round_robin',
+    matchConfig?: Partial<TournamentMatchConfig>,
+    scoringConfig?: Partial<TournamentScoringConfig>
+  ): Promise<TournamentOperationResult<Tournament>> {
+    // Check if tournament already exists
+    if (await this.repository.exists(tournamentId)) {
+      return { success: false, error: `Tournament ${tournamentId} already exists` };
+    }
+
+    const tournament = createTournament(
+      tournamentId,
+      name,
+      format,
+      matchConfig,
+      scoringConfig
+    );
+
+    // Use provided configs or defaults
+    if (matchConfig) {
+      tournament.matchConfig = { ...this.defaultMatchConfig, ...matchConfig };
+    } else {
+      tournament.matchConfig = { ...this.defaultMatchConfig };
+    }
+
+    if (scoringConfig) {
+      tournament.scoringConfig = { ...this.defaultScoringConfig, ...scoringConfig };
+    } else {
+      tournament.scoringConfig = { ...this.defaultScoringConfig };
+    }
+
+    await this.repository.save(tournament);
+    return { success: true, data: tournament };
+  }
+
+  /**
+   * Load a tournament
+   */
+  async loadTournament(tournamentId: string): Promise<TournamentOperationResult<Tournament>> {
+    const tournament = await this.repository.load(tournamentId);
+    if (!tournament) {
+      return { success: false, error: `Tournament ${tournamentId} not found` };
+    }
+    return { success: true, data: tournament };
+  }
+
+  /**
+   * List all tournaments
+   */
+  async listTournaments(): Promise<Tournament[]> {
+    return this.repository.list();
+  }
+
+  async updateMetadata(
+    tournamentId: string,
+    metadata: Record<string, unknown>
+  ): Promise<TournamentOperationResult<Tournament>> {
+    const loadResult = await this.loadTournament(tournamentId);
+    if (!loadResult.success || !loadResult.data) return loadResult;
+    loadResult.data.metadata = { ...(loadResult.data.metadata ?? {}), ...metadata };
+    await this.repository.save(loadResult.data);
+    return loadResult;
+  }
+
+  /**
+   * Register a participant with their bot
+   */
+  async registerParticipant(
+    tournamentId: string,
+    participantId: string,
+    name: string,
+    bot: TournamentBot
+  ): Promise<TournamentOperationResult<Tournament>> {
+    const loadResult = await this.loadTournament(tournamentId);
+    if (!loadResult.success || !loadResult.data) {
+      return { success: false, error: loadResult.error };
+    }
+
+    const tournament = loadResult.data;
+
+    // Check status
+    if (tournament.status !== 'draft' && tournament.status !== 'registration_open') {
+      return { success: false, error: `Cannot register: tournament status is ${tournament.status}` };
+    }
+
+    // Check participant limit
+    if (tournament.participants.length >= 64) {
+      return { success: false, error: 'Maximum participants reached' };
+    }
+
+    // Check duplicate
+    if (tournament.participants.some(p => p.participantId === participantId)) {
+      return { success: false, error: `Participant ${participantId} already registered` };
+    }
+
+    // Validate bot
+    if (!bot.command || !bot.botId) {
+      return { success: false, error: 'Bot must have botId and command' };
+    }
+
+    const participant: TournamentParticipant = {
+      participantId,
+      name,
+      bot: {
+        botId: bot.botId,
+        player: 'A' as const, // Will be assigned per match
+        command: bot.command,
+        args: bot.args || [],
+        env: bot.env,
+      },
+      registeredAt: new Date().toISOString(),
+    };
+
+    tournament.participants.push(participant);
+    await this.repository.save(tournament);
+    return { success: true, data: tournament };
+  }
+
+  /**
+   * Unregister a participant
+   */
+  async unregisterParticipant(
+    tournamentId: string,
+    participantId: string
+  ): Promise<TournamentOperationResult<Tournament>> {
+    const loadResult = await this.loadTournament(tournamentId);
+    if (!loadResult.success || !loadResult.data) {
+      return { success: false, error: loadResult.error };
+    }
+
+    const tournament = loadResult.data;
+
+    if (tournament.status !== 'draft' && tournament.status !== 'registration_open') {
+      return { success: false, error: `Cannot unregister: tournament status is ${tournament.status}` };
+    }
+
+    const index = tournament.participants.findIndex(p => p.participantId === participantId);
+    if (index === -1) {
+      return { success: false, error: `Participant ${participantId} not found` };
+    }
+
+    tournament.participants.splice(index, 1);
+    await this.repository.save(tournament);
+    return { success: true, data: tournament };
+  }
+
+  /**
+   * Open registration
+   */
+  async openRegistration(tournamentId: string): Promise<TournamentOperationResult<Tournament>> {
+    return this.transitionStatus(tournamentId, 'registration_open');
+  }
+
+  /**
+   * Close registration
+   */
+  async closeRegistration(tournamentId: string): Promise<TournamentOperationResult<Tournament>> {
+    return this.transitionStatus(tournamentId, 'registration_open', 'running');
+  }
+
+  /**
+   * Generate schedule (must be called after registration closes)
+   */
+  async generateSchedule(tournamentId: string): Promise<TournamentOperationResult<Tournament>> {
+    const loadResult = await this.loadTournament(tournamentId);
+    if (!loadResult.success || !loadResult.data) {
+      return { success: false, error: loadResult.error };
+    }
+
+    const tournament = loadResult.data;
+
+    if (tournament.status !== 'registration_open') {
+      return { success: false, error: `Cannot generate schedule: tournament status is ${tournament.status}` };
+    }
+
+    const minParticipants = MIN_PARTICIPANTS[tournament.format] || 2;
+    if (tournament.participants.length < minParticipants) {
+      return { success: false, error: `Need at least ${minParticipants} participants for ${tournament.format}` };
+    }
+
+    // Generate round-robin schedule
+    const rounds = generateRoundRobinSchedule(tournament.participants);
+
+    // Validate schedule
+    const validation = validateRoundRobinSchedule(tournament.participants, rounds);
+    if (!validation.valid) {
+      return { success: false, error: `Schedule validation failed: ${validation.errors.join(', ')}` };
+    }
+
+    // Update pairings with deterministic IDs
+    for (const round of rounds) {
+      for (const pairing of round.pairings) {
+        pairing.pairingId = generatePairingId(pairing.participantA, pairing.participantB, round.roundNumber);
+      }
+    }
+
+    tournament.rounds = rounds;
+    tournament.registrationClosedAt = new Date().toISOString();
+
+    // Initialize standings
+    tournament.standings = computeStandings(tournament.participants, [], tournament.scoringConfig);
+
+    await this.repository.save(tournament);
+    return { success: true, data: tournament };
+  }
+
+  /**
+   * Start the tournament
+   */
+  async startTournament(tournamentId: string): Promise<TournamentOperationResult<Tournament>> {
+    const loadResult = await this.loadTournament(tournamentId);
+    if (!loadResult.success || !loadResult.data) {
+      return { success: false, error: loadResult.error };
+    }
+
+    const tournament = loadResult.data;
+
+    if (tournament.status !== 'registration_open') {
+      return { success: false, error: `Cannot start: tournament status is ${tournament.status}` };
+    }
+
+    if (tournament.rounds.length === 0) {
+      return { success: false, error: 'No schedule generated. Call generateSchedule first.' };
+    }
+
+    tournament.status = 'running';
+    tournament.startedAt = new Date().toISOString();
+    await this.repository.save(tournament);
+    return { success: true, data: tournament };
+  }
+
+  /**
+   * Run the next eligible match
+   */
+  async runNextMatch(tournamentId: string): Promise<TournamentOperationResult<ExecutedMatchResult>> {
+    const loadResult = await this.loadTournament(tournamentId);
+    if (!loadResult.success || !loadResult.data) {
+      return { success: false, error: loadResult.error };
+    }
+
+    const tournament = loadResult.data;
+
+    if (tournament.status !== 'running') {
+      return { success: false, error: `Tournament not running (status: ${tournament.status})` };
+    }
+
+    const pairing = getNextEligiblePairing(tournament.rounds);
+    if (!pairing) {
+      return { success: false, error: 'No pending matches to run' };
+    }
+
+    return this.runPairing(tournament, pairing);
+  }
+
+  /**
+   * Run all remaining matches sequentially
+   */
+  async runAllMatches(tournamentId: string): Promise<TournamentOperationResult<ExecutedMatchResult[]>> {
+    const loadResult = await this.loadTournament(tournamentId);
+    if (!loadResult.success || !loadResult.data) {
+      return { success: false, error: loadResult.error };
+    }
+
+    const tournament = loadResult.data;
+
+    if (tournament.status !== 'running') {
+      return { success: false, error: `Tournament not running (status: ${tournament.status})` };
+    }
+
+    const results: ExecutedMatchResult[] = [];
+    let pairing = getNextEligiblePairing(tournament.rounds);
+
+    while (pairing) {
+      const result = await this.runPairing(tournament, pairing);
+      if (result.success && result.data) {
+        results.push(result.data);
+        // Reload tournament to get updated state
+        const reload = await this.loadTournament(tournamentId);
+        if (!reload.success || !reload.data) {
+          break;
+        }
+        tournament.rounds = reload.data.rounds;
+        tournament.standings = reload.data.standings;
+        pairing = getNextEligiblePairing(tournament.rounds);
+      } else {
+        break;
+      }
+    }
+
+    // Check if tournament is complete
+    if (isScheduleComplete(tournament.rounds)) {
+      await this.completeTournament(tournamentId);
+    }
+
+    return { success: true, data: results };
+  }
+
+  /**
+   * Run a specific pairing by ID
+   */
+  async runPairingById(tournamentId: string, pairingId: string): Promise<TournamentOperationResult<ExecutedMatchResult>> {
+    const loadResult = await this.loadTournament(tournamentId);
+    if (!loadResult.success || !loadResult.data) {
+      return { success: false, error: loadResult.error };
+    }
+
+    const tournament = loadResult.data;
+    const pairing = findPairing(tournament.rounds, pairingId);
+
+    if (!pairing) {
+      return { success: false, error: `Pairing ${pairingId} not found` };
+    }
+
+    if (pairing.status !== 'scheduled') {
+      return { success: false, error: `Pairing not in scheduled state (current: ${pairing.status})` };
+    }
+
+    if (pairing.participantB === null) {
+      return { success: false, error: 'Cannot run bye pairing' };
+    }
+
+    return this.runPairing(tournament, pairing);
+  }
+
+  /**
+   * Internal method to execute a pairing
+   */
+  private async runPairing(
+    tournament: Tournament,
+    pairing: TournamentPairing
+  ): Promise<TournamentOperationResult<ExecutedMatchResult>> {
+    const participantA = tournament.participants.find(p => p.participantId === pairing.participantA);
+    const participantB = tournament.participants.find(p => p.participantId === pairing.participantB!);
+
+    if (!participantA || !participantB) {
+      return { success: false, error: 'Participant not found' };
+    }
+
+    const matchId = `${tournament.tournamentId}-${pairing.pairingId}`;
+
+    // Mark pairing as in progress
+    markPairingInProgress(tournament.rounds, pairing.pairingId, matchId);
+
+    // Convert tournament bots to match runner bot definitions
+    const botA: import('@match-runner/types.js').BotDefinition = {
+      botId: participantA.bot.botId,
+      player: 'A',
+      command: participantA.bot.command,
+      args: participantA.bot.args,
+      env: participantA.bot.env,
+    };
+
+    const botB: import('@match-runner/types.js').BotDefinition = {
+      botId: participantB.bot.botId,
+      player: 'B',
+      command: participantB.bot.command,
+      args: participantB.bot.args,
+      env: participantB.bot.env,
+    };
+
+    // Execute match
+    let matchResult: MatchResult;
+    try {
+      const matchConfig: MatchConfig = {
+        matchId,
+        protocolVersion: tournament.matchConfig.protocolVersion,
+        maxTurns: tournament.matchConfig.maxTurns,
+        turnTimeoutMs: tournament.matchConfig.turnTimeoutMs,
+        maxStdoutBytes: tournament.matchConfig.maxStdoutBytes,
+        maxStderrBytes: tournament.matchConfig.maxStderrBytes,
+        failurePolicy: tournament.matchConfig.failurePolicy,
+        maxRetries: tournament.matchConfig.maxRetries,
+        logRequests: tournament.matchConfig.logRequests,
+        logResponses: tournament.matchConfig.logResponses,
+        logStates: tournament.matchConfig.logStates,
+      };
+      matchResult = await this.executor.executeMatch(
+        matchId,
+        botA,
+        botB,
+        matchConfig
+      );
+    } catch (error) {
+      // On executor failure, mark pairing as failed but don't complete it
+      pairing.status = 'scheduled'; // Reset to allow retry
+      pairing.matchId = null;
+      pairing.startedAt = null;
+      await this.repository.save(tournament);
+      return { success: false, error: `Match execution failed: ${error}` };
+    }
+
+    // Create tournament match record
+    const tournamentMatchRecord: TournamentMatchRecord = {
+      matchId,
+      pairingId: pairing.pairingId,
+      participantA: pairing.participantA,
+      participantB: pairing.participantB,
+      winner: matchResult.winner,
+      terminationReason: matchResult.terminationReason,
+      turnCount: matchResult.turnCount,
+      durationMs: matchResult.durationMs,
+      replayRef: matchId, // Reference for loading replay
+      completedAt: new Date().toISOString(),
+    };
+
+    // Create replay
+    const replay = MatchRunner.createReplay(matchResult);
+
+    // Save match result and replay
+    await this.repository.saveMatchResult(tournament.tournamentId, matchId, tournamentMatchRecord, replay);
+
+    // Mark pairing completed
+    markPairingCompleted(tournament.rounds, pairing.pairingId, tournamentMatchRecord);
+
+    // Recompute standings from all recorded results (idempotent)
+    const allMatchRecords = await this.repository.listMatchResults(tournament.tournamentId);
+    tournament.standings = computeStandings(tournament.participants, allMatchRecords, tournament.scoringConfig);
+
+    // Save updated tournament
+    await this.repository.save(tournament);
+
+    return {
+      success: true,
+      data: { matchResult, replay },
+    };
+  }
+
+  /**
+   * Complete the tournament
+   */
+  async completeTournament(tournamentId: string): Promise<TournamentOperationResult<Tournament>> {
+    const loadResult = await this.loadTournament(tournamentId);
+    if (!loadResult.success || !loadResult.data) {
+      return { success: false, error: loadResult.error };
+    }
+
+    const tournament = loadResult.data;
+
+    if (tournament.status !== 'running') {
+      return { success: false, error: `Cannot complete: tournament status is ${tournament.status}` };
+    }
+
+    if (!isScheduleComplete(tournament.rounds)) {
+      return { success: false, error: 'Not all matches completed' };
+    }
+
+    tournament.status = 'completed';
+    tournament.completedAt = new Date().toISOString();
+    await this.repository.save(tournament);
+    return { success: true, data: tournament };
+  }
+
+  /**
+   * Cancel the tournament
+   */
+  async cancelTournament(tournamentId: string): Promise<TournamentOperationResult<Tournament>> {
+    return this.transitionStatus(tournamentId, 'cancelled');
+  }
+
+  /**
+   * Get current standings
+   */
+  async getStandings(tournamentId: string): Promise<TournamentOperationResult<TournamentStanding[]>> {
+    const loadResult = await this.loadTournament(tournamentId);
+    if (!loadResult.success || !loadResult.data) {
+      return { success: false, error: loadResult.error };
+    }
+
+    return { success: true, data: loadResult.data.standings };
+  }
+
+  /**
+   * Get match result by match ID
+   */
+  async getMatchResult(tournamentId: string, matchId: string): Promise<TournamentOperationResult<TournamentMatchRecord>> {
+    const result = await this.repository.loadMatchResult(tournamentId, matchId);
+    if (!result) {
+      return { success: false, error: `Match ${matchId} not found` };
+    }
+    return { success: true, data: result };
+  }
+
+  /**
+   * Get replay by match ID
+   */
+  async getReplay(tournamentId: string, matchId: string): Promise<TournamentOperationResult<MatchReplay>> {
+    const replay = await this.repository.loadReplay(tournamentId, matchId);
+    if (!replay) {
+      return { success: false, error: `Replay for match ${matchId} not found` };
+    }
+    return { success: true, data: replay };
+  }
+
+  /**
+   * Get tournament statistics
+   */
+  async getStats(tournamentId: string): Promise<TournamentOperationResult<ReturnType<typeof getTournamentStats>>> {
+    const loadResult = await this.loadTournament(tournamentId);
+    if (!loadResult.success || !loadResult.data) {
+      return { success: false, error: loadResult.error };
+    }
+
+    const tournament = loadResult.data;
+    const matchRecords = await this.repository.listMatchResults(tournamentId);
+    return { success: true, data: getTournamentStats(tournament.participants, matchRecords) };
+  }
+
+  /**
+   * Transition tournament status with validation
+   */
+  private async transitionStatus(
+    tournamentId: string,
+    targetStatus: TournamentStatus,
+    allowedFrom?: TournamentStatus
+  ): Promise<TournamentOperationResult<Tournament>> {
+    const loadResult = await this.loadTournament(tournamentId);
+    if (!loadResult.success || !loadResult.data) {
+      return { success: false, error: loadResult.error };
+    }
+
+    const tournament = loadResult.data;
+    const currentStatus = tournament.status;
+
+    // Check if transition is valid
+    const validTransitions = VALID_STATUS_TRANSITIONS[currentStatus] || [];
+    const fromStatus = allowedFrom || currentStatus;
+    if (!validTransitions.includes(targetStatus)) {
+      return { success: false, error: `Invalid status transition: ${fromStatus} -> ${targetStatus}` };
+    }
+
+    tournament.status = targetStatus;
+
+    if (targetStatus === 'registration_open') {
+      tournament.registrationOpenedAt = new Date().toISOString();
+    } else if (targetStatus === 'completed') {
+      tournament.completedAt = new Date().toISOString();
+    } else if (targetStatus === 'cancelled') {
+      // No additional timestamp needed
+    }
+
+    await this.repository.save(tournament);
+    return { success: true, data: tournament };
+  }
+
+  /**
+   * Resume an interrupted tournament
+   * Recomputes standings from stored match results
+   */
+  async resumeTournament(tournamentId: string): Promise<TournamentOperationResult<Tournament>> {
+    const loadResult = await this.loadTournament(tournamentId);
+    if (!loadResult.success || !loadResult.data) {
+      return { success: false, error: loadResult.error };
+    }
+
+    const tournament = loadResult.data;
+
+    // Load all match results and recompute standings (idempotent)
+    const matchRecords = await this.repository.listMatchResults(tournamentId);
+    tournament.standings = computeStandings(tournament.participants, matchRecords, tournament.scoringConfig);
+
+    // Update pairing statuses from match records
+    for (const record of matchRecords) {
+      const pairing = findPairing(tournament.rounds, record.pairingId);
+      if (pairing && pairing.status !== 'completed') {
+        pairing.status = 'completed';
+        pairing.matchId = record.matchId;
+        pairing.matchResult = record;
+        pairing.startedAt = record.completedAt; // Approximate
+        pairing.completedAt = record.completedAt;
+      }
+    }
+
+    await this.repository.save(tournament);
+    return { success: true, data: tournament };
+  }
+}
+
+/**
+ * Create a TournamentManager with file-based persistence
+ */
+export async function createTournamentManager(
+  storageDir: string,
+  executor?: MatchExecutor,
+  executionPolicy?: 'development' | 'sandbox-required',
+  executorConfig?: import('@bot-executor/index.js').ExecutorFactoryConfig
+): Promise<TournamentManager> {
+  const repository = new FileTournamentRepository({ baseDir: storageDir });
+  await repository.initialize();
+
+  let matchExecutor = executor;
+  if (!matchExecutor) {
+    let botExecutor: BotExecutor | undefined;
+    try {
+      const { createExecutor } = await import('@bot-executor/index.js');
+      botExecutor = await createExecutor({
+        ...executorConfig,
+        childProcessConfig: { executionPolicy: executionPolicy ?? 'development' }
+      });
+    } catch (error) {
+      // If sandbox-required but Docker unavailable, throw
+      if (executionPolicy === 'sandbox-required') {
+        throw new Error(`Failed to create sandbox executor: ${error}`);
+      }
+      // In development mode, fall back to BotRunnerAdapter (handled by MatchRunner)
+    }
+    const { DEFAULT_MATCH_CONFIG } = await import('@match-runner/types.js');
+    matchExecutor = await createMatchRunnerExecutor(DEFAULT_MATCH_CONFIG, botExecutor);
+  }
+
+  return new TournamentManager({
+    repository,
+    executor: matchExecutor,
+    storageDir,
+  });
+}
+
+/**
+ * Create a TournamentManager with mock executor for testing
+ */
+export function createMockTournamentManager(
+  repository: TournamentRepository
+): TournamentManager {
+  return new TournamentManager({
+    repository,
+    executor: new MockMatchExecutor(),
+  });
+}

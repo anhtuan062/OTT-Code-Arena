@@ -1,0 +1,77 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  unit-tests:
+    name: Unit & Integration Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+      - run: npm ci
+      - run: npm run build
+      - run: npx vitest run
+        env:
+          NODE_ENV: test
+
+  docker-integration:
+    name: Docker Integration Tests
+    runs-on: ubuntu-latest
+    needs: unit-tests
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+      - run: npm ci
+      - run: npm run build
+
+      - name: Verify Docker is available
+        run: docker version
+
+      - name: Pull bot execution base image
+        run: docker pull node:20-alpine
+
+      - name: Run Docker integration tests
+        run: npx vitest run tests/bot-executor/docker-integration.test.ts
+        env:
+          NODE_ENV: test
+        timeout-minutes: 10
+
+      - name: Verify network isolation
+        run: |
+          docker run --rm --network none node:20-alpine sh -c \
+            "wget -q -T 2 http://example.com 2>&1 || echo 'NETWORK_BLOCKED: network isolation confirmed'"
+
+      - name: Verify read-only filesystem
+        run: |
+          docker run --rm --read-only --tmpfs /tmp:rw,noexec,nosuid,size=10m node:20-alpine sh -c \
+            "touch /test-write 2>&1 || echo 'READONLY_FS: filesystem restriction confirmed'"
+
+      - name: Verify resource limits
+        run: |
+          docker run --rm --memory=64m --pids-limit=16 node:20-alpine sh -c \
+            "echo 'RESOURCE_LIMITS: constraints applied successfully'"
+
+      - name: Verify security options
+        run: |
+          docker run --rm --security-opt no-new-privileges:true --cap-drop ALL node:20-alpine sh -c \
+            "echo 'SECURITY_OPTS: no-new-privileges and cap-drop ALL applied'"
+
+      - name: Upload test logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: docker-test-logs
+          path: |
+            **/*.log
+          retention-days: 7

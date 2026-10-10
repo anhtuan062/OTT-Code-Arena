@@ -1,0 +1,53 @@
+{
+  "name": "ott-code-arena",
+  "version": "0.1.0",
+  "description": "OTT Code Arena - Programming competition platform for OTTv2",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc && tsc-alias",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "lint": "eslint . --ext .ts",
+    "dev": "tsx watch examples/sample-bot/index.ts",
+    "engine:test": "vitest run tests/engine"
+  },
+  "keywords": [
+    "ott",
+    "game",
+    "arena",
+    "bot",
+    "competition"
+  ],
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "@types/cors": "^2.8.19",
+    "@types/express": "^5.0.6",
+    "@types/node": "^20.19.43",
+    "@types/supertest": "^7.2.1",
+    "@typescript-eslint/eslint-plugin": "^6.13.0",
+    "@typescript-eslint/parser": "^6.13.0",
+    "@vitest/coverage-v8": "^1.0.0",
+    "eslint": "^8.55.0",
+    "supertest": "^7.3.1",
+    "tsc-alias": "^1.9.7",
+    "tsx": "^4.6.0",
+    "typescript": "^5.3.0",
+    "vite-tsconfig-paths": "^6.1.1",
+    "vitest": "^1.0.0"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "dependencies": {
+    "@types/bcryptjs": "^2.4.6",
+    "@types/better-sqlite3": "^9.6.0",
+    "bcryptjs": "^3.0.3",
+    "better-sqlite3": "^13.0.3",
+    "cors": "^2.8.6",
+    "express": "^5.3.0"
+  }
+}

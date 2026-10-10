@@ -1,0 +1,21 @@
+node_modules/
+dist/
+coverage/
+.vscode/
+data/*.sqlite
+data/*.sqlite-*
+data/**/*.tmp
+data/**/*.bak
+*.log
+.env
+.env.*
+!.env.example
+*.tmp
+*.bak
+
+# Local agent state and corrupted recovery files
+.kilo/agent-manager.json
+.kilo/agent-manager.json.corrupt-*
+
+# Temporary local Docker probes
+tmp-docker-probe/

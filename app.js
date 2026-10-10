@@ -1,999 +1,529 @@
-import { playhtml } from "https://unpkg.com/playhtml";
+const API_URL = '/api';
+let currentUser = null;
+let csrfToken = null;
 
-// ==================== CONSTANTS ====================
-const BOARD_SIZE = 9;
-const COLS = 'abcdefghi';
-const PIECE_TYPES = {
-  dam: { icon: '🥊', name: 'Đấm', beats: 'keo' },
-  la: { icon: '🍃', name: 'Lá', beats: 'dam' },
-  keo: { icon: '✂️', name: 'Kéo', beats: 'la' }
-};
-const ARENA_BOARDS = [1, 2, 3, 4];
-
-// ==================== GLOBAL STATE ====================
-let myPlayerId = null;
-let baseRoomId = '';
-let currentRoomId = '';
-let selectedMode = '2p'; // '2p' | 'arena'
-
-// --- Chế độ 2 người chơi ---
-let gameData = null;
-let myPlayerNumber = null;
-let selectedPieceId = null;
-let validMoves = [];
-
-// --- Chế độ đấu trường 4 bàn ---
-let arenaBoards = {}; // { [num]: { gameData, myPlayerNumber, selectedPieceId, validMoves } }
-let myPlayingBoard = null; // bàn mà mình đang là NGƯỜI CHƠI (chỉ được chơi 1 bàn cùng lúc)
-
-// ==================== HELPERS: PHÒNG / TÊN / ID ====================
-function generateRoomId() {
-  return 'room-' + Math.random().toString(36).substring(2, 8);
-}
-
-function getRoomFromUrl() {
-  const params = new URLSearchParams(window.location.search);
-  return params.get('room');
-}
-
-function getModeFromUrl() {
-  const params = new URLSearchParams(window.location.search);
-  const m = params.get('mode');
-  return (m === '2p' || m === 'arena') ? m : null;
-}
-
-function getOrCreateMyPlayerId() {
-  let id = sessionStorage.getItem('ottv2-player-id');
-  if (!id) {
-    id = 'p-' + Math.random().toString(36).substring(2, 11);
-    sessionStorage.setItem('ottv2-player-id', id);
-  }
-  return id;
-}
-
-function getSavedName() {
-  return (sessionStorage.getItem('ottv2-player-name') || '').trim();
-}
-
-// ==================== TRẠNG THÁI BAN ĐẦU CỦA 1 BÀN CỜ ====================
-function createInitialState(roomId) {
-  const pieces = {};
-  const board = Array.from({length: BOARD_SIZE}, () => Array(BOARD_SIZE).fill(null));
-
-  const p1Setup = [
-    {type: 'dam', row: 0, col: 2}, {type: 'dam', row: 1, col: 6}, {type: 'dam', row: 2, col: 7},
-    {type: 'la', row: 0, col: 5}, {type: 'la', row: 1, col: 8}, {type: 'la', row: 2, col: 1},
-    {type: 'keo', row: 0, col: 8}, {type: 'keo', row: 1, col: 3}, {type: 'keo', row: 2, col: 4}
-  ];
-
-  const p2Setup = [
-    {type: 'dam', row: 8, col: 6}, {type: 'dam', row: 7, col: 2}, {type: 'dam', row: 6, col: 1},
-    {type: 'la', row: 8, col: 3}, {type: 'la', row: 7, col: 0}, {type: 'la', row: 6, col: 7},
-    {type: 'keo', row: 8, col: 0}, {type: 'keo', row: 7, col: 5}, {type: 'keo', row: 6, col: 4}
-  ];
-
-  const p1Counters = {dam: 0, la: 0, keo: 0};
-  p1Setup.forEach(pos => {
-    p1Counters[pos.type]++;
-    const id = `p1-${pos.type}-${p1Counters[pos.type]}`;
-    pieces[id] = { id, player: 1, type: pos.type, row: pos.row, col: pos.col };
-    board[pos.row][pos.col] = id;
-  });
-
-  const p2Counters = {dam: 0, la: 0, keo: 0};
-  p2Setup.forEach(pos => {
-    p2Counters[pos.type]++;
-    const id = `p2-${pos.type}-${p2Counters[pos.type]}`;
-    pieces[id] = { id, player: 2, type: pos.type, row: pos.row, col: pos.col };
-    board[pos.row][pos.col] = id;
-  });
-
-  return {
-    room: roomId,
-    players: {},
-    playerOrder: [],
-    spectators: [],
-    board,
-    pieces,
-    currentPlayer: 1,
-    gameStatus: "waiting",
-    winner: null,
-    winnerReason: null,
-    turnNumber: 0
-  };
-}
-
-// ==================== GAME LOGIC (dùng chung cho cả 2 chế độ) ====================
-function isInsideBoard(row, col) {
-  return row >= 0 && row < BOARD_SIZE && col >= 0 && col < BOARD_SIZE;
-}
-
-function canCapture(attackerType, defenderType) {
-  if (attackerType === defenderType) return false;
-  return PIECE_TYPES[attackerType].beats === defenderType;
-}
-
-function getLegalMovesForPiece(state, pieceId) {
-  const piece = state.pieces[pieceId];
-  if (!piece) return [];
-
-  const moves = [];
-  for (let dr = -1; dr <= 1; dr++) {
-    for (let dc = -1; dc <= 1; dc++) {
-      if (dr === 0 && dc === 0) continue;
-      const nr = piece.row + dr;
-      const nc = piece.col + dc;
-      if (!isInsideBoard(nr, nc)) continue;
-
-      const targetId = state.board[nr][nc];
-      if (!targetId) {
-        moves.push({row: nr, col: nc, captures: null});
-      } else {
-        const target = state.pieces[targetId];
-        if (target.player !== piece.player && target.type !== piece.type && canCapture(piece.type, target.type)) {
-          moves.push({row: nr, col: nc, captures: targetId});
-        }
-      }
-    }
-  }
-  return moves;
-}
-
-// NOTE: đã khôi phục đầy đủ kiểm tra lượt chơi / quyền sở hữu quân
-// (bản trước bị mất phần này khi dọn debug log, khiến ai cũng đi được bất kỳ quân nào bất kỳ lúc nào).
-function validateMove(state, pieceId, toRow, toCol) {
-  const piece = state.pieces[pieceId];
-  if (!piece) return {valid: false, reason: "Quân không tồn tại"};
-  if (state.gameStatus !== "playing") return {valid: false, reason: "Game chưa bắt đầu"};
-
-  const currentPlayerId = state.playerOrder[state.currentPlayer - 1];
-  const currentPlayerInfo = currentPlayerId ? state.players[currentPlayerId] : null;
-  if (!currentPlayerInfo || currentPlayerInfo.id !== myPlayerId) {
-    return {valid: false, reason: "Không phải lượt của bạn"};
-  }
-  if (piece.player !== state.currentPlayer) {
-    return {valid: false, reason: "Đây không phải quân của bạn"};
-  }
-
-  if (!isInsideBoard(toRow, toCol)) return {valid: false, reason: "Nằm ngoài bàn cờ"};
-
-  const dr = Math.abs(toRow - piece.row);
-  const dc = Math.abs(toCol - piece.col);
-  if (dr > 1 || dc > 1 || (dr === 0 && dc === 0)) {
-    return {valid: false, reason: "Quân chỉ được di chuyển đúng 1 ô theo 8 hướng"};
-  }
-
-  const targetId = state.board[toRow][toCol];
-  if (targetId) {
-    const target = state.pieces[targetId];
-    if (target.player === piece.player) {
-      return {valid: false, reason: "Không thể ăn quân của mình"};
-    }
-    if (target.type === piece.type) {
-      return {valid: false, reason: "Hai quân cùng loại không thể ăn nhau"};
-    }
-    if (!canCapture(piece.type, target.type)) {
-      return {valid: false, reason: "Quân của bạn yếu hơn"};
-    }
-  }
-
-  return {valid: true};
-}
-
-function executeMove(draft, pieceId, toRow, toCol) {
-  const piece = draft.pieces[pieceId];
-  const fromRow = piece.row;
-  const fromCol = piece.col;
-
-  const newBoard = draft.board.map(row => [...row]);
-  newBoard[fromRow][fromCol] = null;
-
-  const targetId = newBoard[toRow][toCol];
-  let captured = null;
-  if (targetId) {
-    captured = draft.pieces[targetId];
-    delete draft.pieces[targetId];
-  }
-
-  piece.row = toRow;
-  piece.col = toCol;
-  newBoard[toRow][toCol] = pieceId;
-  draft.board = newBoard;
-
-  const opponent = piece.player === 1 ? 2 : 1;
-  const opponentPieces = Object.values(draft.pieces).filter(p => p.player === opponent);
-  const typesPresent = new Set(opponentPieces.map(p => p.type));
-  const missingType = ['dam', 'la', 'keo'].find(t => !typesPresent.has(t));
-
-  if (missingType) {
-    draft.gameStatus = "finished";
-    draft.winner = piece.player;
-    const typeNames = {dam: 'Đấm', la: 'Lá', keo: 'Kéo'};
-    draft.winnerReason = `Bạn đã ăn hết toàn bộ quân ${typeNames[missingType]} của đối phương!`;
-  }
-
-  if (draft.gameStatus !== "finished") {
-    if ((toRow === 0 && toCol === 0) || (toRow === 8 && toCol === 8)) {
-      draft.gameStatus = "finished";
-      draft.winner = piece.player;
-      const goalName = (toRow === 0 && toCol === 0) ? 'a1' : 'i9';
-      draft.winnerReason = `Bạn đã đưa quân vào ô ${goalName}!`;
-    }
-  }
-
-  if (draft.gameStatus === "playing") {
-    draft.currentPlayer = opponent;
-    draft.turnNumber++;
-  }
-
-  return {success: true, captured};
-}
-
-// ==================== TOAST DÙNG CHUNG ====================
-function showToast(message, type = 'error') {
+// Utilities
+function showToast(message, type = 'info') {
   const container = document.getElementById('toast-container');
   if (!container) return;
-
   const toast = document.createElement('div');
   toast.className = `toast toast-${type}`;
-  toast.textContent = message;
+  toast.innerHTML = `<span>${message}</span>`;
   container.appendChild(toast);
-
-  requestAnimationFrame(() => {
-    toast.classList.add('show');
-  });
-
+  requestAnimationFrame(() => toast.classList.add('show'));
   setTimeout(() => {
     toast.classList.remove('show');
-    setTimeout(() => {
-      if (toast.parentNode) {
-        toast.parentNode.removeChild(toast);
-      }
-    }, 300);
-  }, 2500);
+    setTimeout(() => toast.remove(), 300);
+  }, 3000);
 }
 
-function showError(msg) {
-  showToast(msg, 'error');
+function openModal(id) {
+  document.getElementById(id).classList.add('open');
 }
 
-function showCaptureMessage(capturedName) {
-  showToast(`Ăn được quân ${capturedName} của đối phương!`, 'capture');
+function closeModal(id) {
+  document.getElementById(id).classList.remove('open');
 }
 
-// ==================== MÀN HÌNH ====================
-function showScreen(id) {
-  document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
-  const el = document.getElementById(id);
-  if (el) el.classList.add('active');
+function navigate(pageId) {
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.nav-link').forEach(l => l.classList.remove('active'));
+
+  document.getElementById(pageId).classList.add('active');
+  const link = document.querySelector(`.nav-link[data-target="${pageId}"]`);
+  if (link) link.classList.add('active');
+
+  if (pageId === 'dashboard') loadDashboard();
+  else if (pageId === 'bots') loadBots();
+  else if (pageId === 'tournaments') loadTournaments();
 }
 
-function showGameScreen() {
-  showScreen('game');
-  const roomDisplay = document.getElementById('room-display');
-  const roomDisplayFooter = document.getElementById('room-display-footer');
-  if (roomDisplay) roomDisplay.textContent = currentRoomId;
-  if (roomDisplayFooter) roomDisplayFooter.textContent = currentRoomId;
-  const back = document.getElementById('back-link');
-  if (back) back.href = `?room=${baseRoomId}`;
+function setAuthenticated(user, csrf) {
+  currentUser = user;
+  csrfToken = csrf;
+  document.getElementById('auth-screen').hidden = true;
+  document.getElementById('app-nav').hidden = false;
+  document.getElementById('current-user').textContent = user.username;
+  document.getElementById('dashboard').classList.add('active');
+  loadDashboard();
 }
 
-function showArenaScreen() {
-  showScreen('arena');
-  const roomDisplay = document.getElementById('arena-room-display');
-  if (roomDisplay) roomDisplay.textContent = baseRoomId;
-  const back = document.getElementById('arena-back-link');
-  if (back) back.href = `?room=${baseRoomId}`;
+function showAuthScreen() {
+  currentUser = null;
+  csrfToken = null;
+  document.getElementById('auth-screen').hidden = false;
+  document.getElementById('app-nav').hidden = true;
+  document.querySelectorAll('.page:not(#auth-screen)').forEach(page => page.classList.remove('active'));
 }
 
-function renderCoordinates() {
-  const header = document.getElementById('coord-header');
-  const side = document.getElementById('coord-side');
-  if (!header || !side) return;
-  header.innerHTML = '<div class="corner"></div>' + COLS.split('').map(c => `<div class="coord">${c}</div>`).join('');
-  side.innerHTML = '';
-  for (let i = 1; i <= BOARD_SIZE; i++) {
-    const div = document.createElement('div');
-    div.className = 'coord';
-    div.textContent = i;
-    side.appendChild(div);
-  }
-}
-
-/* ============================================================
-   ================  CHẾ ĐỘ 1: 2 NGƯỜI CHƠI  ==================
-   ============================================================ */
-
-function renderBoard() {
-  const boardEl = document.getElementById('board');
-  if (!boardEl || !gameData) return;
-
-  const state = gameData.getData();
-  if (!state || !state.board) {
-    boardEl.innerHTML = '';
-    return;
-  }
-
-  boardEl.innerHTML = '';
-
-  for (let row = 0; row < BOARD_SIZE; row++) {
-    for (let col = 0; col < BOARD_SIZE; col++) {
-      const cell = document.createElement('div');
-      cell.className = 'cell';
-      cell.dataset.row = row;
-      cell.dataset.col = col;
-
-      const pieceId = state.board[row]?.[col];
-      if (pieceId && state.pieces[pieceId]) {
-        const piece = state.pieces[pieceId];
-        const pieceEl = document.createElement('span');
-        pieceEl.className = `piece player${piece.player}`;
-        pieceEl.textContent = PIECE_TYPES[piece.type].icon;
-        pieceEl.dataset.pieceId = pieceId;
-        cell.appendChild(pieceEl);
-      }
-
-      if ((row === 0 && col === 0) || (row === 8 && col === 8)) {
-        cell.classList.add('goal');
-        const flag = document.createElement('span');
-        flag.className = 'goal-flag';
-        flag.textContent = '🏁';
-        cell.appendChild(flag);
-      }
-
-      if (selectedPieceId === pieceId) {
-        cell.classList.add('selected');
-      }
-
-      const moveInfo = validMoves.find(m => m.row === row && m.col === col);
-      if (moveInfo) {
-        cell.classList.add(moveInfo.captures ? 'capture-move' : 'valid-move');
-      }
-
-      cell.addEventListener('click', () => onCellClick(row, col));
-      boardEl.appendChild(cell);
-    }
-  }
-}
-
-function renderPlayerPanels() {
-  const state = gameData.getData();
-
-  ['p1', 'p2'].forEach((p, idx) => {
-    const playerNum = idx + 1;
-    const panel = document.getElementById(`player${playerNum}-panel`);
-    const nameEl = document.getElementById(`${p}-name`);
-    if (!panel || !nameEl) return;
-
-    const playerId = state.playerOrder[idx];
-    const player = playerId ? state.players[playerId] : null;
-    nameEl.textContent = player ? player.name : 'Đang chờ...';
-
-    ['dam', 'la', 'keo'].forEach(type => {
-      const count = Object.values(state.pieces).filter(p => p.player === playerNum && p.type === type).length;
-      const countEl = document.getElementById(`${p}-${type}`);
-      if (countEl) countEl.textContent = count;
-    });
-
-    panel.classList.toggle('active', state.gameStatus === 'playing' && state.currentPlayer === playerNum);
+// Navigation binding
+document.querySelectorAll('.nav-link').forEach(link => {
+  link.addEventListener('click', (e) => {
+    navigate(e.currentTarget.dataset.target);
   });
+});
 
-  const playerCountEl = document.getElementById('player-count');
-  const turnCountEl = document.getElementById('turn-count');
-  if (playerCountEl) playerCountEl.textContent = state.playerOrder.length;
-  if (turnCountEl) turnCountEl.textContent = state.turnNumber;
-}
+setInterval(refreshQueueStats, 5000);
 
-function renderTurnIndicator() {
-  const state = gameData.getData();
-  const indicator = document.getElementById('turn-indicator');
-  if (!indicator) return;
-
-  if (state.gameStatus === 'waiting') {
-    indicator.textContent = 'ĐANG CHỜ NGƯỜI CHƠI THỨ 2...';
-    indicator.className = 'turn-indicator waiting';
-  } else if (state.gameStatus === 'finished') {
-    indicator.textContent = `🏆 PLAYER ${state.winner} THẮNG!`;
-    indicator.className = 'turn-indicator winner';
-  } else {
-    if (myPlayerNumber === null) {
-      indicator.textContent = '👀 BẠN ĐANG QUAN SÁT';
-      indicator.className = 'turn-indicator waiting';
-    } else if (state.currentPlayer === myPlayerNumber) {
-      indicator.textContent = '🎯 ĐẾN LƯỢT BẠN';
-      indicator.className = 'turn-indicator my-turn';
-    } else {
-      indicator.textContent = '⏳ ĐANG CHỜ ĐỐI THỦ...';
-      indicator.className = 'turn-indicator opponent-turn';
-    }
-  }
-}
-
-function renderSpectators() {
-  const state = gameData.getData();
-  const el = document.getElementById('spectator-info');
-  if (!el) return;
-
-  if (!state.spectators || state.spectators.length === 0) {
-    el.textContent = '';
-    return;
-  }
-  el.textContent = `👁️ ${state.spectators.map(s => s.name).join(', ')}`;
-}
-
-function renderAll() {
+// API Calls
+async function api(path, options = {}) {
   try {
-    renderBoard();
-    renderPlayerPanels();
-    renderTurnIndicator();
-    renderSpectators();
-
-    const state = gameData.getData();
-    const resetBtn = document.getElementById('reset-btn');
-    if (resetBtn) resetBtn.style.display = state.gameStatus === 'finished' ? 'inline-block' : 'none';
+    const method = (options.method || 'GET').toUpperCase();
+    const headers = { 'Content-Type': 'application/json', ...options.headers };
+    if (csrfToken && method !== 'GET' && method !== 'HEAD') headers['x-csrf-token'] = csrfToken;
+    const res = await fetch(`${API_URL}${path}`, {
+      ...options,
+      credentials: 'same-origin',
+      headers
+    });
+    const data = res.status === 204 ? null : await res.json();
+    if (!res.ok) {
+      if (res.status === 401) showAuthScreen();
+      throw new Error(data?.error || 'API Error');
+    }
+    return data;
   } catch (err) {
-    console.error('[OTTv2] renderAll error:', err);
+    if (err.message) showToast(err.message, 'error');
+    throw err;
   }
 }
 
-function onCellClick(row, col) {
-  const state = gameData.getData();
-  if (state.gameStatus !== 'playing') return;
-
-  const clickedPieceId = state.board[row][col];
-
-  if (selectedPieceId) {
-    const moveInfo = validMoves.find(m => m.row === row && m.col === col);
-    if (moveInfo) {
-      makeMove(selectedPieceId, row, col);
-      selectedPieceId = null;
-      validMoves = [];
-      renderAll();
-      return;
-    }
-
-    if (clickedPieceId && state.pieces[clickedPieceId]) {
-      const piece = state.pieces[clickedPieceId];
-      if (piece.player === myPlayerNumber && state.currentPlayer === myPlayerNumber) {
-        selectedPieceId = clickedPieceId;
-        validMoves = getLegalMovesForPiece(state, clickedPieceId);
-        renderAll();
-        return;
-      }
-    }
-
-    selectedPieceId = null;
-    validMoves = [];
-    renderAll();
-    return;
-  }
-
-  if (clickedPieceId && state.pieces[clickedPieceId]) {
-    const piece = state.pieces[clickedPieceId];
-    if (piece.player === myPlayerNumber && state.currentPlayer === myPlayerNumber) {
-      selectedPieceId = clickedPieceId;
-      validMoves = getLegalMovesForPiece(state, clickedPieceId);
-      renderAll();
-    }
-  }
-}
-
-function makeMove(pieceId, toRow, toCol) {
-  const state = gameData.getData();
-  const validation = validateMove(state, pieceId, toRow, toCol);
-  if (!validation.valid) {
-    showError(validation.reason);
-    return;
-  }
-
-  const targetId = state.board[toRow][toCol];
-  const capturedPiece = targetId ? state.pieces[targetId] : null;
-
-  gameData.setData((draft) => {
-    executeMove(draft, pieceId, toRow, toCol);
-  });
-
-  if (capturedPiece) {
-    const typeNames = {dam: 'Đấm', la: 'Lá', keo: 'Kéo'};
-    showCaptureMessage(typeNames[capturedPiece.type]);
-  }
-
-  renderAll();
-}
-
-function autoJoinTwoPlayer() {
-  const name = getSavedName() || `Player ${gameData.getData().playerOrder.length + 1}`;
-
-  gameData.setData((draft) => {
-    const existing = draft.players[myPlayerId];
-    if (existing) return;
-
-    if (draft.playerOrder.length >= 2) {
-      const alreadySpectating = (draft.spectators || []).some(s => s.id === myPlayerId);
-      if (alreadySpectating) return;
-      draft.spectators = draft.spectators || [];
-      draft.spectators.push({ id: myPlayerId, name, joinedAt: Date.now() });
-      return;
-    }
-
-    draft.players[myPlayerId] = { id: myPlayerId, name, joinedAt: Date.now() };
-    draft.playerOrder.push(myPlayerId);
-
-    if (draft.playerOrder.length === 2) {
-      draft.gameStatus = "playing";
-      draft.currentPlayer = 1;
-    }
-  });
-
-  const state = gameData.getData();
-  const idx = state.playerOrder.indexOf(myPlayerId);
-  myPlayerNumber = idx >= 0 ? idx + 1 : null;
-
-  if (myPlayerNumber === null) {
-    showToast(`Bạn đang xem trận đấu với tên ${name}`, 'info');
-  }
-}
-
-function resetGame() {
-  if (!gameData) return;
-  const newState = createInitialState(currentRoomId);
-  gameData.setData(newState);
-  selectedPieceId = null;
-  validMoves = [];
-  renderAll();
-}
-
-async function initTwoPlayerGame() {
+async function restoreSession() {
   try {
-    await playhtml.init({ room: currentRoomId });
-    await playhtml.ready;
-
-    const initialState = createInitialState(currentRoomId);
-    gameData = playhtml.createPageData("ottv2-game", initialState);
-
-    let state = gameData.getData();
-    if (!state || !state.board) {
-      gameData.setData(initialState);
-      state = initialState;
-    }
-
-    gameData.onUpdate(() => {
-      selectedPieceId = null;
-      validMoves = [];
-      try { renderAll(); } catch (err) { console.error('[OTTv2] renderAll error:', err); }
-    });
-
-    myPlayerId = getOrCreateMyPlayerId();
-
-    const existingPlayer = state.players[myPlayerId];
-    if (existingPlayer) {
-      const myIndex = state.playerOrder.indexOf(myPlayerId);
-      myPlayerNumber = myIndex >= 0 ? myIndex + 1 : null;
-    } else {
-      autoJoinTwoPlayer();
-    }
-
-    renderCoordinates();
-    showGameScreen();
-    renderAll();
-  } catch (err) {
-    console.error('[OTTv2] PlayHTML init failed:', err);
-    showLobbyError('Không thể kết nối PlayHTML: ' + (err?.message || err));
+    const result = await api('/auth/me');
+    setAuthenticated(result.user, result.csrfToken);
+  } catch {
+    showAuthScreen();
   }
 }
 
-/* ============================================================
-   ==============  CHẾ ĐỘ 2: ĐẤU TRƯỜNG 4 BÀN  ================
-   ============================================================ */
-
-function buildArenaGrid() {
-  const grid = document.getElementById('arena-grid');
-  if (!grid) return;
-  grid.innerHTML = '';
-
-  ARENA_BOARDS.forEach(num => {
-    const panel = document.createElement('div');
-    panel.className = 'board-panel';
-    panel.id = `panel-${num}`;
-    panel.innerHTML = `
-      <div class="board-panel-header">
-        <span class="board-panel-title">BÀN ${num}</span>
-        <span class="board-panel-code">${baseRoomId}-${num}</span>
-      </div>
-      <div class="mini-players">
-        <div class="mini-player p1">
-          <span class="mini-player-name" id="name-${num}-1">Đang chờ...</span>
-          <span class="mini-piece-counts" id="counts-${num}-1">🥊0 🍃0 ✂️0</span>
-        </div>
-        <div class="mini-player p2">
-          <span class="mini-player-name" id="name-${num}-2">Đang chờ...</span>
-          <span class="mini-piece-counts" id="counts-${num}-2">🥊0 🍃0 ✂️0</span>
-        </div>
-      </div>
-      <div class="mini-board" id="board-${num}"></div>
-      <div class="board-panel-turn" id="turn-${num}"></div>
-      <div class="board-panel-footer">
-        <button class="join-board-btn" data-board="${num}">THAM GIA</button>
-        <button class="reset-board-btn" data-board="${num}" style="display:none">🔄 Chơi lại</button>
-      </div>
-      <div class="spectator-info-mini" id="spectator-${num}"></div>
-    `;
-    grid.appendChild(panel);
-  });
-
-  grid.querySelectorAll('.join-board-btn').forEach(btn => {
-    btn.addEventListener('click', () => joinArenaBoard(parseInt(btn.dataset.board, 10)));
-  });
-  grid.querySelectorAll('.reset-board-btn').forEach(btn => {
-    btn.addEventListener('click', () => resetArenaBoard(parseInt(btn.dataset.board, 10)));
-  });
-}
-
-function renderMiniBoard(num, state, b) {
-  const boardEl = document.getElementById(`board-${num}`);
-  if (!boardEl) return;
-  boardEl.innerHTML = '';
-
-  for (let row = 0; row < BOARD_SIZE; row++) {
-    for (let col = 0; col < BOARD_SIZE; col++) {
-      const cell = document.createElement('div');
-      cell.className = 'cell';
-
-      const pieceId = state.board[row]?.[col];
-      if (pieceId && state.pieces[pieceId]) {
-        const piece = state.pieces[pieceId];
-        const span = document.createElement('span');
-        span.className = `piece player${piece.player}`;
-        span.textContent = PIECE_TYPES[piece.type].icon;
-        cell.appendChild(span);
-      }
-
-      if ((row === 0 && col === 0) || (row === 8 && col === 8)) {
-        cell.classList.add('goal');
-      }
-
-      if (b.selectedPieceId === pieceId && pieceId) {
-        cell.classList.add('selected');
-      }
-
-      const moveInfo = b.validMoves.find(m => m.row === row && m.col === col);
-      if (moveInfo) {
-        cell.classList.add(moveInfo.captures ? 'capture-move' : 'valid-move');
-      }
-
-      cell.addEventListener('click', () => onArenaCellClick(num, row, col));
-      boardEl.appendChild(cell);
-    }
-  }
-}
-
-function renderArenaBoard(num) {
-  const b = arenaBoards[num];
-  if (!b) return;
-  const state = b.gameData.getData();
-  if (!state || !state.board) return;
-
-  renderMiniBoard(num, state, b);
-
-  [1, 2].forEach(pn => {
-    const playerId = state.playerOrder[pn - 1];
-    const player = playerId ? state.players[playerId] : null;
-    const nameEl = document.getElementById(`name-${num}-${pn}`);
-    if (nameEl) nameEl.textContent = player ? player.name : 'Đang chờ...';
-
-    const dam = Object.values(state.pieces).filter(p => p.player === pn && p.type === 'dam').length;
-    const la = Object.values(state.pieces).filter(p => p.player === pn && p.type === 'la').length;
-    const keo = Object.values(state.pieces).filter(p => p.player === pn && p.type === 'keo').length;
-    const countsEl = document.getElementById(`counts-${num}-${pn}`);
-    if (countsEl) countsEl.textContent = `🥊${dam} 🍃${la} ✂️${keo}`;
-  });
-
-  const turnEl = document.getElementById(`turn-${num}`);
-  if (turnEl) {
-    if (state.gameStatus === 'waiting') {
-      turnEl.textContent = 'Đang chờ người chơi...';
-      turnEl.className = 'board-panel-turn waiting';
-    } else if (state.gameStatus === 'finished') {
-      turnEl.textContent = `🏆 Player ${state.winner} thắng!`;
-      turnEl.className = 'board-panel-turn winner';
-    } else if (b.myPlayerNumber && b.myPlayerNumber === state.currentPlayer) {
-      turnEl.textContent = '🎯 Lượt của bạn';
-      turnEl.className = 'board-panel-turn my-turn';
-    } else if (b.myPlayerNumber) {
-      turnEl.textContent = '⏳ Chờ đối thủ';
-      turnEl.className = 'board-panel-turn opponent-turn';
-    } else {
-      turnEl.textContent = '👀 Đang xem';
-      turnEl.className = 'board-panel-turn waiting';
-    }
-  }
-
-  const joinBtn = document.querySelector(`.join-board-btn[data-board="${num}"]`);
-  const resetBtn = document.querySelector(`.reset-board-btn[data-board="${num}"]`);
-  const iAmRegistered = !!state.players[myPlayerId] || (state.spectators || []).some(s => s.id === myPlayerId);
-  if (joinBtn) joinBtn.style.display = iAmRegistered ? 'none' : 'inline-block';
-  if (resetBtn) resetBtn.style.display = state.gameStatus === 'finished' ? 'inline-block' : 'none';
-
-  const specEl = document.getElementById(`spectator-${num}`);
-  if (specEl) {
-    const names = (state.spectators || []).map(s => s.name).join(', ');
-    specEl.textContent = names ? `👁️ ${names}` : '';
-  }
-}
-
-function renderArenaAll() {
-  ARENA_BOARDS.forEach(num => renderArenaBoard(num));
-}
-
-function onArenaCellClick(num, row, col) {
-  const b = arenaBoards[num];
-  if (!b) return;
-  const state = b.gameData.getData();
-  if (state.gameStatus !== 'playing') return;
-
-  const clickedPieceId = state.board[row][col];
-
-  if (b.selectedPieceId) {
-    const moveInfo = b.validMoves.find(m => m.row === row && m.col === col);
-    if (moveInfo) {
-      makeArenaMove(num, b.selectedPieceId, row, col);
-      b.selectedPieceId = null;
-      b.validMoves = [];
-      renderArenaBoard(num);
-      return;
-    }
-
-    if (clickedPieceId && state.pieces[clickedPieceId]) {
-      const piece = state.pieces[clickedPieceId];
-      if (piece.player === b.myPlayerNumber && state.currentPlayer === b.myPlayerNumber) {
-        b.selectedPieceId = clickedPieceId;
-        b.validMoves = getLegalMovesForPiece(state, clickedPieceId);
-        renderArenaBoard(num);
-        return;
-      }
-    }
-
-    b.selectedPieceId = null;
-    b.validMoves = [];
-    renderArenaBoard(num);
-    return;
-  }
-
-  if (clickedPieceId && state.pieces[clickedPieceId]) {
-    const piece = state.pieces[clickedPieceId];
-    if (piece.player === b.myPlayerNumber && state.currentPlayer === b.myPlayerNumber) {
-      b.selectedPieceId = clickedPieceId;
-      b.validMoves = getLegalMovesForPiece(state, clickedPieceId);
-      renderArenaBoard(num);
-    }
-  }
-}
-
-function makeArenaMove(num, pieceId, toRow, toCol) {
-  const b = arenaBoards[num];
-  if (!b) return;
-  const state = b.gameData.getData();
-  const validation = validateMove(state, pieceId, toRow, toCol);
-  if (!validation.valid) {
-    showError(validation.reason);
-    return;
-  }
-
-  const targetId = state.board[toRow][toCol];
-  const capturedPiece = targetId ? state.pieces[targetId] : null;
-
-  b.gameData.setData((draft) => {
-    executeMove(draft, pieceId, toRow, toCol);
-  });
-
-  if (capturedPiece) {
-    const typeNames = {dam: 'Đấm', la: 'Lá', keo: 'Kéo'};
-    showCaptureMessage(typeNames[capturedPiece.type]);
-  }
-
-  renderArenaBoard(num);
-}
-
-function joinArenaBoard(num) {
-  const b = arenaBoards[num];
-  if (!b) return;
-
-  const name = getSavedName() || `Player ${b.gameData.getData().playerOrder.length + 1}`;
-
-  b.gameData.setData((draft) => {
-    const existing = draft.players[myPlayerId];
-    if (existing) return;
-
-    // Mỗi người chỉ được làm NGƯỜI CHƠI ở 1 bàn tại 1 thời điểm; các bàn khác chỉ có thể xem.
-    const canBePlayer = draft.playerOrder.length < 2 && (myPlayingBoard === null || myPlayingBoard === num);
-
-    if (!canBePlayer) {
-      const alreadySpectating = (draft.spectators || []).some(s => s.id === myPlayerId);
-      if (alreadySpectating) return;
-      draft.spectators = draft.spectators || [];
-      draft.spectators.push({ id: myPlayerId, name, joinedAt: Date.now() });
-      return;
-    }
-
-    draft.players[myPlayerId] = { id: myPlayerId, name, joinedAt: Date.now() };
-    draft.playerOrder.push(myPlayerId);
-
-    if (draft.playerOrder.length === 2) {
-      draft.gameStatus = "playing";
-      draft.currentPlayer = 1;
-    }
-  });
-
-  const state = b.gameData.getData();
-  const idx = state.playerOrder.indexOf(myPlayerId);
-  b.myPlayerNumber = idx >= 0 ? idx + 1 : null;
-
-  if (b.myPlayerNumber !== null) {
-    myPlayingBoard = num;
-    showToast(`Bạn đã vào Bàn ${num} với vai trò Player ${b.myPlayerNumber}`, 'success');
-  } else {
-    showToast(`Bạn đang xem Bàn ${num}`, 'info');
-  }
-
-  renderArenaBoard(num);
-}
-
-function resetArenaBoard(num) {
-  const b = arenaBoards[num];
-  if (!b) return;
-
-  const newState = createInitialState(`${baseRoomId}-${num}`);
-  b.gameData.setData(newState);
-  b.myPlayerNumber = null;
-  b.selectedPieceId = null;
-  b.validMoves = [];
-  if (myPlayingBoard === num) myPlayingBoard = null;
-
-  renderArenaBoard(num);
-}
-
-async function initArenaGame() {
+document.getElementById('login-form').addEventListener('submit', async (event) => {
+  event.preventDefault();
   try {
-    await playhtml.init({ room: currentRoomId });
-    await playhtml.ready;
-
-    myPlayerId = getOrCreateMyPlayerId();
-
-    buildArenaGrid();
-
-    ARENA_BOARDS.forEach(num => {
-      const key = `ottv2-arena-board-${num}`;
-      const initialState = createInitialState(`${baseRoomId}-${num}`);
-      const gd = playhtml.createPageData(key, initialState);
-
-      let state = gd.getData();
-      if (!state || !state.board) {
-        gd.setData(initialState);
-        state = initialState;
-      }
-
-      const idx = state.playerOrder.indexOf(myPlayerId);
-      const myNumber = idx >= 0 ? idx + 1 : null;
-
-      arenaBoards[num] = {
-        gameData: gd,
-        myPlayerNumber: myNumber,
-        selectedPieceId: null,
-        validMoves: []
-      };
-
-      if (myNumber !== null) myPlayingBoard = num;
-
-      gd.onUpdate(() => {
-        arenaBoards[num].selectedPieceId = null;
-        arenaBoards[num].validMoves = [];
-        try { renderArenaBoard(num); } catch (err) { console.error('[OTTv2] arena render error:', err); }
-      });
+    const result = await api('/auth/login', {
+      method: 'POST',
+      body: JSON.stringify({
+        username: document.getElementById('login-username').value,
+        password: document.getElementById('login-password').value
+      })
     });
+    setAuthenticated(result.user, result.csrfToken);
+  } catch {}
+});
 
-    renderArenaAll();
-    showArenaScreen();
-  } catch (err) {
-    console.error('[OTTv2] PlayHTML init failed:', err);
-    showLobbyError('Không thể kết nối PlayHTML: ' + (err?.message || err));
-  }
-}
-
-/* ============================================================
-   ========================  LOBBY  ============================
-   ============================================================ */
-
-function showLobbyError(msg) {
-  const statusEl = document.getElementById('lobby-status');
-  if (statusEl) {
-    statusEl.textContent = msg;
-    statusEl.style.display = 'block';
-  }
-  showScreen('lobby');
-}
-
-function proceedToGame() {
-  const nameInput = document.getElementById('player-name');
-  const name = nameInput ? nameInput.value.trim() : '';
-  if (name) sessionStorage.setItem('ottv2-player-name', name);
-  window.location.href = `?room=${baseRoomId}&mode=${selectedMode}`;
-}
-
-document.addEventListener('DOMContentLoaded', () => {
-  const urlRoom = getRoomFromUrl();
-  const urlMode = getModeFromUrl();
-  baseRoomId = urlRoom || generateRoomId();
-
-  if (!urlRoom) {
-    window.history.replaceState({}, '', `?room=${baseRoomId}`);
-  }
-
-  const roomIdInput = document.getElementById('room-id');
-  if (roomIdInput) roomIdInput.value = baseRoomId;
-
-  const savedName = sessionStorage.getItem('ottv2-player-name');
-  if (savedName) {
-    const nameInput = document.getElementById('player-name');
-    if (nameInput) nameInput.value = savedName;
-  }
-
-  document.querySelectorAll('.mode-card').forEach(card => {
-    if (card.classList.contains('selected')) selectedMode = card.dataset.mode;
-    card.addEventListener('click', () => {
-      document.querySelectorAll('.mode-card').forEach(c => c.classList.remove('selected'));
-      card.classList.add('selected');
-      selectedMode = card.dataset.mode;
+document.getElementById('register-form').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  try {
+    const result = await api('/auth/register', {
+      method: 'POST',
+      body: JSON.stringify({
+        username: document.getElementById('register-username').value,
+        password: document.getElementById('register-password').value
+      })
     });
-  });
+    setAuthenticated(result.user, result.csrfToken);
+  } catch {}
+});
 
-  const generateBtn = document.getElementById('generate-room');
-  if (generateBtn) {
-    generateBtn.addEventListener('click', () => {
-      baseRoomId = generateRoomId();
-      if (roomIdInput) roomIdInput.value = baseRoomId;
-      window.history.replaceState({}, '', `?room=${baseRoomId}`);
-    });
-  }
-
-  const copyBtn = document.getElementById('copy-link');
-  if (copyBtn) {
-    copyBtn.addEventListener('click', () => {
-      const link = `${window.location.origin}${window.location.pathname}?room=${baseRoomId}&mode=${selectedMode}`;
-      navigator.clipboard.writeText(link).then(() => {
-        const status = document.getElementById('lobby-status');
-        if (status) {
-          status.textContent = 'Đã sao chép link phòng!';
-          status.style.display = 'block';
-          setTimeout(() => { status.style.display = 'none'; }, 2000);
-        }
-      }).catch(() => {
-        alert('Link phòng: ' + link);
-      });
-    });
-  }
-
-  const joinBtn = document.getElementById('join-btn');
-  if (joinBtn) joinBtn.addEventListener('click', proceedToGame);
-
-  const nameInput = document.getElementById('player-name');
-  if (nameInput) {
-    nameInput.addEventListener('keypress', (e) => {
-      if (e.key === 'Enter') proceedToGame();
-    });
-  }
-
-  const resetBtn = document.getElementById('reset-btn');
-  if (resetBtn) resetBtn.addEventListener('click', resetGame);
-
-  renderCoordinates();
-
-  if (urlMode === '2p') {
-    currentRoomId = baseRoomId;
-    initTwoPlayerGame();
-  } else if (urlMode === 'arena') {
-    currentRoomId = baseRoomId;
-    initArenaGame();
-  } else {
-    showScreen('lobby');
+document.getElementById('logout-button').addEventListener('click', async () => {
+  try {
+    await api('/auth/logout', { method: 'POST' });
+  } finally {
+    showAuthScreen();
   }
 });
+
+restoreSession();
+
+// ---------------------------------------------------
+// Dashboard
+// ---------------------------------------------------
+async function refreshQueueStats() {
+  try {
+    const stats = await api('/system/queue');
+    document.getElementById('queue-stats').textContent =
+      `Queue: ${stats.activeCount}/${stats.maxConcurrent} active, ${stats.queueLength} queued`;
+  } catch (e) {
+    document.getElementById('queue-stats').textContent = 'Queue status offline';
+  }
+}
+
+async function loadDashboard() {
+  refreshQueueStats();
+  const [tourneys, bots] = await Promise.all([
+    api('/tournaments').catch(() => []),
+    api('/bots').catch(() => [])
+  ]);
+
+  document.getElementById('dash-tourney-count').textContent = tourneys.length;
+  document.getElementById('dash-bot-count').textContent = bots.length;
+
+  const tbody = document.querySelector('#dash-recent-tourneys tbody');
+  tbody.innerHTML = '';
+
+  tourneys.slice(0, 5).forEach(t => {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td>${t.name}</td>
+      <td>${t.format}</td>
+      <td><span class="status-badge status-${t.status}">${t.status.replace('_', ' ').toUpperCase()}</span></td>
+      <td>${t.participants.length}</td>
+      <td><button class="secondary-btn" style="padding: 4px 8px;" onclick="viewTournament('${t.tournamentId}')">View</button></td>
+    `;
+    tbody.appendChild(tr);
+  });
+}
+
+// ---------------------------------------------------
+// Bots
+// ---------------------------------------------------
+async function loadBots() {
+  const bots = await api('/bots');
+  const tbody = document.querySelector('#bots-table tbody');
+  tbody.innerHTML = '';
+  bots.forEach(b => {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td><code>${b.id}</code></td>
+      <td>${b.name}</td>
+      <td><code>${b.command}</code></td>
+      <td><code>${b.args.join(' ')}</code></td>
+      <td>${new Date(b.registeredAt).toLocaleString()}</td>
+    `;
+    tbody.appendChild(tr);
+  });
+}
+
+async function submitNewBot() {
+  const name = document.getElementById('new-bot-name').value;
+  const command = document.getElementById('new-bot-cmd').value;
+  const argsRaw = document.getElementById('new-bot-args').value;
+  const args = argsRaw ? argsRaw.split(',').map(s => s.trim()) : [];
+
+  try {
+    await api('/bots', { method: 'POST', body: JSON.stringify({ name, command, args }) });
+    closeModal('add-bot-modal');
+    document.getElementById('new-bot-name').value = '';
+    document.getElementById('new-bot-cmd').value = '';
+    document.getElementById('new-bot-args').value = '';
+    showToast('Bot registered successfully', 'success');
+    loadBots();
+  } catch (e) {
+    // Error handled in api()
+  }
+}
+
+// ---------------------------------------------------
+// Tournaments
+// ---------------------------------------------------
+async function loadTournaments() {
+  const tourneys = await api('/tournaments');
+  const tbody = document.querySelector('#tourneys-table tbody');
+  tbody.innerHTML = '';
+  tourneys.forEach(t => {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td><code>${t.tournamentId}</code></td>
+      <td>${t.name}</td>
+      <td><span class="status-badge status-${t.status}">${t.status.replace('_', ' ').toUpperCase()}</span></td>
+      <td><button class="secondary-btn" style="padding: 4px 8px;" onclick="viewTournament('${t.tournamentId}')">View</button></td>
+    `;
+    tbody.appendChild(tr);
+  });
+}
+
+async function submitNewTourney() {
+  const name = document.getElementById('new-tourney-name').value;
+  try {
+    const result = await api('/tournaments', { method: 'POST', body: JSON.stringify({ name }) });
+    closeModal('add-tourney-modal');
+    document.getElementById('new-tourney-name').value = '';
+    showToast('Tournament created', 'success');
+    viewTournament(result.tournamentId);
+  } catch (e) {
+    // Handled
+  }
+}
+
+let currentTourneyId = null;
+
+async function viewTournament(id) {
+  currentTourneyId = id;
+  navigate('tournament-detail');
+  await refreshTournamentDetail();
+}
+
+async function refreshTournamentDetail() {
+  if (!currentTourneyId) return;
+  const t = await api(`/tournaments/${currentTourneyId}`);
+
+  document.getElementById('td-name').textContent = t.name;
+  document.getElementById('td-status').className = `status-badge status-${t.status}`;
+  document.getElementById('td-status').textContent = t.status.replace('_', ' ').toUpperCase();
+  document.getElementById('td-pcount').textContent = t.participants.length;
+
+  const plist = document.getElementById('td-participants');
+  plist.innerHTML = '';
+  t.participants.forEach(p => {
+    const li = document.createElement('li');
+    li.style.padding = '8px 0';
+    li.style.borderBottom = '1px solid var(--border-light)';
+    li.innerHTML = `<strong>${p.name}</strong> <span style="color:var(--text-faint); font-size:0.8rem;">(${p.bot.botId})</span>`;
+    plist.appendChild(li);
+  });
+
+  // Actions based on status
+  const actions = document.getElementById('td-actions');
+  actions.innerHTML = '';
+  const btnReg = document.getElementById('btn-register-bot');
+  btnReg.style.display = 'none';
+
+  if (t.status === 'draft') {
+    actions.innerHTML += `<button class="primary-btn" style="padding:8px;" onclick="tourneyAction('open_registration')">Open Registration</button>`;
+  } else if (t.status === 'registration_open') {
+    btnReg.style.display = 'block';
+    actions.innerHTML += `<button class="primary-btn" style="padding:8px;" onclick="tourneyAction('generate_schedule')">Generate Schedule</button>`;
+  } else if (t.status === 'running') {
+    actions.innerHTML += `<button class="primary-btn" style="padding:8px;" onclick="tourneyAction('run_all')">Run All Matches</button>`;
+  }
+
+  // Load standings
+  const tbody = document.querySelector('#td-standings tbody');
+  tbody.innerHTML = '';
+  t.standings.forEach((s, idx) => {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td>${idx + 1}</td>
+      <td><strong>${s.participantName}</strong></td>
+      <td>${s.matchesPlayed}</td>
+      <td>${s.wins}</td>
+      <td>${s.draws}</td>
+      <td>${s.losses}</td>
+      <td><strong>${s.points}</strong></td>
+    `;
+    tbody.appendChild(tr);
+  });
+
+  if (t.status === 'completed' || t.status === 'running') {
+    api(`/tournaments/${currentTourneyId}/stats`).then(stats => {
+      document.getElementById('td-stats').textContent =
+        `Matches: ${stats.completedMatches}/${stats.totalMatches} | Avg Turns: ${stats.averageTurns}`;
+    }).catch(()=>{});
+  }
+
+  // Schedule
+  const sched = document.getElementById('td-schedule');
+  sched.innerHTML = '';
+  t.rounds.forEach(r => {
+    const roundDiv = document.createElement('div');
+    roundDiv.innerHTML = `<h4 style="color:var(--text-secondary); border-bottom:1px solid var(--border-light); padding-bottom:5px; margin-bottom:10px;">Round ${r.roundNumber}</h4>`;
+
+    const table = document.createElement('table');
+    table.className = 'data-table';
+    let thtml = `<thead><tr><th>Match</th><th>Player A</th><th>Player B</th><th>Status</th><th>Winner</th><th>Action</th></tr></thead><tbody>`;
+
+    r.pairings.forEach(p => {
+      const pA = t.participants.find(x => x.participantId === p.participantA)?.name || p.participantA;
+      const pB = p.participantB ? (t.participants.find(x => x.participantId === p.participantB)?.name || p.participantB) : 'BYE';
+
+      let winnerName = '-';
+      if (p.matchResult) {
+        if (p.matchResult.winner === 'A') winnerName = pA;
+        else if (p.matchResult.winner === 'B') winnerName = pB;
+        else if (p.matchResult.winner === 'draw') winnerName = 'Draw';
+      }
+
+      thtml += `<tr>
+        <td><code style="font-size:0.75rem;">${p.pairingId}</code></td>
+        <td>${pA}</td>
+        <td>${pB}</td>
+        <td><span class="status-badge status-${p.status}">${p.status.toUpperCase()}</span></td>
+        <td>${winnerName}</td>
+        <td>
+          ${p.matchId ? `<button class="secondary-btn" style="padding:4px 8px;" onclick="playReplay('${t.tournamentId}', '${p.matchId}')">Watch</button>` : ''}
+        </td>
+      </tr>`;
+    });
+    table.innerHTML = thtml + '</tbody>';
+    roundDiv.appendChild(table);
+    sched.appendChild(roundDiv);
+  });
+}
+
+async function tourneyAction(action) {
+  try {
+    await api(`/tournaments/${currentTourneyId}/action`, { method: 'POST', body: JSON.stringify({ action }) });
+    showToast(`Action ${action} successful`, 'success');
+    if (action === 'generate_schedule') {
+      await api(`/tournaments/${currentTourneyId}/action`, { method: 'POST', body: JSON.stringify({ action: 'start' }) });
+    }
+    refreshTournamentDetail();
+  } catch (e) {}
+}
+
+async function submitTourneyRegistration() {
+  const name = document.getElementById('reg-part-name').value;
+  const botId = document.getElementById('reg-bot-select').value;
+  try {
+    await api(`/tournaments/${currentTourneyId}/register`, { method: 'POST', body: JSON.stringify({ participantName: name, botId }) });
+    closeModal('register-bot-tourney-modal');
+    document.getElementById('reg-part-name').value = '';
+    showToast('Registered successfully', 'success');
+    refreshTournamentDetail();
+  } catch (e) {}
+}
+
+// Populate bot select when opening modal
+document.getElementById('btn-register-bot')?.addEventListener('click', async () => {
+  const bots = await api('/bots').catch(()=>[]);
+  const sel = document.getElementById('reg-bot-select');
+  sel.innerHTML = bots.map(b => `<option value="${b.id}">${b.name} (${b.id})</option>`).join('');
+});
+
+
+// ---------------------------------------------------
+// REPLAY VIEWER
+// ---------------------------------------------------
+let currentReplay = null;
+let currentReplayMoveIndex = -1;
+
+const BOARD_SIZE = 9;
+const PIECE_TYPES = {
+  dam: { icon: 'icon-piece-dam', name: 'Búa' },
+  la: { icon: 'icon-piece-la', name: 'Lá' },
+  keo: { icon: 'icon-piece-keo', name: 'Kéo' }
+};
+
+function closeReplay() {
+  navigate('tournament-detail');
+  currentReplay = null;
+}
+
+function svgUse(iconId) {
+  return `<svg viewBox="0 0 24 24" aria-hidden="true"><use href="#${iconId}"></use></svg>`;
+}
+
+async function playReplay(tourneyId, matchId) {
+  try {
+    const replay = await api(`/tournaments/${tourneyId}/replays/${matchId}`);
+    currentReplay = replay;
+
+    // Setup UI
+    document.getElementById('r-p1-name').textContent = "PLAYER A"; // We could fetch real names if we pass them
+    document.getElementById('r-p2-name').textContent = "PLAYER B";
+
+    let wtxt = '';
+    if (replay.winner === 'A') wtxt = 'PLAYER A WON';
+    else if (replay.winner === 'B') wtxt = 'PLAYER B WON';
+    else wtxt = 'DRAW';
+
+    document.getElementById('r-result-text').textContent = `Result: ${wtxt} (${replay.terminationReason || 'unknown'})`;
+
+    navigate('replay-view');
+    goToReplayTurn(-1); // Start at initial state
+  } catch (e) {
+    showToast('Failed to load replay', 'error');
+  }
+}
+
+function renderReplayBoard(state) {
+  const boardEl = document.getElementById('r-board');
+  boardEl.innerHTML = '';
+
+  for (let row = 0; row < BOARD_SIZE; row++) {
+    for (let col = 0; col < BOARD_SIZE; col++) {
+      const cell = document.createElement('div');
+      cell.className = 'cell';
+
+      if ((row === 0 && col === 0) || (row === 8 && col === 8)) {
+        cell.classList.add('goal');
+        cell.innerHTML = `<span class="goal-flag">${svgUse('icon-flag')}</span>`;
+      }
+
+      const pieceId = state.board[row][col];
+      if (pieceId) {
+        const piece = state.pieces[pieceId];
+        const pel = document.createElement('span');
+        pel.className = `piece player${piece.player === 'A' ? '1' : '2'}`;
+        pel.innerHTML = svgUse(PIECE_TYPES[piece.type].icon);
+        cell.appendChild(pel);
+      }
+      boardEl.appendChild(cell);
+    }
+  }
+}
+
+function buildStateAt(moveIndex) {
+  if (!currentReplay) return null;
+  // Deep clone initial state
+  const state = JSON.parse(JSON.stringify(currentReplay.initialState));
+
+  // Apply moves up to index
+  for (let i = 0; i <= moveIndex; i++) {
+    const move = currentReplay.moves[i];
+
+    // Find piece
+    let pieceId = null;
+    let pieceObj = null;
+    for (const [pid, p] of Object.entries(state.pieces)) {
+      if (p.row === move.from.row && p.col === move.from.col) {
+        pieceId = pid;
+        pieceObj = p;
+        break;
+      }
+    }
+
+    if (pieceObj) {
+      // Remove from old
+      state.board[move.from.row][move.from.col] = null;
+      // Capture target if any
+      const targetId = state.board[move.to.row][move.to.col];
+      if (targetId) {
+        delete state.pieces[targetId];
+      }
+      // Move to new
+      pieceObj.row = move.to.row;
+      pieceObj.col = move.to.col;
+      state.board[move.to.row][move.to.col] = pieceId;
+    }
+  }
+  return state;
+}
+
+function goToReplayTurn(index) {
+  if (!currentReplay) return;
+  if (index < -1) index = -1;
+  if (index >= currentReplay.moves.length) index = currentReplay.moves.length - 1;
+
+  currentReplayMoveIndex = index;
+  document.getElementById('r-turn-display').textContent = `${index + 1} / ${currentReplay.moves.length}`;
+
+  const state = buildStateAt(index);
+  if (state) renderReplayBoard(state);
+}
+
+document.getElementById('btn-replay-start').addEventListener('click', () => goToReplayTurn(-1));
+document.getElementById('btn-replay-prev').addEventListener('click', () => goToReplayTurn(currentReplayMoveIndex - 1));
+document.getElementById('btn-replay-next').addEventListener('click', () => goToReplayTurn(currentReplayMoveIndex + 1));
+document.getElementById('btn-replay-end').addEventListener('click', () => {
+  if (currentReplay) goToReplayTurn(currentReplay.moves.length - 1);
+});
+
+// Render static board coordinates for replay
+function setupReplayCoords() {
+  const cols = 'abcdefghi'.split('');
+  const header = document.getElementById('coord-header');
+  const side = document.getElementById('coord-side');
+  if(header && side) {
+    header.innerHTML = '<div class="corner" style="width:25px"></div>' + cols.map(c => `<div class="coord" style="width:min(6.8vw, 61px);text-align:center">${c}</div>`).join('');
+    side.innerHTML = Array.from({length:9}, (_,i)=>`<div class="coord" style="height:min(6.8vw, 61px);display:flex;align-items:center">${i+1}</div>`).join('');
+  }
+}
+setupReplayCoords();
+
+// Polling for tournament updates while on the detail page
+setInterval(() => {
+  if (document.getElementById('tournament-detail').classList.contains('active')) {
+    refreshTournamentDetail();
+  }
+}, 5000);
