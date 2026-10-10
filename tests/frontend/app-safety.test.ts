@@ -43,4 +43,21 @@ describe('SPA rendering and request foundations', () => {
     expect(page).toContain('id="sidebar-backdrop"');
     expect(page).toContain('id="dash-queue-value"');
   });
+
+  it('keeps bot management actions and validation in the safe DOM-based workspace', async () => {
+    const [app, page] = await Promise.all([readProjectFile('app.js'), readProjectFile('index.html')]);
+
+    expect(app).toContain('function renderBotList');
+    expect(app).toContain('function botInput');
+    expect(app).toContain("method: editingBot ? 'PUT' : 'POST'");
+    expect(app).toContain("method: 'DELETE'");
+    expect(app).toContain("$('#bot-search').addEventListener('input'");
+    expect(app).toContain("rawArguments === '' ? [] : rawArguments.split(',').map(value => value.trim())");
+    expect(app).toContain('state.botDialogRevision !== dialogRevision');
+    expect(app).toContain('state.deleteDialogRevision !== dialogRevision');
+    expect(app).toContain("isCurrentView('bots', authRevision, viewRevision)");
+    expect(page).toContain('id="bots-list"');
+    expect(page).toContain('id="delete-bot-modal"');
+    expect(page).toContain('quotation marks are not parsed');
+  });
 });

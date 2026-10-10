@@ -12,6 +12,12 @@ const state = {
   loading: new Set(),
   error: null,
   pending: new Set(),
+  bots: [],
+  botSearch: '',
+  editingBot: null,
+  deletingBot: null,
+  botDialogRevision: 0,
+  deleteDialogRevision: 0,
 };
 
 const $ = (selector, root = document) => root.querySelector(selector);
@@ -89,6 +95,7 @@ function renderMessage(container, message, retry) {
 }
 
 function renderTableMessage(tbody, message, columns, retry) {
+  if (tbody.tagName !== 'TBODY') return renderMessage(tbody, message, retry);
   clear(tbody);
   const row = create('tr');
   const cell = create('td', { text: message, attrs: { colspan: columns } });
@@ -115,6 +122,8 @@ function closeModal(id) {
   modal.setAttribute('aria-hidden', 'true');
   if (state.modalReturnFocus?.isConnected) state.modalReturnFocus.focus();
   state.modalReturnFocus = null;
+  if (id === 'add-bot-modal') { state.botDialogRevision += 1; state.editingBot = null; clearBotFormError(); }
+  if (id === 'delete-bot-modal') { state.deleteDialogRevision += 1; state.deletingBot = null; }
 }
 
 function trapModalFocus(event) {
@@ -317,7 +326,8 @@ async function loadDashboard() {
 }
 
 async function loadBots() {
-  const table = $('#bots-table tbody');
+  const list = $('#bots-list');
+  const table = list;
   const authRevision = state.authRevision;
   const viewRevision = state.viewRevision;
   state.loading.add('bots');
@@ -326,16 +336,119 @@ async function loadBots() {
   try {
     const bots = await request('/bots');
     if (!isCurrentView('bots', authRevision, viewRevision)) return;
-    clear(table);
-    if (!bots.length) return renderTableMessage(table, 'No bots registered yet.', 5);
-    bots.forEach(bot => {
-      const row = create('tr');
-      const command = textCell(bot.command); const args = textCell(bot.args.join(' '));
-      row.append(textCell(bot.id), textCell(bot.name), command, args, textCell(new Date(bot.registeredAt).toLocaleString()));
-      table.appendChild(row);
-    });
-  } catch (error) { if (isCurrentView('bots', authRevision, viewRevision)) { state.error = error.message || 'Unable to load bots.'; renderTableMessage(table, state.error, 5, loadBots); } }
+    state.bots = bots;
+    renderBotList();
+  } catch (error) { if (isCurrentView('bots', authRevision, viewRevision)) { state.error = error.message || 'Unable to load bots.'; $('#bots-count').textContent = 'Bots unavailable'; renderMessage(list, state.error, loadBots); } }
   finally { state.loading.delete('bots'); }
+}
+
+function renderBotList() {
+  const list = $('#bots-list');
+  const query = state.botSearch.trim().toLocaleLowerCase();
+  const bots = state.bots.filter(bot => bot.name.toLocaleLowerCase().includes(query));
+  clear(list);
+  $('#bots-count').textContent = state.bots.length === 1 ? '1 bot' : `${state.bots.length} bots`;
+  if (!state.bots.length) return renderBotEmpty(list, 'No bots yet', 'Create a bot configuration to make it available for tournament registration.');
+  if (!bots.length) return renderBotEmpty(list, 'No matching bots', 'Try a different name or clear the search field.', false);
+  bots.forEach(bot => {
+    const card = create('article', { className: 'bot-card' });
+    const header = create('div', { className: 'bot-card-header' });
+    const heading = create('div'); heading.append(create('h3', { className: 'bot-card-title', text: bot.name }), create('span', { className: 'bot-card-id', text: bot.id }));
+    header.appendChild(heading); card.appendChild(header);
+    const config = create('div', { className: 'bot-config' });
+    [['Command', bot.command], ['Arguments', bot.args.length ? bot.args.join(' ') : 'No arguments']].forEach(([label, value]) => {
+      const row = create('div', { className: 'bot-config-row' }); row.append(create('span', { text: label }), create('code', { text: value })); config.appendChild(row);
+    });
+    card.appendChild(config);
+    const footer = create('div', { className: 'bot-card-footer' });
+    const date = new Date(bot.registeredAt); footer.appendChild(create('small', { text: Number.isNaN(date.getTime()) ? 'Registration date unavailable' : `Registered ${date.toLocaleDateString()}` }));
+    const actions = create('div', { className: 'bot-actions' });
+    actions.append(actionButton('Edit', () => openBotDialog(bot), `edit-bot:${bot.id}`, 'secondary-btn bot-action'), actionButton('Delete', () => openDeleteBotDialog(bot), `delete-bot:${bot.id}`, 'secondary-btn bot-action bot-delete'));
+    footer.appendChild(actions); card.appendChild(footer); list.appendChild(card);
+  });
+}
+
+function renderBotEmpty(list, title, message, showAction = true) {
+  clear(list);
+  const empty = create('div', { className: 'ui-message' });
+  empty.append(create('strong', { className: 'bot-empty-title', text: title }), create('p', { className: 'bot-empty-copy', text: message }));
+  if (showAction) empty.appendChild(actionButton('Create bot', () => openBotDialog(), 'empty-create-bot', 'primary-btn bot-empty-action'));
+  list.appendChild(empty);
+}
+
+function showBotFormError(message) { const error = $('#bot-form-error'); error.textContent = message; error.hidden = false; }
+function clearBotFormError() { const error = $('#bot-form-error'); error.textContent = ''; error.hidden = true; }
+
+function botInput() {
+  const name = $('#new-bot-name').value.trim();
+  const command = $('#new-bot-cmd').value;
+  const rawArguments = $('#new-bot-args').value;
+  const args = rawArguments === '' ? [] : rawArguments.split(',').map(value => value.trim());
+  if (!name || name.length > 50) return { error: 'Bot name must be between 1 and 50 characters.' };
+  if (!['node', 'python', 'python3'].includes(command)) return { error: 'Choose an approved command.' };
+  if (args.length > 32 || args.some(arg => arg.length > 256)) return { error: 'Use no more than 32 arguments, each up to 256 characters.' };
+  if (args.some(arg => arg.startsWith('-') && arg !== '--fast')) return { error: 'Only the --fast argument flag is allowed.' };
+  if (args.some(arg => arg.includes('..') || /^(?:[A-Za-z]:[\\/]|[\\/])/.test(arg))) return { error: 'Absolute paths and parent-path segments are not allowed.' };
+  return { name, command, args };
+}
+
+function openBotDialog(bot = null) {
+  state.botDialogRevision += 1;
+  state.editingBot = bot;
+  clearBotFormError();
+  $('#add-bot-title').textContent = bot ? 'EDIT BOT' : 'CREATE BOT';
+  $('#bot-dialog-description').textContent = bot ? 'Update this saved runtime command and its arguments.' : 'Store an approved runtime command and its arguments for tournament registration.';
+  $('#submit-bot').textContent = bot ? 'Save changes' : 'Create bot';
+  $('#new-bot-name').value = bot?.name || '';
+  $('#new-bot-cmd').value = bot?.command || 'node';
+  $('#new-bot-args').value = bot?.args.join(', ') || '';
+  openModal('add-bot-modal');
+}
+
+async function submitBot() {
+  const button = $('#submit-bot');
+  const authRevision = state.authRevision;
+  const viewRevision = state.viewRevision;
+  const dialogRevision = state.botDialogRevision;
+  const editingBot = state.editingBot;
+  const input = botInput();
+  clearBotFormError();
+  if (input.error) return showBotFormError(input.error);
+  await runPending(editingBot ? `save-bot:${editingBot.id}` : 'create-bot', button, async () => {
+    try { await api(editingBot ? `/bots/${editingBot.id}` : '/bots', { method: editingBot ? 'PUT' : 'POST', body: JSON.stringify(input) }); }
+    catch (error) { if (isCurrentView('bots', authRevision, viewRevision) && state.botDialogRevision === dialogRevision) showBotFormError(error.message || 'Unable to save bot.'); throw error; }
+    if (!isCurrentView('bots', authRevision, viewRevision)) return;
+    if (state.botDialogRevision !== dialogRevision) { void loadBots(); return; }
+    closeModal('add-bot-modal');
+    showToast(editingBot ? 'Bot updated successfully.' : 'Bot registered successfully.', 'success');
+    await loadBots();
+  });
+}
+
+function openDeleteBotDialog(bot) {
+  state.deleteDialogRevision += 1;
+  state.deletingBot = bot;
+  $('#delete-bot-name').textContent = bot.name;
+  const error = $('#delete-bot-error'); error.textContent = ''; error.hidden = true;
+  openModal('delete-bot-modal');
+}
+
+async function deleteBot() {
+  const bot = state.deletingBot;
+  if (!bot) return;
+  const button = $('#confirm-delete-bot');
+  const authRevision = state.authRevision;
+  const viewRevision = state.viewRevision;
+  const dialogRevision = state.deleteDialogRevision;
+  await runPending(`confirm-delete:${bot.id}`, button, async () => {
+    try { await api(`/bots/${bot.id}`, { method: 'DELETE' }); }
+    catch (error) { if (isCurrentView('bots', authRevision, viewRevision) && state.deleteDialogRevision === dialogRevision) { const message = $('#delete-bot-error'); message.textContent = error.message || 'Unable to delete bot.'; message.hidden = false; } throw error; }
+    if (!isCurrentView('bots', authRevision, viewRevision)) return;
+    if (state.deleteDialogRevision !== dialogRevision) { void loadBots(); return; }
+    closeModal('delete-bot-modal');
+    showToast('Bot deleted.', 'success');
+    await loadBots();
+  });
 }
 
 async function loadTournaments() {
@@ -362,20 +475,7 @@ async function loadTournaments() {
 }
 
 async function submitNewBot() {
-  const button = $('#submit-bot');
-  const authRevision = state.authRevision;
-  await runPending('create-bot', button, async () => {
-    const name = $('#new-bot-name').value;
-    const command = $('#new-bot-cmd').value;
-    const argsRaw = $('#new-bot-args').value;
-    const args = argsRaw ? argsRaw.split(',').map(value => value.trim()) : [];
-    await api('/bots', { method: 'POST', body: JSON.stringify({ name, command, args }) });
-    if (!state.user || state.authRevision !== authRevision) return;
-    closeModal('add-bot-modal');
-    $('#new-bot-name').value = ''; $('#new-bot-cmd').value = ''; $('#new-bot-args').value = '';
-    showToast('Bot registered successfully.', 'success');
-    await loadBots();
-  });
+  await submitBot();
 }
 
 async function submitNewTournament() {
@@ -565,8 +665,10 @@ function bindEvents() {
   $('#login-form').addEventListener('submit', event => { event.preventDefault(); void runPending('login', $('#login-submit'), async () => { const result = await api('/auth/login', { method: 'POST', body: JSON.stringify({ username: $('#login-username').value, password: $('#login-password').value }) }); setAuthenticated(result.user, result.csrfToken); }); });
   $('#register-form').addEventListener('submit', event => { event.preventDefault(); void runPending('register', $('#register-submit'), async () => { const result = await api('/auth/register', { method: 'POST', body: JSON.stringify({ username: $('#register-username').value, password: $('#register-password').value }) }); setAuthenticated(result.user, result.csrfToken); }); });
   $('#logout-button').addEventListener('click', () => void runPending('logout', $('#logout-button'), async () => { try { await api('/auth/logout', { method: 'POST' }); } finally { showAuthScreen(); } }));
-  $('#open-bot-modal').addEventListener('click', () => openModal('add-bot-modal')); $('#open-tournament-modal').addEventListener('click', () => openModal('add-tourney-modal'));
-  $('#dashboard-create-bot').addEventListener('click', () => openModal('add-bot-modal')); $('#dashboard-create-tournament').addEventListener('click', () => openModal('add-tourney-modal'));
+  $('#open-bot-modal').addEventListener('click', () => openBotDialog()); $('#open-tournament-modal').addEventListener('click', () => openModal('add-tourney-modal'));
+  $('#dashboard-create-bot').addEventListener('click', () => openBotDialog()); $('#dashboard-create-tournament').addEventListener('click', () => openModal('add-tourney-modal'));
+  $('#bot-search').addEventListener('input', event => { state.botSearch = event.target.value; renderBotList(); });
+  $('#confirm-delete-bot').addEventListener('click', () => void deleteBot());
   $('#mobile-menu-toggle').addEventListener('click', toggleMobileNavigation); $('#sidebar-backdrop').addEventListener('click', closeMobileNavigation);
   $('#back-to-tournaments').addEventListener('click', () => navigate('tournaments')); $('#btn-register-bot').addEventListener('click', async () => { if (await populateBotSelect()) openModal('register-bot-tourney-modal'); });
   $('#close-replay').addEventListener('click', closeReplay); $('#submit-bot').addEventListener('click', () => void submitNewBot()); $('#submit-tournament').addEventListener('click', () => void submitNewTournament()); $('#submit-registration').addEventListener('click', () => void submitTournamentRegistration());
