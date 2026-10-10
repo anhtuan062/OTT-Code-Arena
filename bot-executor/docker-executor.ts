@@ -50,6 +50,8 @@ interface RunningContainer {
 export class DockerExecutor implements BotExecutor {
   private config: DockerExecutorConfig;
   private runningContainers: Map<string, RunningContainer> = new Map();
+  private startingExecutions = new Set<string>();
+  private pendingTerminations = new Set<string>();
   private dockerAvailable: boolean = false;
 
   constructor(config: Partial<DockerExecutorConfig> = {}) {
@@ -121,8 +123,12 @@ export class DockerExecutor implements BotExecutor {
         0
       );
     }
+    const executionId = context.executionId;
+    this.startingExecutions.add(executionId);
     const available = await this.isAvailable();
     if (!available) {
+      this.startingExecutions.delete(executionId);
+      this.pendingTerminations.delete(executionId);
       return this.createErrorResult(
         'EXECUTOR_UNAVAILABLE',
         'Docker is not available',
@@ -133,8 +139,12 @@ export class DockerExecutor implements BotExecutor {
         0
       );
     }
+    if (context.signal?.aborted) {
+      this.startingExecutions.delete(executionId);
+      this.pendingTerminations.delete(executionId);
+      throw new ExecutionCancelledError();
+    }
 
-    const executionId = context.executionId;
     const startTime = Date.now();
 
     // Create a temporary directory for this execution
@@ -181,7 +191,8 @@ export class DockerExecutor implements BotExecutor {
         startTime,
       };
       this.runningContainers.set(executionId, runningContainer);
-      if (cancelled || context.signal?.aborted) {
+      this.startingExecutions.delete(executionId);
+      if (cancelled || context.signal?.aborted || this.pendingTerminations.delete(executionId)) {
         await this.terminateRunningContainer(runningContainer);
       }
 
@@ -226,9 +237,12 @@ export class DockerExecutor implements BotExecutor {
         proc.once('error', error => finish(-1, error));
       });
     } finally {
+      this.startingExecutions.delete(executionId);
+      this.pendingTerminations.delete(executionId);
       context.signal?.removeEventListener('abort', abortHandler);
       if (runningContainer) {
         clearTimeout(runningContainer.timeoutId);
+        await this.removeContainer(runningContainer.containerId);
       }
       await fs.rm(tempDir, { recursive: true, force: true }).catch(() => {});
     }
@@ -332,7 +346,12 @@ export class DockerExecutor implements BotExecutor {
 
   async terminate(executionId: string): Promise<void> {
     const running = this.runningContainers.get(executionId);
-    if (!running) return;
+    if (!running) {
+      if (this.startingExecutions.has(executionId)) {
+        this.pendingTerminations.add(executionId);
+      }
+      return;
+    }
 
     await this.terminateRunningContainer(running);
   }
@@ -379,8 +398,11 @@ export class DockerExecutor implements BotExecutor {
     running.killed = true;
     clearTimeout(running.timeoutId);
     running.terminationPromise = (async () => {
-      const killedContainer = await this.killContainer(running.containerId);
-      if (!killedContainer && !running.resolved) {
+      await this.killContainer(running.containerId);
+      // Docker Desktop can stop the container while leaving the parent
+      // `docker run` CLI process waiting. Stop that process as well so the
+      // execution promise observes its close event and cleanup can finish.
+      if (!running.resolved) {
         running.process.kill();
       }
     })();
@@ -406,6 +428,43 @@ export class DockerExecutor implements BotExecutor {
       }
       killProcess.once('error', () => finish(false));
       killProcess.once('close', code => finish(code === 0));
+    });
+  }
+
+  private removeContainer(containerId: string): Promise<void> {
+    return new Promise(resolve => {
+      let settled = false;
+      const deadline = Date.now() + 10000;
+      let retryId: ReturnType<typeof setTimeout> | undefined;
+      let removeProcess: ChildProcess | undefined;
+      const finish = () => {
+        if (settled) return;
+        settled = true;
+        if (retryId) clearTimeout(retryId);
+        resolve();
+      };
+      const attempt = () => {
+        if (settled) return;
+        try {
+          removeProcess = spawn(this.config.dockerBinary!, ['rm', '--force', containerId], { stdio: 'ignore' });
+        } catch {
+          finish();
+          return;
+        }
+        removeProcess.once('error', () => {
+          if (Date.now() >= deadline) finish();
+          else retryId = setTimeout(attempt, 100);
+        });
+        removeProcess.once('close', code => {
+          if (code === 0 || Date.now() >= deadline) finish();
+          else retryId = setTimeout(attempt, 100);
+        });
+      };
+      retryId = setTimeout(() => {
+        if (removeProcess && !removeProcess.killed) removeProcess.kill();
+        finish();
+      }, 10000);
+      attempt();
     });
   }
 

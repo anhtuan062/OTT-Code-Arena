@@ -405,6 +405,31 @@ describe('DockerExecutor - Integration Tests (requires Docker)', () => {
         new Promise<never>((_, reject) => setTimeout(() => reject(new Error('termination did not settle')), 3000)),
       ]);
       expect(result.success).toBe(false);
+      await executor.terminate('docker-terminate-1');
+      await expect(fs.access(path.join(process.cwd(), 'tmp', 'exec-docker-terminate-1'))).rejects.toThrow();
+    }, 10000);
+
+    skipIfNoDocker('should terminate during startup and tolerate repeated termination', async () => {
+      const context = createContext('docker-terminate-startup-1');
+      const config = createProcessConfig({
+        command: 'node',
+        args: ['-e', `setTimeout(() => {}, 10000)`],
+        timeoutMs: 5000,
+      });
+
+      const executionPromise = executor.execute(context, config, createValidRequest());
+      await Promise.all([
+        executor.terminate('docker-terminate-startup-1'),
+        executor.terminate('docker-terminate-startup-1'),
+      ]);
+
+      const result = await Promise.race([
+        executionPromise,
+        new Promise<never>((_, reject) => setTimeout(() => reject(new Error('startup termination did not settle')), 12000)),
+      ]);
+      expect(result.success).toBe(false);
+      await executor.terminate('docker-terminate-startup-1');
+      await expect(fs.access(path.join(process.cwd(), 'tmp', 'exec-docker-terminate-startup-1'))).rejects.toThrow();
     }, 10000);
 
     skipIfNoDocker('should handle multiple concurrent executions', async () => {
