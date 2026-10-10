@@ -73,6 +73,7 @@ describe('SPA rendering and request foundations', () => {
     expect(app).toContain('state.tournamentDialogRevision === dialogRevision');
     expect(app).toContain('state.registrationDialogRevision === dialogRevision');
     expect(app).toContain("$('#td-status').className = 'status-badge status-unknown'");
+    expect(app).toContain("isCurrentView('dashboard', authRevision, viewRevision)");
     expect(page).toContain('id="tournaments-list"');
     expect(page).toContain('id="tournament-action-modal"');
   });

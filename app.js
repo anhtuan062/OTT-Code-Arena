@@ -444,17 +444,20 @@ async function submitBot() {
   const viewRevision = state.viewRevision;
   const dialogRevision = state.botDialogRevision;
   const editingBot = state.editingBot;
+  const isBotView = () => isCurrentView('bots', authRevision, viewRevision)
+    || isCurrentView('dashboard', authRevision, viewRevision);
   const input = botInput();
   clearBotFormError();
   if (input.error) return showBotFormError(input.error);
   await runPending(editingBot ? `save-bot:${editingBot.id}` : 'create-bot', button, async () => {
     try { await api(editingBot ? `/bots/${editingBot.id}` : '/bots', { method: editingBot ? 'PUT' : 'POST', body: JSON.stringify(input) }); }
-    catch (error) { if (isCurrentView('bots', authRevision, viewRevision) && state.botDialogRevision === dialogRevision) showBotFormError(error.message || 'Unable to save bot.'); throw error; }
-    if (!isCurrentView('bots', authRevision, viewRevision)) return;
+    catch (error) { if (isBotView() && state.botDialogRevision === dialogRevision) showBotFormError(error.message || 'Unable to save bot.'); throw error; }
+    if (!isBotView()) return;
     if (state.botDialogRevision !== dialogRevision) { void loadBots(); return; }
     closeModal('add-bot-modal');
     showToast(editingBot ? 'Bot updated successfully.' : 'Bot registered successfully.', 'success');
-    await loadBots();
+    if (state.activeView === 'bots') await loadBots();
+    else await loadDashboard();
   });
 }
 
