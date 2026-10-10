@@ -60,4 +60,20 @@ describe('SPA rendering and request foundations', () => {
     expect(page).toContain('id="delete-bot-modal"');
     expect(page).toContain('quotation marks are not parsed');
   });
+
+  it('keeps tournament lifecycle actions guarded by the current view and safe DOM rendering', async () => {
+    const [app, page] = await Promise.all([readProjectFile('app.js'), readProjectFile('index.html')]);
+
+    expect(app).toContain('function renderTournamentList');
+    expect(app).toContain("/tournaments/${tournamentId}/action");
+    expect(app).toContain("isCurrentView('tournament-detail', authRevision, viewRevision, tournamentId)");
+    expect(app).toContain("action === 'cancel'");
+    expect(app).toContain("state.tournamentSearch");
+    expect(app).toContain('state.tournamentListError');
+    expect(app).toContain('state.tournamentDialogRevision === dialogRevision');
+    expect(app).toContain('state.registrationDialogRevision === dialogRevision');
+    expect(app).toContain("$('#td-status').className = 'status-badge status-unknown'");
+    expect(page).toContain('id="tournaments-list"');
+    expect(page).toContain('id="tournament-action-modal"');
+  });
 });

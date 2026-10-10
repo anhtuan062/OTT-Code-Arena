@@ -18,6 +18,13 @@ const state = {
   deletingBot: null,
   botDialogRevision: 0,
   deleteDialogRevision: 0,
+  tournaments: [],
+  tournamentSearch: '',
+  pendingTournamentAction: null,
+  tournamentActionRevision: 0,
+  tournamentListError: null,
+  tournamentDialogRevision: 0,
+  registrationDialogRevision: 0,
 };
 
 const $ = (selector, root = document) => root.querySelector(selector);
@@ -124,6 +131,9 @@ function closeModal(id) {
   state.modalReturnFocus = null;
   if (id === 'add-bot-modal') { state.botDialogRevision += 1; state.editingBot = null; clearBotFormError(); }
   if (id === 'delete-bot-modal') { state.deleteDialogRevision += 1; state.deletingBot = null; }
+  if (id === 'add-tourney-modal') { state.tournamentDialogRevision += 1; $('#tournament-form-error').textContent = ''; $('#tournament-form-error').hidden = true; }
+  if (id === 'register-bot-tourney-modal') { state.registrationDialogRevision += 1; $('#registration-form-error').textContent = ''; $('#registration-form-error').hidden = true; }
+  if (id === 'tournament-action-modal') { state.tournamentActionRevision += 1; state.pendingTournamentAction = null; }
 }
 
 function trapModalFocus(event) {
@@ -184,6 +194,18 @@ function navigate(view) {
   if (view === 'dashboard') void loadDashboard();
   if (view === 'bots') void loadBots();
   if (view === 'tournaments') void loadTournaments();
+}
+
+function openTournamentDialog() {
+  state.tournamentDialogRevision += 1;
+  $('#tournament-form-error').textContent = ''; $('#tournament-form-error').hidden = true;
+  openModal('add-tourney-modal');
+}
+
+function openRegistrationDialog() {
+  state.registrationDialogRevision += 1;
+  $('#registration-form-error').textContent = ''; $('#registration-form-error').hidden = true;
+  openModal('register-bot-tourney-modal');
 }
 
 function setAuthenticated(user, csrfToken) {
@@ -452,26 +474,45 @@ async function deleteBot() {
 }
 
 async function loadTournaments() {
-  const table = $('#tourneys-table tbody');
+  const list = $('#tournaments-list');
   const authRevision = state.authRevision;
   const viewRevision = state.viewRevision;
   state.loading.add('tournaments');
   state.error = null;
-  renderTableMessage(table, 'Loading tournaments…', 4);
+  state.tournamentListError = null;
+  renderMessage(list, 'Loading tournaments…');
   try {
     const tournaments = await request('/tournaments');
     if (!isCurrentView('tournaments', authRevision, viewRevision)) return;
-    clear(table);
-    if (!tournaments.length) return renderTableMessage(table, 'No tournaments yet. Create one to get started.', 4);
-    tournaments.forEach(tournament => {
-      const row = create('tr');
-      row.append(textCell(tournament.tournamentId), textCell(tournament.name));
-      const status = create('td'); status.appendChild(statusBadge(tournament.status)); row.appendChild(status);
-      const action = create('td'); action.appendChild(actionButton('View', () => viewTournament(tournament.tournamentId), `view:${tournament.tournamentId}`)); row.appendChild(action);
-      table.appendChild(row);
-    });
-  } catch (error) { if (isCurrentView('tournaments', authRevision, viewRevision)) { state.error = error.message || 'Unable to load tournaments.'; renderTableMessage(table, state.error, 4, loadTournaments); } }
+    state.tournaments = tournaments;
+    renderTournamentList();
+  } catch (error) { if (isCurrentView('tournaments', authRevision, viewRevision)) { state.error = error.message || 'Unable to load tournaments.'; state.tournamentListError = state.error; $('#tournaments-count').textContent = 'Tournaments unavailable'; renderMessage(list, state.error, loadTournaments); } }
   finally { state.loading.delete('tournaments'); }
+}
+
+function renderTournamentList() {
+  const list = $('#tournaments-list');
+  if (state.tournamentListError) { $('#tournaments-count').textContent = 'Tournaments unavailable'; return renderMessage(list, state.tournamentListError, loadTournaments); }
+  const query = state.tournamentSearch.trim().toLocaleLowerCase();
+  const tournaments = state.tournaments.filter(tournament => tournament.name.toLocaleLowerCase().includes(query));
+  clear(list);
+  $('#tournaments-count').textContent = state.tournaments.length === 1 ? '1 tournament' : `${state.tournaments.length} tournaments`;
+  if (!state.tournaments.length) return renderTournamentEmpty('No tournaments yet', 'Create a tournament to register bots and begin a competition.');
+  if (!tournaments.length) return renderTournamentEmpty('No matching tournaments', 'Try another name or clear the search field.', false);
+  tournaments.forEach(tournament => {
+    const card = create('article', { className: 'tournament-card' });
+    const heading = create('div'); heading.append(create('h3', { text: tournament.name }), statusBadge(tournament.status)); card.appendChild(heading);
+    const meta = create('div', { className: 'tournament-card-meta' });
+    meta.append(create('span', { text: 'Single round robin' }), create('span', { text: `${tournament.participants?.length || 0} participants` })); card.appendChild(meta);
+    const footer = create('div', { className: 'tournament-card-footer' }); footer.append(create('small', { text: tournament.tournamentId })); footer.appendChild(actionButton('View details', () => viewTournament(tournament.tournamentId), `view:${tournament.tournamentId}`, 'secondary-btn tournament-view-btn')); card.appendChild(footer); list.appendChild(card);
+  });
+}
+
+function renderTournamentEmpty(title, message, showAction = true) {
+  const list = $('#tournaments-list'); clear(list);
+  const empty = create('div', { className: 'ui-message' }); empty.append(create('strong', { className: 'bot-empty-title', text: title }), create('p', { className: 'bot-empty-copy', text: message }));
+  if (showAction) empty.appendChild(actionButton('Create tournament', openTournamentDialog, 'empty-create-tournament', 'primary-btn bot-empty-action'));
+  list.appendChild(empty);
 }
 
 async function submitNewBot() {
@@ -481,9 +522,17 @@ async function submitNewBot() {
 async function submitNewTournament() {
   const button = $('#submit-tournament');
   const authRevision = state.authRevision;
+  const viewRevision = state.viewRevision;
+  const dialogRevision = state.tournamentDialogRevision;
+  const name = $('#new-tourney-name').value.trim();
+  const error = $('#tournament-form-error'); error.textContent = ''; error.hidden = true;
+  if (!name || name.length > 100) { error.textContent = 'Tournament name must be between 1 and 100 characters.'; error.hidden = false; return; }
   await runPending('create-tournament', button, async () => {
-    const result = await api('/tournaments', { method: 'POST', body: JSON.stringify({ name: $('#new-tourney-name').value }) });
-    if (!state.user || state.authRevision !== authRevision) return;
+    let result;
+    try { result = await api('/tournaments', { method: 'POST', body: JSON.stringify({ name }) }); }
+    catch (requestError) { if (state.user && state.authRevision === authRevision && state.tournamentDialogRevision === dialogRevision) { error.textContent = requestError.message || 'Unable to create tournament.'; error.hidden = false; } throw requestError; }
+    if (!state.user || state.authRevision !== authRevision || state.viewRevision !== viewRevision) return;
+    if (state.tournamentDialogRevision !== dialogRevision) return;
     closeModal('add-tourney-modal'); $('#new-tourney-name').value = '';
     showToast('Tournament created.', 'success'); await viewTournament(result.tournamentId);
   });
@@ -495,9 +544,8 @@ async function viewTournament(id) {
   await refreshTournamentDetail();
 }
 
-function appendTournamentAction(container, tournamentId, authRevision, label, action) {
-  const button = actionButton(label, () => tournamentAction(tournamentId, authRevision, action), `tournament:${tournamentId}:${label}`, 'primary-btn');
-  button.style.padding = '8px';
+function appendTournamentAction(container, tournamentId, authRevision, viewRevision, label, action, confirmation = false) {
+  const button = actionButton(label, () => confirmation ? confirmTournamentAction(tournamentId, authRevision, viewRevision, action, label) : tournamentAction(tournamentId, authRevision, viewRevision, action), `tournament:${tournamentId}:${action}`, `secondary-btn tournament-action${action === 'cancel' ? ' tournament-action-danger' : ''}`);
   container.appendChild(button);
 }
 
@@ -522,9 +570,13 @@ async function refreshTournamentDetail() {
 
     const actions = $('#td-actions'); clear(actions);
     const register = $('#btn-register-bot'); register.hidden = tournament.status !== 'registration_open';
-    if (tournament.status === 'draft') appendTournamentAction(actions, tournamentId, authRevision, 'Open Registration', 'open_registration');
-    if (tournament.status === 'registration_open') appendTournamentAction(actions, tournamentId, authRevision, 'Generate Schedule', 'generate_schedule');
-    if (tournament.status === 'running') appendTournamentAction(actions, tournamentId, authRevision, 'Run All Matches', 'run_all');
+    if (tournament.status === 'draft') appendTournamentAction(actions, tournamentId, authRevision, viewRevision, 'Open registration', 'open_registration');
+    if (tournament.status === 'registration_open') {
+      if (tournament.rounds.length) appendTournamentAction(actions, tournamentId, authRevision, viewRevision, 'Start tournament', 'start');
+      else appendTournamentAction(actions, tournamentId, authRevision, viewRevision, 'Generate schedule', 'generate_schedule');
+    }
+    if (tournament.status === 'running') appendTournamentAction(actions, tournamentId, authRevision, viewRevision, 'Run all matches', 'run_all', true);
+    if (tournament.status === 'draft' || tournament.status === 'registration_open' || tournament.status === 'running') appendTournamentAction(actions, tournamentId, authRevision, viewRevision, 'Cancel tournament', 'cancel', true);
 
     renderStandings(tournament.standings);
     renderSchedule(tournament);
@@ -537,7 +589,11 @@ async function refreshTournamentDetail() {
     } else $('#td-stats').textContent = '';
   } catch (error) {
     if (isCurrentView('tournament-detail', authRevision, viewRevision, tournamentId)) {
-      $('#td-name').textContent = 'Tournament unavailable'; renderMessage($('#td-schedule'), error.message || 'Unable to load tournament.', refreshTournamentDetail);
+      $('#td-name').textContent = 'Tournament unavailable';
+      $('#td-status').className = 'status-badge status-unknown'; $('#td-status').textContent = 'UNAVAILABLE';
+      $('#td-pcount').textContent = '0'; clear($('#td-participants')); clear($('#td-actions')); clear($('#td-standings tbody')); $('#td-stats').textContent = '';
+      $('#btn-register-bot').hidden = true;
+      renderMessage($('#td-schedule'), error.message || 'Unable to load tournament.', refreshTournamentDetail);
     }
   }
 }
@@ -556,8 +612,8 @@ function renderSchedule(tournament) {
   const schedule = $('#td-schedule'); clear(schedule);
   if (!tournament.rounds.length) return renderMessage(schedule, 'A schedule will appear after registration is complete.');
   tournament.rounds.forEach(round => {
-    const section = create('section');
-    const heading = create('h4', { text: `Round ${round.roundNumber}` }); heading.style.color = 'var(--text-secondary)'; heading.style.borderBottom = '1px solid var(--border-light)'; heading.style.paddingBottom = '5px'; heading.style.marginBottom = '10px'; section.appendChild(heading);
+    const section = create('section', { className: 'schedule-round' });
+    const heading = create('h4', { text: `Round ${round.roundNumber}` }); section.appendChild(heading);
     const table = create('table', { className: 'data-table' });
     const head = create('thead'); const headRow = create('tr'); ['Match', 'Player A', 'Player B', 'Status', 'Winner', 'Action'].forEach(label => headRow.appendChild(textCell(label, 'th'))); head.appendChild(headRow);
     const body = create('tbody');
@@ -573,10 +629,18 @@ function renderSchedule(tournament) {
   });
 }
 
-async function tournamentAction(tournamentId, authRevision, action) {
+function confirmTournamentAction(tournamentId, authRevision, viewRevision, action, label) {
+  state.pendingTournamentAction = { tournamentId, authRevision, viewRevision, action };
+  state.tournamentActionRevision += 1;
+  $('#tournament-action-title').textContent = label.toUpperCase();
+  $('#tournament-action-copy').textContent = action === 'cancel' ? 'Cancel this tournament? This cannot be undone from the workspace.' : 'Queue all remaining matches for execution? Match execution follows the server security policy.';
+  $('#confirm-tournament-action').textContent = label;
+  openModal('tournament-action-modal');
+}
+
+async function tournamentAction(tournamentId, authRevision, viewRevision, action) {
   await api(`/tournaments/${tournamentId}/action`, { method: 'POST', body: JSON.stringify({ action }) });
-  if (action === 'generate_schedule') await api(`/tournaments/${tournamentId}/action`, { method: 'POST', body: JSON.stringify({ action: 'start' }) });
-  if (state.user && state.authRevision === authRevision && state.tournamentId === tournamentId) {
+  if (isCurrentView('tournament-detail', authRevision, viewRevision, tournamentId)) {
     showToast(`Action ${action.replaceAll('_', ' ')} successful.`, 'success');
     await refreshTournamentDetail();
   }
@@ -586,9 +650,17 @@ async function submitTournamentRegistration() {
   const button = $('#submit-registration');
   const tournamentId = state.tournamentId;
   const authRevision = state.authRevision;
+  const viewRevision = state.viewRevision;
+  const dialogRevision = state.registrationDialogRevision;
+  const participantName = $('#reg-part-name').value.trim();
+  const botId = $('#reg-bot-select').value;
+  const error = $('#registration-form-error'); error.textContent = ''; error.hidden = true;
+  if (!participantName || !botId) { error.textContent = 'Choose a bot and enter a participant name.'; error.hidden = false; return; }
   await runPending('register-participant', button, async () => {
-    await api(`/tournaments/${tournamentId}/register`, { method: 'POST', body: JSON.stringify({ participantName: $('#reg-part-name').value, botId: $('#reg-bot-select').value }) });
-    if (!state.user || state.authRevision !== authRevision || state.tournamentId !== tournamentId) return;
+    try { await api(`/tournaments/${tournamentId}/register`, { method: 'POST', body: JSON.stringify({ participantName, botId }) }); }
+    catch (requestError) { if (isCurrentView('tournament-detail', authRevision, viewRevision, tournamentId) && state.registrationDialogRevision === dialogRevision) { error.textContent = requestError.message || 'Unable to register bot.'; error.hidden = false; } throw requestError; }
+    if (!isCurrentView('tournament-detail', authRevision, viewRevision, tournamentId)) return;
+    if (state.registrationDialogRevision !== dialogRevision) return;
     closeModal('register-bot-tourney-modal'); $('#reg-part-name').value = ''; showToast('Registered successfully.', 'success'); await refreshTournamentDetail();
   });
 }
@@ -597,15 +669,16 @@ async function populateBotSelect() {
   const select = $('#reg-bot-select'); clear(select);
   const authRevision = state.authRevision;
   const tournamentId = state.tournamentId;
+  const viewRevision = state.viewRevision;
   try {
     const bots = await request('/bots');
-    if (!state.user || state.authRevision !== authRevision || state.tournamentId !== tournamentId) return false;
+    if (!isCurrentView('tournament-detail', authRevision, viewRevision, tournamentId)) return false;
     if (!bots.length) { select.appendChild(create('option', { text: 'No bots available', attrs: { value: '' } })); return true; }
     bots.forEach(bot => select.appendChild(create('option', { text: `${bot.name} (${bot.id})`, attrs: { value: bot.id } })));
   } catch {
-    if (state.user && state.authRevision === authRevision && state.tournamentId === tournamentId) select.appendChild(create('option', { text: 'Unable to load bots', attrs: { value: '' } }));
+    if (isCurrentView('tournament-detail', authRevision, viewRevision, tournamentId)) select.appendChild(create('option', { text: 'Unable to load bots', attrs: { value: '' } }));
   }
-  return state.user && state.authRevision === authRevision && state.tournamentId === tournamentId;
+  return isCurrentView('tournament-detail', authRevision, viewRevision, tournamentId);
 }
 
 const PIECE_TYPES = { dam: 'icon-piece-dam', la: 'icon-piece-la', keo: 'icon-piece-keo' };
@@ -665,12 +738,14 @@ function bindEvents() {
   $('#login-form').addEventListener('submit', event => { event.preventDefault(); void runPending('login', $('#login-submit'), async () => { const result = await api('/auth/login', { method: 'POST', body: JSON.stringify({ username: $('#login-username').value, password: $('#login-password').value }) }); setAuthenticated(result.user, result.csrfToken); }); });
   $('#register-form').addEventListener('submit', event => { event.preventDefault(); void runPending('register', $('#register-submit'), async () => { const result = await api('/auth/register', { method: 'POST', body: JSON.stringify({ username: $('#register-username').value, password: $('#register-password').value }) }); setAuthenticated(result.user, result.csrfToken); }); });
   $('#logout-button').addEventListener('click', () => void runPending('logout', $('#logout-button'), async () => { try { await api('/auth/logout', { method: 'POST' }); } finally { showAuthScreen(); } }));
-  $('#open-bot-modal').addEventListener('click', () => openBotDialog()); $('#open-tournament-modal').addEventListener('click', () => openModal('add-tourney-modal'));
-  $('#dashboard-create-bot').addEventListener('click', () => openBotDialog()); $('#dashboard-create-tournament').addEventListener('click', () => openModal('add-tourney-modal'));
+  $('#open-bot-modal').addEventListener('click', () => openBotDialog()); $('#open-tournament-modal').addEventListener('click', openTournamentDialog);
+  $('#dashboard-create-bot').addEventListener('click', () => openBotDialog()); $('#dashboard-create-tournament').addEventListener('click', openTournamentDialog);
   $('#bot-search').addEventListener('input', event => { state.botSearch = event.target.value; renderBotList(); });
+  $('#tournament-search').addEventListener('input', event => { state.tournamentSearch = event.target.value; renderTournamentList(); });
   $('#confirm-delete-bot').addEventListener('click', () => void deleteBot());
+  $('#confirm-tournament-action').addEventListener('click', () => { const pending = state.pendingTournamentAction; if (!pending) return; const revision = state.tournamentActionRevision; void runPending(`tournament:${pending.tournamentId}:${pending.action}`, $('#confirm-tournament-action'), async () => { await tournamentAction(pending.tournamentId, pending.authRevision, pending.viewRevision, pending.action); if (state.tournamentActionRevision === revision) closeModal('tournament-action-modal'); }); });
   $('#mobile-menu-toggle').addEventListener('click', toggleMobileNavigation); $('#sidebar-backdrop').addEventListener('click', closeMobileNavigation);
-  $('#back-to-tournaments').addEventListener('click', () => navigate('tournaments')); $('#btn-register-bot').addEventListener('click', async () => { if (await populateBotSelect()) openModal('register-bot-tourney-modal'); });
+  $('#back-to-tournaments').addEventListener('click', () => navigate('tournaments')); $('#btn-register-bot').addEventListener('click', async () => { if (await populateBotSelect()) openRegistrationDialog(); });
   $('#close-replay').addEventListener('click', closeReplay); $('#submit-bot').addEventListener('click', () => void submitNewBot()); $('#submit-tournament').addEventListener('click', () => void submitNewTournament()); $('#submit-registration').addEventListener('click', () => void submitTournamentRegistration());
   document.querySelectorAll('[data-close-modal]').forEach(button => button.addEventListener('click', () => closeModal(button.dataset.closeModal)));
   document.querySelectorAll('.modal-overlay').forEach(modal => modal.addEventListener('click', event => { if (event.target === modal) closeModal(modal.id); }));

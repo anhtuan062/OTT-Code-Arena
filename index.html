@@ -104,6 +104,10 @@
     .bot-grid .ui-message { grid-column: 1 / -1; min-height: 164px; display: grid; place-content: center; border: 1px dashed #cbd8ce; border-radius: 15px; background: #fbfdfb; }.bot-empty-title { font-size: 1rem; color: var(--text-primary); }.bot-empty-copy { max-width: 420px; margin: 8px auto 15px; color: var(--text-secondary); line-height: 1.5; }.bot-empty-action { width: auto; justify-self: center; padding: 9px 13px; }
     .dialog-copy { margin: -2px 0 19px; color: var(--text-secondary); font-size: .83rem; line-height: 1.5; }.field-help { display: block; margin-top: 6px; color: var(--text-faint); font-size: .69rem; line-height: 1.45; }.field-help code { color: var(--text-secondary); }.form-error { margin: 0 0 12px; padding: 9px 10px; border: 1px solid #fecaca; border-radius: 9px; background: #fff4f2; color: #b42318; font-size: .76rem; line-height: 1.4; }.dialog-actions { display: flex; justify-content: flex-end; gap: 9px; }.dialog-actions .secondary-btn, .dialog-actions .primary-btn, .danger-btn { width: auto; min-width: 92px; padding: 10px 13px; }.danger-btn { border: 1px solid #b42318; border-radius: 10px; background: #b42318; color: #fff; font: inherit; font-size: .8rem; font-weight: 700; }.danger-btn:hover { background: #8e1d13; }.danger-btn:disabled { cursor: not-allowed; opacity: .6; }
     @media (max-width: 640px) { .workspace-header { align-items: flex-start; flex-direction: column; gap: 18px; }.workspace-primary-action { width: 100%; }.bots-toolbar { align-items: stretch; flex-direction: column; gap: 10px; }.bot-search { max-width: none; }.bots-count { white-space: normal; }.bot-grid { grid-template-columns: 1fr; }.bot-card { padding: 17px; }.bot-card-footer { align-items: flex-start; flex-direction: column; }.bot-actions { width: 100%; }.bot-action { flex: 1; justify-content: center; }.dialog-actions { flex-direction: column-reverse; }.dialog-actions .secondary-btn, .dialog-actions .primary-btn, .danger-btn { width: 100%; } }
+    /* Phase 3B: tournament workspace */
+    .tournament-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(290px, 1fr)); gap: 14px; min-height: 164px; }.tournament-card { display: grid; gap: 18px; min-width: 0; padding: 20px; border: 1px solid var(--border-light); border-radius: 15px; background: #fff; box-shadow: 0 5px 16px rgba(30,43,34,.035); }.tournament-card h3 { overflow-wrap: anywhere; }.tournament-card-meta { display: flex; flex-wrap: wrap; gap: 8px; color: var(--text-secondary); font-size: .75rem; }.tournament-card-footer { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding-top: 14px; border-top: 1px solid var(--border-light); }.tournament-card-footer small { color: var(--text-faint); }.tournament-view-btn { width: auto; padding: 8px 11px; font-size: .75rem; }
+    .tournament-detail-hero { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 22px; align-items: end; padding-bottom: 24px; border-bottom: 1px solid var(--border-light); }.tournament-detail-title { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }.tournament-detail-title h2 { overflow-wrap: anywhere; }.tournament-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }.tournament-action { width: auto; padding: 9px 12px; font-size: .75rem; }.tournament-action-danger { border-color: #f4cccc; color: #b42318; }.tournament-overview { display: grid; grid-template-columns: minmax(250px, .8fr) minmax(0, 1.2fr); gap: 16px; margin-top: 22px; }.tournament-panel { min-width: 0; padding: 20px; border: 1px solid var(--border-light); border-radius: 15px; background: #fff; }.tournament-panel-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; }.participant-list { display: grid; gap: 0; margin: 15px 0 0; padding: 0; list-style: none; }.participant-list li { display: flex; justify-content: space-between; gap: 12px; padding: 11px 0; border-bottom: 1px solid var(--border-light); overflow-wrap: anywhere; }.participant-list small { color: var(--text-faint); }.detail-register { width: auto; margin-top: 15px; padding: 9px 12px; }.tournament-schedule { display: grid; gap: 14px; margin-top: 22px; }.schedule-round { overflow-x: auto; padding: 19px; border: 1px solid var(--border-light); border-radius: 15px; background: #fff; }.schedule-round h4 { margin-bottom: 12px; color: var(--text-secondary); }
+    @media (max-width: 700px) { .tournament-detail-hero { grid-template-columns: 1fr; align-items: start; }.tournament-actions { justify-content: flex-start; }.tournament-overview { grid-template-columns: 1fr; }.tournament-card-footer { align-items: flex-start; flex-direction: column; }.tournament-view-btn, .detail-register { width: 100%; } }
   </style>
 </head>
 <body>
@@ -214,50 +218,29 @@
   </div>
 
   <!-- TOURNAMENTS LIST -->
-  <div id="tournaments" class="page">
-    <div class="page-header">
-      <h2>Tournaments</h2>
-      <button class="primary-btn" id="open-tournament-modal" type="button" style="width: auto; padding: 10px 20px;">Create Tournament</button>
+  <div id="tournaments" class="page tournaments-page">
+    <div class="workspace-header">
+      <div><p class="section-kicker">TOURNAMENT WORKSPACE</p><h2>Run your competitions</h2><p>Create a private round-robin tournament, register your approved bots, then schedule and run matches.</p></div>
+      <button class="primary-btn workspace-primary-action" id="open-tournament-modal" type="button">Create tournament</button>
     </div>
-    <table class="data-table" id="tourneys-table">
-      <thead><tr><th>ID</th><th>Name</th><th>Status</th><th>Action</th></tr></thead>
-      <tbody></tbody>
-    </table>
+    <div class="bots-toolbar"><label class="bot-search" for="tournament-search"><span class="visually-hidden">Search tournaments by name</span><input id="tournament-search" type="search" placeholder="Search tournaments by name" autocomplete="off"></label><span id="tournaments-count" class="bots-count">Loading tournaments</span></div>
+    <section id="tournaments-list" class="tournament-grid" aria-live="polite" aria-label="Your tournaments"></section>
   </div>
 
   <!-- TOURNAMENT DETAILS -->
   <div id="tournament-detail" class="page">
-    <div class="page-header">
-      <div style="display: flex; align-items: center; gap: 15px;">
-        <button class="secondary-btn" id="back-to-tournaments" type="button" aria-label="Back to tournaments" style="width: auto; padding: 8px;">
-          <svg viewBox="0 0 24 24"><use href="#icon-arrow-left"></use></svg>
-        </button>
-        <h2 id="td-name">Loading...</h2>
-        <span id="td-status" class="status-badge">...</span>
-      </div>
-      <div id="td-actions" style="display: flex; gap: 10px;"></div>
+    <div class="tournament-detail-hero">
+      <div><button class="secondary-btn tournament-view-btn" id="back-to-tournaments" type="button">Back to tournaments</button><div class="tournament-detail-title"><h2 id="td-name">Loading tournament…</h2><span id="td-status" class="status-badge">Loading</span></div><p class="dialog-copy">Tournament configuration, participants, standings, and match schedule.</p></div>
+      <div id="td-actions" class="tournament-actions" aria-label="Tournament actions"></div>
     </div>
-
-    <div class="card-grid" style="grid-template-columns: 1fr 2fr;">
-      <div class="card">
-        <h3>Participants (<span id="td-pcount">0</span>)</h3>
-        <ul id="td-participants" style="list-style: none; margin-top: 15px; padding: 0;"></ul>
-        <button id="btn-register-bot" type="button" class="secondary-btn" style="margin-top: 15px; display: none;">Register Bot</button>
-      </div>
-      <div class="card" style="overflow-x: auto;">
-        <h3 style="display: flex; justify-content: space-between;">
-          Standings
-          <span id="td-stats" style="font-size: 0.8rem; font-weight: normal; color: var(--text-secondary);"></span>
-        </h3>
-        <table class="data-table" id="td-standings">
+    <div class="tournament-overview">
+      <section class="tournament-panel"><div class="tournament-panel-head"><h3>Participants (<span id="td-pcount">0</span>)</h3></div><ul id="td-participants" class="participant-list"></ul><button id="btn-register-bot" type="button" class="secondary-btn detail-register" hidden>Register bot</button></section>
+      <section class="tournament-panel" style="overflow-x:auto;"><div class="tournament-panel-head"><h3>Standings</h3><span id="td-stats" class="bots-count"></span></div><table class="data-table" id="td-standings">
           <thead><tr><th>Rank</th><th>Name</th><th>Pld</th><th>W</th><th>D</th><th>L</th><th>Pts</th></tr></thead>
           <tbody></tbody>
-        </table>
-      </div>
+        </table></section>
     </div>
-
-    <h3 style="margin-top: 30px;">Schedule & Matches</h3>
-    <div id="td-schedule" style="margin-top: 15px; display: flex; flex-direction: column; gap: 15px;"></div>
+    <section class="tournament-schedule"><h3>Schedule & matches</h3><div id="td-schedule"></div></section>
   </div>
 
   <!-- REPLAY VIEWER -->
@@ -336,8 +319,10 @@
   <div class="modal-overlay" id="add-tourney-modal" role="dialog" aria-modal="true" aria-labelledby="add-tourney-title" aria-hidden="true">
     <div class="modal-box">
       <div class="modal-head"><h4 id="add-tourney-title">CREATE TOURNAMENT</h4><button class="modal-close" type="button" data-close-modal="add-tourney-modal" aria-label="Close create tournament dialog">×</button></div>
-      <div class="form-group"><label for="new-tourney-name">Tournament Name</label><input type="text" id="new-tourney-name" class="input-shell" style="width: 100%"></div>
-      <button class="primary-btn" id="submit-tournament" type="button">Create</button>
+      <p class="dialog-copy">Create a private single round-robin tournament. You can add your saved bot configurations during registration.</p>
+      <div class="form-group"><label for="new-tourney-name">Tournament name</label><input type="text" id="new-tourney-name" class="input-shell" maxlength="100" style="width: 100%" autocomplete="off"></div>
+      <p id="tournament-form-error" class="form-error" role="alert" hidden></p>
+      <div class="dialog-actions"><button class="secondary-btn" type="button" data-close-modal="add-tourney-modal">Cancel</button><button class="primary-btn" id="submit-tournament" type="button">Create tournament</button></div>
     </div>
   </div>
 
@@ -349,8 +334,13 @@
         <label for="reg-bot-select">Select Bot</label>
         <select id="reg-bot-select" style="width: 100%; padding: 10px; border-radius: 8px; border: 1px solid var(--border-light);"></select>
       </div>
-      <button class="primary-btn" id="submit-registration" type="button">Register</button>
+      <p id="registration-form-error" class="form-error" role="alert" hidden></p>
+      <div class="dialog-actions"><button class="secondary-btn" type="button" data-close-modal="register-bot-tourney-modal">Cancel</button><button class="primary-btn" id="submit-registration" type="button">Register bot</button></div>
     </div>
+  </div>
+
+  <div class="modal-overlay" id="tournament-action-modal" role="dialog" aria-modal="true" aria-labelledby="tournament-action-title" aria-hidden="true">
+    <div class="modal-box confirmation-dialog"><div class="modal-head"><h4 id="tournament-action-title">CONFIRM ACTION</h4><button class="modal-close" type="button" data-close-modal="tournament-action-modal" aria-label="Close action confirmation">×</button></div><p id="tournament-action-copy" class="dialog-copy"></p><div class="dialog-actions"><button class="secondary-btn" type="button" data-close-modal="tournament-action-modal">Cancel</button><button id="confirm-tournament-action" class="danger-btn" type="button">Continue</button></div></div>
   </div>
 
   <!-- TOASTS -->
