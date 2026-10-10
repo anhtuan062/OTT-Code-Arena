@@ -12,13 +12,18 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
           cache: 'npm'
+
       - run: npm ci
+
       - run: npm run build
-      - run: npx vitest run --pool=forks --maxWorkers=1 --minWorkers=1
+
+      - name: Run unit and integration tests
+        run: npx vitest run --pool=threads --maxWorkers=1 --minWorkers=1
         env:
           NODE_ENV: test
 
@@ -28,11 +33,14 @@ jobs:
     needs: unit-tests
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
           cache: 'npm'
+
       - run: npm ci
+
       - run: npm run build
 
       - name: Verify Docker is available
