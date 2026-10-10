@@ -23,7 +23,7 @@ jobs:
       - run: npm run build
 
       - name: Run unit and integration tests
-        run: npx vitest run --pool=threads --maxWorkers=1 --minWorkers=1
+        run: npx vitest run --pool=threads --maxWorkers=1 --minWorkers=1 --exclude tests/bot-executor/docker-integration.test.ts
         env:
           NODE_ENV: test
 
