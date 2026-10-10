@@ -25,6 +25,13 @@ const state = {
   tournamentListError: null,
   tournamentDialogRevision: 0,
   registrationDialogRevision: 0,
+  replayTimer: null,
+  replaySpeed: 800,
+  replayRevision: 0,
+  replayMatchId: null,
+  replayContext: null,
+  replayLoading: false,
+  replayPlaybackToken: 0,
 };
 
 const $ = (selector, root = document) => root.querySelector(selector);
@@ -176,6 +183,7 @@ function isCurrentView(view, authRevision, viewRevision, tournamentId) {
 }
 
 function navigate(view) {
+  if (view !== 'replay-view') stopReplayPlayback();
   const target = document.getElementById(view);
   if (!target) return;
   state.activeView = view;
@@ -222,12 +230,15 @@ function setAuthenticated(user, csrfToken) {
 }
 
 function showAuthScreen() {
+  stopReplayPlayback();
   state.authRevision += 1;
   state.viewRevision += 1;
   state.user = null;
   state.csrfToken = null;
   state.tournamentId = null;
   state.replay = null;
+  state.replayContext = null;
+  state.replayMatchId = null;
   document.querySelectorAll('.modal-overlay.open').forEach(modal => {
     modal.classList.remove('open');
     modal.setAttribute('aria-hidden', 'true');
@@ -682,55 +693,195 @@ async function populateBotSelect() {
 }
 
 const PIECE_TYPES = { dam: 'icon-piece-dam', la: 'icon-piece-la', keo: 'icon-piece-keo' };
-function closeReplay() { navigate('tournament-detail'); state.replay = null; }
+const PIECE_LABELS = { dam: 'Rock', la: 'Paper', keo: 'Scissors' };
+function stopReplayPlayback() {
+  if (state.replayTimer) clearTimeout(state.replayTimer);
+  state.replayTimer = null;
+  state.replayPlaybackToken = (state.replayPlaybackToken || 0) + 1;
+  const button = $('#btn-replay-play');
+  if (button) {
+    button.textContent = 'Play';
+    button.setAttribute('aria-pressed', 'false');
+  }
+}
+
+function closeReplay() {
+  stopReplayPlayback();
+  state.replay = null;
+  state.replayContext = null;
+  state.replayMatchId = null;
+  state.replayMoveIndex = -1;
+  navigate('tournament-detail');
+}
+
+function setReplayLoading(isLoading) {
+  state.replayLoading = isLoading;
+  const loading = $('#replay-loading');
+  const content = $('#replay-content');
+  if (loading) loading.hidden = !isLoading;
+  if (content) content.hidden = isLoading;
+}
+
+function formatReplayReason(reason) {
+  return String(reason || 'unknown').replaceAll('_', ' ');
+}
+
+function replayResultLabel(replay) {
+  if (replay.winner === 'A') return 'Player A won';
+  if (replay.winner === 'B') return 'Player B won';
+  if (replay.winner === 'draw') return 'Draw';
+  return 'No winner';
+}
+
+function isReplayShape(replay) {
+  return replay && replay.initialState && Number(replay.initialState.boardSize) === 9
+    && Array.isArray(replay.initialState.pieces) && Array.isArray(replay.moves)
+    && replay.finalState && Number(replay.finalState.boardSize) === 9;
+}
+
+function renderReplaySummary(replay) {
+  $('#r-p1-name').textContent = 'PLAYER A';
+  $('#r-p2-name').textContent = 'PLAYER B';
+  $('#r-result-text').textContent = `${replayResultLabel(replay)} · ${formatReplayReason(replay.terminationReason)}`;
+  $('#r-winner').textContent = replayResultLabel(replay);
+  $('#r-termination').textContent = formatReplayReason(replay.terminationReason);
+  $('#r-protocol').textContent = String(replay.protocolVersion || 'unknown');
+}
+
 async function playReplay(tournamentId, matchId) {
+  stopReplayPlayback();
   const authRevision = state.authRevision;
-  const viewRevision = state.viewRevision;
-  const replay = await api(`/tournaments/${tournamentId}/replays/${matchId}`);
-  if (!isCurrentView('tournament-detail', authRevision, viewRevision, tournamentId)) return;
-  state.replay = replay; state.replayMoveIndex = -1;
-  $('#r-p1-name').textContent = 'PLAYER A'; $('#r-p2-name').textContent = 'PLAYER B';
-  const result = replay.winner === 'A' ? 'PLAYER A WON' : replay.winner === 'B' ? 'PLAYER B WON' : 'DRAW';
-  $('#r-result-text').textContent = `Result: ${result} (${replay.terminationReason || 'unknown'})`;
-  navigate('replay-view'); goToReplayTurn(-1);
+  const sourceViewRevision = state.viewRevision;
+  const replayRevision = ++state.replayRevision;
+  state.replayContext = { tournamentId, matchId, authRevision, sourceViewRevision };
+  state.replay = null;
+  state.replayMatchId = matchId;
+  state.replayMoveIndex = -1;
+  $('#replay-error').hidden = true;
+  setReplayLoading(true);
+  navigate('replay-view');
+  const replayViewRevision = state.viewRevision;
+  let replay;
+  try {
+    replay = await api(`/tournaments/${tournamentId}/replays/${matchId}`);
+    if (!isReplayShape(replay)) throw new Error('Replay data is invalid.');
+  }
+  catch (error) {
+    if (state.authRevision === authRevision && state.replayRevision === replayRevision && state.activeView === 'replay-view'
+      && state.replayContext?.tournamentId === tournamentId && state.replayContext?.matchId === matchId) {
+      setReplayLoading(false);
+      $('#replay-content').hidden = true;
+      $('#replay-error-message').textContent = error.message || 'Unable to load replay.';
+      $('#replay-error').hidden = false;
+    }
+    return;
+  }
+  if (!state.user || state.authRevision !== authRevision || state.replayRevision !== replayRevision
+    || state.activeView !== 'replay-view' || state.viewRevision !== replayViewRevision
+    || state.tournamentId !== tournamentId || state.replayContext?.matchId !== matchId) return;
+  state.replay = replay;
+  state.replayContext.replayViewRevision = replayViewRevision;
+  renderReplaySummary(replay);
+  setReplayLoading(false);
+  goToReplayTurn(-1);
+}
+
+function retryReplay() {
+  if (!state.replayContext) return;
+  void playReplay(state.replayContext.tournamentId, state.replayContext.matchId);
 }
 
 function buildStateAt(moveIndex) {
-  if (!state.replay) return null;
-  const board = JSON.parse(JSON.stringify(state.replay.initialState));
+  if (!state.replay || !state.replay.initialState || !Array.isArray(state.replay.initialState.pieces)) return null;
+  const board = { ...state.replay.initialState, pieces: state.replay.initialState.pieces.map(piece => ({ ...piece })) };
   for (let index = 0; index <= moveIndex; index += 1) {
     const move = state.replay.moves[index]; if (!move) continue;
-    const pieceId = Object.keys(board.pieces).find(id => board.pieces[id].row === move.from.row && board.pieces[id].col === move.from.col);
-    if (!pieceId) continue;
-    const target = board.board[move.to.row][move.to.col]; if (target) delete board.pieces[target];
-    board.board[move.from.row][move.from.col] = null; board.pieces[pieceId].row = move.to.row; board.pieces[pieceId].col = move.to.col; board.board[move.to.row][move.to.col] = pieceId;
+    const piece = board.pieces.find(candidate => candidate.id === move.pieceId);
+    if (!piece || !move.to) continue;
+    if (move.captures) board.pieces = board.pieces.filter(candidate => candidate.id !== move.captures);
+    piece.row = move.to.row; piece.col = move.to.col;
   }
   return board;
 }
 
 function renderReplayBoard(board) {
   const element = $('#r-board'); clear(element);
-  for (let row = 0; row < 9; row += 1) for (let col = 0; col < 9; col += 1) {
-    const cell = create('div', { className: 'cell' });
+  const lastMove = state.replayMoveIndex >= 0 ? state.replay.moves[state.replayMoveIndex] : null;
+  const boardSize = Number(board.boardSize) === 9 ? 9 : 0;
+  if (!boardSize) {
+    element.appendChild(create('p', { className: 'ui-message', text: 'This replay has an unsupported board size.' }));
+    return;
+  }
+  const columns = 'abcdefghi';
+  for (let row = 0; row < boardSize; row += 1) for (let col = 0; col < boardSize; col += 1) {
+    const coordinate = `${columns[col]}${row + 1}`;
+    const cell = create('div', { className: 'replay-cell', attrs: { role: 'gridcell', 'aria-label': `${coordinate}, empty` } });
+    if (lastMove?.pieceId && lastMove.from?.row === row && lastMove.from?.col === col) cell.classList.add('move-from');
+    if (lastMove?.pieceId && lastMove.to?.row === row && lastMove.to?.col === col) cell.classList.add('move-to');
     if ((row === 0 && col === 0) || (row === 8 && col === 8)) { cell.classList.add('goal'); const flag = create('span', { className: 'goal-flag' }); flag.appendChild(icon('icon-flag')); cell.appendChild(flag); }
-    const id = board.board[row][col]; const piece = id && board.pieces[id];
-    if (piece) { const token = create('span', { className: `piece player${piece.player === 'A' ? '1' : '2'}` }); token.appendChild(icon(PIECE_TYPES[piece.type])); cell.appendChild(token); }
+    const piece = board.pieces.find(candidate => candidate.row === row && candidate.col === col);
+    if (piece) {
+      const label = `Player ${piece.player}, ${PIECE_LABELS[piece.type]}`;
+      const token = create('span', { className: `replay-piece replay-player-${piece.player.toLowerCase()}`, text: piece.type === 'dam' ? 'R' : piece.type === 'la' ? 'P' : 'S', attrs: { 'aria-label': label, title: label } });
+      cell.setAttribute('aria-label', `${coordinate}, ${label}`);
+      cell.appendChild(token);
+    }
     element.appendChild(cell);
   }
 }
 
 function goToReplayTurn(index) {
-  if (!state.replay) return;
+  if (!state.replay || state.activeView !== 'replay-view') return;
   state.replayMoveIndex = Math.max(-1, Math.min(index, state.replay.moves.length - 1));
-  $('#r-turn-display').textContent = `${state.replayMoveIndex + 1} / ${state.replay.moves.length}`;
+  $('#r-turn-display').textContent = `${Math.max(0, state.replayMoveIndex + 1)} / ${state.replay.moves.length}`;
   const board = buildStateAt(state.replayMoveIndex); if (board) renderReplayBoard(board);
+  renderReplayTimeline();
+  const move = state.replayMoveIndex >= 0 ? state.replay.moves[state.replayMoveIndex] : null;
+  $('#r-current-move').textContent = move?.pieceId
+    ? `Turn ${move.turn}: ${replayCoordinate(move.from)} to ${replayCoordinate(move.to)}`
+    : state.replayMoveIndex >= 0 ? `Turn ${move.turn}: no applied move` : 'Initial position';
 }
 
 function setupReplayCoordinates() {
   const header = $('#coord-header'); const side = $('#coord-side'); clear(header); clear(side);
-  header.appendChild(create('div', { className: 'corner' }));
-  'abcdefghi'.split('').forEach(column => { const item = create('div', { className: 'coord', text: column }); item.style.width = 'min(6.8vw, 61px)'; header.appendChild(item); });
-  Array.from({ length: 9 }, (_, index) => index + 1).forEach(row => { const item = create('div', { className: 'coord', text: row }); item.style.height = 'min(6.8vw, 61px)'; side.appendChild(item); });
+  'abcdefghi'.split('').forEach(column => header.appendChild(create('span', { className: 'coord', text: column, attrs: { 'aria-hidden': 'true' } })));
+  Array.from({ length: 9 }, (_, index) => index + 1).forEach(row => side.appendChild(create('span', { className: 'coord', text: row, attrs: { 'aria-hidden': 'true' } })));
+}
+
+function replayCoordinate(position) { return position ? `${'abcdefghi'[position.col] || '?'}${Number(position.row) + 1}` : '?'; }
+function renderReplayTimeline() {
+  const list = $('#replay-timeline'); clear(list);
+  if (!state.replay?.moves.length) { list.appendChild(create('p', { className: 'ui-message', text: 'No moves were recorded for this match.' })); return; }
+  state.replay.moves.forEach((move, index) => {
+    const item = actionButton('', () => { stopReplayPlayback(); goToReplayTurn(index); }, `replay-seek:${index}`, 'replay-move');
+    item.classList.toggle('active', index === state.replayMoveIndex);
+    const label = move.pieceId ? `Turn ${move.turn} · Player ${move.player}: ${replayCoordinate(move.from)} to ${replayCoordinate(move.to)}${move.captures ? ' · capture' : ''}` : `Turn ${move.turn} · Player ${move.player}: no applied move`;
+    item.textContent = label; list.appendChild(item);
+  });
+}
+
+function toggleReplayPlayback() {
+  if (!state.replay || state.activeView !== 'replay-view') return;
+  if (state.replayTimer) return stopReplayPlayback();
+  if (state.replayMoveIndex >= state.replay.moves.length - 1) goToReplayTurn(-1);
+  const token = (state.replayPlaybackToken || 0) + 1;
+  state.replayPlaybackToken = token;
+  const replayId = state.replayMatchId;
+  const authRevision = state.authRevision;
+  const viewRevision = state.viewRevision;
+  const tick = () => {
+    if (state.replayPlaybackToken !== token || !state.replay || state.replayMatchId !== replayId
+      || state.replayContext?.tournamentId !== state.tournamentId
+      || !isCurrentView('replay-view', authRevision, viewRevision) || state.replayMoveIndex >= state.replay.moves.length - 1) {
+      if (state.replayPlaybackToken === token) stopReplayPlayback();
+      return;
+    }
+    goToReplayTurn(state.replayMoveIndex + 1);
+    state.replayTimer = setTimeout(tick, state.replaySpeed);
+  };
+  $('#btn-replay-play').textContent = 'Pause';
+  $('#btn-replay-play').setAttribute('aria-pressed', 'true');
+  state.replayTimer = setTimeout(tick, state.replaySpeed);
 }
 
 function bindEvents() {
@@ -746,7 +897,7 @@ function bindEvents() {
   $('#confirm-tournament-action').addEventListener('click', () => { const pending = state.pendingTournamentAction; if (!pending) return; const revision = state.tournamentActionRevision; void runPending(`tournament:${pending.tournamentId}:${pending.action}`, $('#confirm-tournament-action'), async () => { await tournamentAction(pending.tournamentId, pending.authRevision, pending.viewRevision, pending.action); if (state.tournamentActionRevision === revision) closeModal('tournament-action-modal'); }); });
   $('#mobile-menu-toggle').addEventListener('click', toggleMobileNavigation); $('#sidebar-backdrop').addEventListener('click', closeMobileNavigation);
   $('#back-to-tournaments').addEventListener('click', () => navigate('tournaments')); $('#btn-register-bot').addEventListener('click', async () => { if (await populateBotSelect()) openRegistrationDialog(); });
-  $('#close-replay').addEventListener('click', closeReplay); $('#submit-bot').addEventListener('click', () => void submitNewBot()); $('#submit-tournament').addEventListener('click', () => void submitNewTournament()); $('#submit-registration').addEventListener('click', () => void submitTournamentRegistration());
+  $('#close-replay').addEventListener('click', closeReplay); $('#btn-replay-play').addEventListener('click', toggleReplayPlayback); $('#replay-retry').addEventListener('click', retryReplay); $('#replay-speed').addEventListener('change', event => { state.replaySpeed = Number(event.target.value); if (state.replayTimer) { stopReplayPlayback(); toggleReplayPlayback(); } }); $('#submit-bot').addEventListener('click', () => void submitNewBot()); $('#submit-tournament').addEventListener('click', () => void submitNewTournament()); $('#submit-registration').addEventListener('click', () => void submitTournamentRegistration());
   document.querySelectorAll('[data-close-modal]').forEach(button => button.addEventListener('click', () => closeModal(button.dataset.closeModal)));
   document.querySelectorAll('.modal-overlay').forEach(modal => modal.addEventListener('click', event => { if (event.target === modal) closeModal(modal.id); }));
   document.addEventListener('keydown', event => {
@@ -756,7 +907,7 @@ function bindEvents() {
     }
     else trapModalFocus(event);
   });
-  $('#btn-replay-start').addEventListener('click', () => goToReplayTurn(-1)); $('#btn-replay-prev').addEventListener('click', () => goToReplayTurn(state.replayMoveIndex - 1)); $('#btn-replay-next').addEventListener('click', () => goToReplayTurn(state.replayMoveIndex + 1)); $('#btn-replay-end').addEventListener('click', () => state.replay && goToReplayTurn(state.replay.moves.length - 1));
+  $('#btn-replay-start').addEventListener('click', () => { stopReplayPlayback(); goToReplayTurn(-1); }); $('#btn-replay-prev').addEventListener('click', () => { stopReplayPlayback(); goToReplayTurn(state.replayMoveIndex - 1); }); $('#btn-replay-next').addEventListener('click', () => { stopReplayPlayback(); goToReplayTurn(state.replayMoveIndex + 1); }); $('#btn-replay-end').addEventListener('click', () => { stopReplayPlayback(); if (state.replay) goToReplayTurn(state.replay.moves.length - 1); });
 }
 
 bindEvents(); setupReplayCoordinates(); void restoreSession();

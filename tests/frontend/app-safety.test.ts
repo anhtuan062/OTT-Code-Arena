@@ -76,4 +76,23 @@ describe('SPA rendering and request foundations', () => {
     expect(page).toContain('id="tournaments-list"');
     expect(page).toContain('id="tournament-action-modal"');
   });
+
+  it('keeps replay stepping, playback cleanup, and contract rendering guarded', async () => {
+    const [app, page] = await Promise.all([readProjectFile('app.js'), readProjectFile('index.html')]);
+
+    expect(app).toContain('function buildStateAt');
+    expect(app).toContain('state.replayMoveIndex = Math.max(-1');
+    expect(app).toContain('clearTimeout(state.replayTimer)');
+    expect(app).toContain('state.replayPlaybackToken');
+    expect(app).toContain('state.replayRevision');
+    expect(app).toContain('state.authRevision !== authRevision');
+    expect(app).toContain('state.viewRevision !== replayViewRevision');
+    expect(app).toContain('state.replayContext?.tournamentId !== state.tournamentId');
+    expect(app).toContain('state.replayContext?.tournamentId === tournamentId');
+    expect(app).toContain('textContent = label');
+    expect(app).toContain('no applied move');
+    expect(page).toContain('id="replay-retry"');
+    expect(page).toContain('aria-label="9 by 9 replay board"');
+    expect(page).toContain('id="r-current-move"');
+  });
 });
