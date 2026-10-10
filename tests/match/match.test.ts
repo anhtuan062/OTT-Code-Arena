@@ -7,6 +7,8 @@ import { GameEngine } from '@engine/index.js';
 import { MatchRunner, createMatchRunner, DEFAULT_MATCH_CONFIG } from '@match-runner/index.js';
 import type { MatchConfig, BotDefinition, TurnLog, MatchResult } from '@match-runner/types.js';
 import type { GameState } from '@engine/types.js';
+import type { BotExecutor } from '@bot-executor/types.js';
+import { ExecutionCancelledError } from '@bot-executor/types.js';
 
 describe('Match Runner', () => {
   const createTestConfig = (overrides: Partial<MatchConfig> = {}): Partial<MatchConfig> => ({
@@ -60,6 +62,26 @@ describe('Match Runner', () => {
   });
 
   describe('MatchRunner.run', () => {
+    it('propagates cancellation instead of producing a bot loss', async () => {
+      const controller = new AbortController();
+      const executor: BotExecutor = {
+        async execute(_context, _config, _request) {
+          return new Promise((_resolve, reject) => {
+            controller.signal.addEventListener('abort', () => reject(new ExecutionCancelledError()), { once: true });
+          });
+        },
+        async terminate() {},
+        async isAvailable() { return true; },
+        getName() { return 'test'; },
+        getSupportedLimits() { return {}; },
+      };
+      const runner = createMatchRunner(createTestConfig(), playerA, playerB, {}, executor);
+      const running = runner.run(controller.signal);
+      controller.abort();
+
+      await expect(running).rejects.toBeInstanceOf(ExecutionCancelledError);
+    });
+
     it('should execute a complete match between two bots', async () => {
       const runner = createMatchRunner(createTestConfig(), playerA, playerB);
       const result = await runner.run();

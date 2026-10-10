@@ -100,13 +100,47 @@ describe('ExecutionQueue', () => {
     it('should cancel an active task', async () => {
       queue = createExecutionQueue({ maxConcurrent: 1, maxQueueLength: 10 });
 
-      const task = queue.submit('active', () => new Promise(r => setTimeout(r, 500)));
-      await new Promise(r => setTimeout(r, 10));
+      let signal: AbortSignal | undefined;
+      let release!: () => void;
+      const task = queue.submit('active', taskSignal => {
+        signal = taskSignal;
+        return new Promise(resolve => { release = resolve; });
+      });
+      while (!signal) await Promise.resolve();
 
       const wasCancelled = queue.cancel('active');
       expect(wasCancelled).toBe(true);
+      expect(signal?.aborted).toBe(true);
+      queue.cancel('active');
+      release();
 
       await expect(task).rejects.toThrow('cancelled');
+    });
+
+    it('does not cancel an unrelated active task', async () => {
+      queue = createExecutionQueue({ maxConcurrent: 2, maxQueueLength: 10 });
+      let firstSignal: AbortSignal | undefined;
+      let secondSignal: AbortSignal | undefined;
+      let releaseFirst!: () => void;
+      let releaseSecond!: () => void;
+
+      const first = queue.submit('first', signal => {
+        firstSignal = signal;
+        return new Promise(resolve => { releaseFirst = resolve; });
+      });
+      const second = queue.submit('second', signal => {
+        secondSignal = signal;
+        return new Promise(resolve => { releaseSecond = resolve; });
+      });
+      while (!firstSignal || !secondSignal) await Promise.resolve();
+
+      queue.cancel('first');
+      expect(firstSignal.aborted).toBe(true);
+      expect(secondSignal.aborted).toBe(false);
+      releaseFirst();
+      releaseSecond();
+      await expect(first).rejects.toThrow('cancelled');
+      await expect(second).resolves.toBeUndefined();
     });
 
     it('should not start cancelled tasks from queue', async () => {
@@ -171,7 +205,9 @@ describe('ExecutionQueue', () => {
     it('should recover slots after task timeout/cancellation', async () => {
       queue = createExecutionQueue({ maxConcurrent: 1, maxQueueLength: 10 });
 
-      const task = queue.submit('timeout', () => new Promise(r => setTimeout(r, 500)));
+      const task = queue.submit('timeout', signal => new Promise<void>(resolve => {
+        signal.addEventListener('abort', () => resolve(), { once: true });
+      }));
       await new Promise(r => setTimeout(r, 10));
       queue.cancel('timeout');
       await task.catch(() => {});

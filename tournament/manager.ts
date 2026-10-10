@@ -64,6 +64,7 @@ import {
 import type { MatchConfig, BotDefinition } from '@match-runner/types.js';
 import { MatchReplay, MatchResult, MatchRunner } from '@match-runner/index.js';
 import type { BotExecutor } from '@bot-executor/types.js';
+import { isExecutionCancelledError } from '@bot-executor/types.js';
 
 /**
  * Tournament application configuration
@@ -93,6 +94,9 @@ export class TournamentManager {
   private executor: MatchExecutor;
   private defaultMatchConfig: TournamentMatchConfig;
   private defaultScoringConfig: TournamentScoringConfig;
+  private readonly cancelledTournaments = new Set<string>();
+  private readonly pendingResultWrites = new Map<string, Set<Promise<void>>>();
+  private readonly terminalTransitionLocks = new Map<string, Promise<void>>();
 
   constructor(config: TournamentAppConfig) {
     this.repository = config.repository;
@@ -342,7 +346,7 @@ export class TournamentManager {
   /**
    * Run the next eligible match
    */
-  async runNextMatch(tournamentId: string): Promise<TournamentOperationResult<ExecutedMatchResult>> {
+  async runNextMatch(tournamentId: string, signal?: AbortSignal): Promise<TournamentOperationResult<ExecutedMatchResult>> {
     const loadResult = await this.loadTournament(tournamentId);
     if (!loadResult.success || !loadResult.data) {
       return { success: false, error: loadResult.error };
@@ -359,13 +363,13 @@ export class TournamentManager {
       return { success: false, error: 'No pending matches to run' };
     }
 
-    return this.runPairing(tournament, pairing);
+    return this.runPairing(tournament, pairing, signal);
   }
 
   /**
    * Run all remaining matches sequentially
    */
-  async runAllMatches(tournamentId: string): Promise<TournamentOperationResult<ExecutedMatchResult[]>> {
+  async runAllMatches(tournamentId: string, signal?: AbortSignal): Promise<TournamentOperationResult<ExecutedMatchResult[]>> {
     const loadResult = await this.loadTournament(tournamentId);
     if (!loadResult.success || !loadResult.data) {
       return { success: false, error: loadResult.error };
@@ -376,12 +380,18 @@ export class TournamentManager {
     if (tournament.status !== 'running') {
       return { success: false, error: `Tournament not running (status: ${tournament.status})` };
     }
+    if (signal?.aborted || this.cancelledTournaments.has(tournamentId)) {
+      return { success: false, error: 'Tournament execution cancelled' };
+    }
 
     const results: ExecutedMatchResult[] = [];
     let pairing = getNextEligiblePairing(tournament.rounds);
 
     while (pairing) {
-      const result = await this.runPairing(tournament, pairing);
+      if (signal?.aborted || this.cancelledTournaments.has(tournamentId)) {
+        return { success: false, error: 'Tournament execution cancelled' };
+      }
+      const result = await this.runPairing(tournament, pairing, signal);
       if (result.success && result.data) {
         results.push(result.data);
         // Reload tournament to get updated state
@@ -391,14 +401,17 @@ export class TournamentManager {
         }
         tournament.rounds = reload.data.rounds;
         tournament.standings = reload.data.standings;
+        if (signal?.aborted || this.cancelledTournaments.has(tournamentId)) {
+          return { success: false, error: 'Tournament execution cancelled' };
+        }
         pairing = getNextEligiblePairing(tournament.rounds);
       } else {
-        break;
+        return { success: false, error: result.error };
       }
     }
 
     // Check if tournament is complete
-    if (isScheduleComplete(tournament.rounds)) {
+    if (!signal?.aborted && !this.cancelledTournaments.has(tournamentId) && isScheduleComplete(tournament.rounds)) {
       await this.completeTournament(tournamentId);
     }
 
@@ -437,8 +450,12 @@ export class TournamentManager {
    */
   private async runPairing(
     tournament: Tournament,
-    pairing: TournamentPairing
+    pairing: TournamentPairing,
+    signal?: AbortSignal
   ): Promise<TournamentOperationResult<ExecutedMatchResult>> {
+    if (signal?.aborted || this.cancelledTournaments.has(tournament.tournamentId)) {
+      return { success: false, error: 'Tournament execution cancelled' };
+    }
     const participantA = tournament.participants.find(p => p.participantId === pairing.participantA);
     const participantB = tournament.participants.find(p => p.participantId === pairing.participantB!);
 
@@ -488,15 +505,24 @@ export class TournamentManager {
         matchId,
         botA,
         botB,
-        matchConfig
+        matchConfig,
+        undefined,
+        signal
       );
     } catch (error) {
+      if (isExecutionCancelledError(error) || signal?.aborted || this.cancelledTournaments.has(tournament.tournamentId)) {
+        return { success: false, error: 'Tournament execution cancelled' };
+      }
       // On executor failure, mark pairing as failed but don't complete it
       pairing.status = 'scheduled'; // Reset to allow retry
       pairing.matchId = null;
       pairing.startedAt = null;
       await this.repository.save(tournament);
       return { success: false, error: `Match execution failed: ${error}` };
+    }
+
+    if (signal?.aborted || this.cancelledTournaments.has(tournament.tournamentId)) {
+      return { success: false, error: 'Tournament execution cancelled' };
     }
 
     // Create tournament match record
@@ -517,7 +543,38 @@ export class TournamentManager {
     const replay = MatchRunner.createReplay(matchResult);
 
     // Save match result and replay
-    await this.repository.saveMatchResult(tournament.tournamentId, matchId, tournamentMatchRecord, replay);
+    if (signal?.aborted || this.cancelledTournaments.has(tournament.tournamentId)) {
+      return { success: false, error: 'Tournament execution cancelled' };
+    }
+    const resultWrite = this.repository.saveMatchResult(
+      tournament.tournamentId,
+      matchId,
+      tournamentMatchRecord,
+      replay
+    );
+    const writes = this.pendingResultWrites.get(tournament.tournamentId) ?? new Set<Promise<void>>();
+    writes.add(resultWrite);
+    this.pendingResultWrites.set(tournament.tournamentId, writes);
+    try {
+      await resultWrite;
+    } catch (error) {
+      if (!this.cancelledTournaments.has(tournament.tournamentId)) {
+        pairing.status = 'scheduled';
+        pairing.matchId = null;
+        pairing.startedAt = null;
+        await this.repository.save(tournament);
+      }
+      return { success: false, error: `Match result persistence failed: ${error}` };
+    } finally {
+      writes.delete(resultWrite);
+      if (writes.size === 0) {
+        this.pendingResultWrites.delete(tournament.tournamentId);
+      }
+    }
+
+    if (signal?.aborted || this.cancelledTournaments.has(tournament.tournamentId)) {
+      return { success: false, error: 'Tournament execution cancelled' };
+    }
 
     // Mark pairing completed
     markPairingCompleted(tournament.rounds, pairing.pairingId, tournamentMatchRecord);
@@ -527,6 +584,9 @@ export class TournamentManager {
     tournament.standings = computeStandings(tournament.participants, allMatchRecords, tournament.scoringConfig);
 
     // Save updated tournament
+    if (signal?.aborted || this.cancelledTournaments.has(tournament.tournamentId)) {
+      return { success: false, error: 'Tournament execution cancelled' };
+    }
     await this.repository.save(tournament);
 
     return {
@@ -539,6 +599,10 @@ export class TournamentManager {
    * Complete the tournament
    */
   async completeTournament(tournamentId: string): Promise<TournamentOperationResult<Tournament>> {
+    return this.withTerminalTransitionLock(tournamentId, async () => {
+      if (this.cancelledTournaments.has(tournamentId)) {
+        return { success: false, error: 'Tournament execution cancelled' };
+      }
     const loadResult = await this.loadTournament(tournamentId);
     if (!loadResult.success || !loadResult.data) {
       return { success: false, error: loadResult.error };
@@ -556,15 +620,43 @@ export class TournamentManager {
 
     tournament.status = 'completed';
     tournament.completedAt = new Date().toISOString();
+    if (this.cancelledTournaments.has(tournamentId)) {
+      return { success: false, error: 'Tournament execution cancelled' };
+    }
     await this.repository.save(tournament);
     return { success: true, data: tournament };
+    });
   }
 
   /**
    * Cancel the tournament
    */
   async cancelTournament(tournamentId: string): Promise<TournamentOperationResult<Tournament>> {
-    return this.transitionStatus(tournamentId, 'cancelled');
+    this.cancelledTournaments.add(tournamentId);
+    return this.withTerminalTransitionLock(tournamentId, async () => {
+      const writes = this.pendingResultWrites.get(tournamentId);
+      if (writes) await Promise.allSettled([...writes]);
+      return this.transitionStatus(tournamentId, 'cancelled');
+    });
+  }
+
+  private async withTerminalTransitionLock<T>(
+    tournamentId: string,
+    operation: () => Promise<T>
+  ): Promise<T> {
+    const previous = this.terminalTransitionLocks.get(tournamentId) ?? Promise.resolve();
+    let release!: () => void;
+    const current = new Promise<void>(resolve => { release = resolve; });
+    this.terminalTransitionLocks.set(tournamentId, current);
+    await previous;
+    try {
+      return await operation();
+    } finally {
+      release();
+      if (this.terminalTransitionLocks.get(tournamentId) === current) {
+        this.terminalTransitionLocks.delete(tournamentId);
+      }
+    }
   }
 
   /**

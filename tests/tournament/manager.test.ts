@@ -12,6 +12,8 @@ import {
 } from '@tournament/manager.js';
 import { FileTournamentRepository } from '@tournament/persistence.js';
 import { MockMatchExecutor } from '@tournament/executor.js';
+import type { MatchExecutor } from '@tournament/executor.js';
+import { ExecutionCancelledError } from '@bot-executor/types.js';
 import type { Tournament, TournamentBot, TournamentParticipant } from '@tournament/types.js';
 import type { MatchResult, MatchReplay } from '@match-runner/types.js';
 
@@ -360,6 +362,74 @@ describe('Tournament Manager', () => {
       const result = await manager.cancelTournament('tourney-1');
       expect(result.success).toBe(true);
       expect(result.data?.status).toBe('cancelled');
+    });
+
+    it('keeps cancellation terminal while an active match is stopping', async () => {
+      let started = false;
+      let release!: () => void;
+      const executor: MatchExecutor = {
+        async executeMatch(_matchId, _playerA, _playerB, _config, _callbacks, signal) {
+          started = true;
+          return new Promise((_resolve, reject) => {
+            release = () => reject(new ExecutionCancelledError());
+            signal?.addEventListener('abort', () => reject(new ExecutionCancelledError()), { once: true });
+          });
+        },
+        async isAvailable() { return true; },
+      };
+      const manager = new TournamentManager({ repository, executor });
+
+      await createTestTournament(manager, 'cancel-active', 'Cancel active');
+      await registerParticipants(manager, 'cancel-active', 2);
+      await manager.openRegistration('cancel-active');
+      await manager.generateSchedule('cancel-active');
+      await manager.startTournament('cancel-active');
+
+      const controller = new AbortController();
+      const running = manager.runAllMatches('cancel-active', controller.signal);
+      while (!started) await new Promise<void>(resolve => setImmediate(resolve));
+
+      const cancelled = await manager.cancelTournament('cancel-active');
+      expect(cancelled.success).toBe(true);
+      controller.abort();
+      release();
+
+      const runResult = await running;
+      expect(runResult.success).toBe(false);
+      expect(runResult.error).toBe('Tournament execution cancelled');
+
+      const persisted = (await manager.loadTournament('cancel-active')).data!;
+      expect(persisted.status).toBe('cancelled');
+      expect(await repository.listMatchResults('cancel-active')).toHaveLength(0);
+    });
+
+    it('restores a pairing when match-result persistence fails', async () => {
+      const manager = new TournamentManager({
+        repository,
+        executor: mockExecutor,
+      });
+
+      await createTestTournament(manager, 'persist-failure', 'Persistence failure');
+      await registerParticipants(manager, 'persist-failure', 2);
+      await manager.openRegistration('persist-failure');
+      await manager.generateSchedule('persist-failure');
+      await manager.startTournament('persist-failure');
+
+      const matchId = 'persist-failure-P1-v-P2-r1';
+      mockExecutor.setMatchResult(matchId, createMockMatchResult(matchId));
+      const originalSaveMatchResult = repository.saveMatchResult.bind(repository);
+      repository.saveMatchResult = async () => {
+        throw new Error('injected result write failure');
+      };
+
+      const result = await manager.runNextMatch('persist-failure');
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('persistence failed');
+
+      const tournament = (await manager.loadTournament('persist-failure')).data!;
+      const pairing = tournament.rounds[0]?.pairings[0];
+      expect(pairing?.status).toBe('scheduled');
+      repository.saveMatchResult = originalSaveMatchResult;
     });
   });
 

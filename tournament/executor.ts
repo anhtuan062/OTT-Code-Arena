@@ -29,7 +29,8 @@ export interface MatchExecutor {
     playerA: BotDefinition,
     playerB: BotDefinition,
     config: MatchConfig,
-    callbacks?: MatchRunnerCallbacks
+    callbacks?: MatchRunnerCallbacks,
+    signal?: AbortSignal
   ): Promise<MatchResult>;
 
   /**
@@ -126,14 +127,15 @@ export class MatchRunnerExecutor implements MatchExecutor {
     playerA: BotDefinition,
     playerB: BotDefinition,
     config?: MatchConfig,
-    callbacks?: MatchRunnerCallbacks
+    callbacks?: MatchRunnerCallbacks,
+    signal?: AbortSignal
   ): Promise<MatchResult> {
     // Lazy import to avoid circular dependencies
     const { createMatchRunner } = await import('@match-runner/index.js');
 
     const mergedConfig = { ...this.config, ...config, matchId };
     const runner = createMatchRunner(mergedConfig, playerA, playerB, callbacks, this.botExecutor);
-    return runner.run();
+    return runner.run(signal);
   }
 
   async isAvailable(): Promise<boolean> {

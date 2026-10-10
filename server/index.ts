@@ -339,18 +339,22 @@ app.post('/api/tournaments/:id/action', requireAuth, requireCsrf, async (req, re
         }
         activeTournamentRuns.add(tournamentId);
 
-        executionQueue.submit(`run_all_${tournamentId}`, async () => {
+        executionQueue.submit(`run_all_${tournamentId}`, async (signal) => {
           try {
-            await manager.runAllMatches(tournamentId);
+            await manager.runAllMatches(tournamentId, signal);
           } finally {
             activeTournamentRuns.delete(tournamentId);
           }
         }).catch(err => {
-          console.error(`Execution queue error for ${tournamentId}:`, err);
+          if (!(err instanceof Error && err.message.includes('cancelled'))) {
+            console.error(`Execution queue error for ${tournamentId}:`, err);
+          }
         });
 
         return res.json({ message: 'Match execution started in background' });
       case 'cancel':
+        executionQueue.cancel(`run_all_${tournamentId}`);
+        activeTournamentRuns.delete(tournamentId);
         result = await manager.cancelTournament(tournamentId);
         break;
       default:

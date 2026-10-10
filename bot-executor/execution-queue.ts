@@ -10,12 +10,14 @@ export type QueueTaskStatus = 'queued' | 'active' | 'completed' | 'failed' | 'ca
 export interface QueueTask<T = unknown> {
   id: string;
   status: QueueTaskStatus;
-  execute: () => Promise<T>;
+  execute: (signal: AbortSignal) => Promise<T>;
   resolve: (value: T) => void;
   reject: (reason: unknown) => void;
   enqueuedAt: number;
   startedAt: number | null;
   completedAt: number | null;
+  controller: AbortController;
+  settled: boolean;
 }
 
 export class ExecutionQueue extends EventEmitter {
@@ -45,7 +47,7 @@ export class ExecutionQueue extends EventEmitter {
     return this._disposed;
   }
 
-  async submit<T>(id: string, execute: () => Promise<T>): Promise<T> {
+  async submit<T>(id: string, execute: (signal: AbortSignal) => Promise<T>): Promise<T> {
     if (this._disposed) {
       throw new Error('Queue is disposed');
     }
@@ -62,12 +64,14 @@ export class ExecutionQueue extends EventEmitter {
       const task: QueueTask<T> = {
         id,
         status: 'queued',
-        execute: execute as () => Promise<unknown>,
+        execute: execute as (signal: AbortSignal) => Promise<unknown>,
         resolve: resolve as (value: unknown) => void,
         reject,
         enqueuedAt: Date.now(),
         startedAt: null,
         completedAt: null,
+        controller: new AbortController(),
+        settled: false,
       } as unknown as QueueTask<T>;
 
       if (this.active.size < this.config.maxConcurrent) {
@@ -88,6 +92,7 @@ export class ExecutionQueue extends EventEmitter {
       this.queue.splice(queueIndex, 1);
       task.status = 'cancelled';
       task.completedAt = Date.now();
+      task.settled = true;
       task.reject(new Error(`Task ${id} cancelled while queued`));
       this.emit('cancelled', { id, wasActive: false });
       return true;
@@ -96,6 +101,12 @@ export class ExecutionQueue extends EventEmitter {
     const activeTask = this.active.get(id);
     if (activeTask) {
       activeTask.status = 'cancelled';
+      activeTask.controller.abort();
+      if (!activeTask.settled) {
+        activeTask.settled = true;
+        activeTask.completedAt = Date.now();
+        activeTask.reject(new Error(`Task ${id} cancelled during execution`));
+      }
       this.emit('cancelled', { id, wasActive: true });
       return true;
     }
@@ -140,23 +151,32 @@ export class ExecutionQueue extends EventEmitter {
 
     const wasCancelled = () => this.cancelled.has(task.id);
 
-    task.execute()
+    task.execute(task.controller.signal)
       .then((result) => {
         if (wasCancelled()) {
           task.status = 'cancelled';
           task.completedAt = Date.now();
-          task.reject(new Error(`Task ${task.id} cancelled during execution`));
+          if (!task.settled) {
+            task.settled = true;
+            task.reject(new Error(`Task ${task.id} cancelled during execution`));
+          }
         } else {
           task.status = 'completed';
           task.completedAt = Date.now();
-          task.resolve(result);
+          if (!task.settled) {
+            task.settled = true;
+            task.resolve(result);
+          }
           this.emit('completed', { id: task.id });
         }
       })
       .catch((error) => {
         task.status = wasCancelled() ? 'cancelled' : 'failed';
         task.completedAt = Date.now();
-        task.reject(error);
+        if (!task.settled) {
+          task.settled = true;
+          task.reject(error);
+        }
         this.emit('failed', { id: task.id, error });
       })
       .finally(() => {
@@ -173,6 +193,7 @@ export class ExecutionQueue extends EventEmitter {
       if (this.cancelled.has(next.id)) {
         next.status = 'cancelled';
         next.completedAt = Date.now();
+        next.settled = true;
         next.reject(new Error(`Task ${next.id} cancelled while queued`));
         this.emit('cancelled', { id: next.id, wasActive: false });
         continue;

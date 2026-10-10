@@ -10,6 +10,7 @@ import * as fs from 'fs/promises';
 import * as path from 'path';
 import { DockerExecutor, createDockerExecutor, isSafeExecutionId } from '@bot-executor/index.js';
 import type { BotProcessConfig, BotRequestMessage, ExecutionContext, BotExecutionResult } from '@bot-executor/types.js';
+import { ExecutionCancelledError } from '@bot-executor/types.js';
 
 // Check Docker availability
 let dockerAvailable = false;
@@ -475,6 +476,25 @@ describe('DockerExecutor - Static verification (no Docker required)', () => {
     expect(result.success).toBe(false);
     expect(result.error?.code).toBe('SECURITY_VIOLATION');
     expect(availabilityCheck).not.toHaveBeenCalled();
+  });
+
+  it('cancels before Docker availability or container creation', async () => {
+    const executor = createDockerExecutor({ image: 'test-image:latest' });
+    const controller = new AbortController();
+    controller.abort();
+
+    await expect(executor.execute(
+      { ...createContext('cancel-before-start'), signal: controller.signal },
+      {
+        botId: 'test-bot',
+        command: 'node',
+        args: ['bot.js'],
+        timeoutMs: 2000,
+        maxStdoutBytes: 1024,
+        maxStderrBytes: 1024,
+      },
+      createValidRequest()
+    )).rejects.toBeInstanceOf(ExecutionCancelledError);
   });
 
   it('should construct correct docker run arguments', () => {

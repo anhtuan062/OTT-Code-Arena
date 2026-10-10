@@ -94,6 +94,18 @@ export interface ExecutionContext {
   turn: number;
   player: 'A' | 'B';
   resourceLimits?: ResourceLimits;
+  signal?: AbortSignal;
+}
+
+export class ExecutionCancelledError extends Error {
+  constructor(message = 'Execution cancelled') {
+    super(message);
+    this.name = 'ExecutionCancelledError';
+  }
+}
+
+export function isExecutionCancelledError(error: unknown): error is ExecutionCancelledError {
+  return error instanceof ExecutionCancelledError;
 }
 
 /**

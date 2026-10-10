@@ -21,6 +21,7 @@ import type {
   ResourceLimits,
   ExecutorConfig,
 } from './types.js';
+import { ExecutionCancelledError } from './types.js';
 import { validateDockerImage } from './image-config.js';
 
 interface DockerExecutorConfig extends ExecutorConfig {
@@ -106,6 +107,9 @@ export class DockerExecutor implements BotExecutor {
     processConfig: BotProcessConfig,
     request: BotRequestMessage
   ): Promise<BotExecutionResult> {
+    if (context.signal?.aborted) {
+      throw new ExecutionCancelledError();
+    }
     if (!isSafeExecutionId(context.executionId)) {
       return this.createErrorResult(
         'SECURITY_VIOLATION',
@@ -144,10 +148,18 @@ export class DockerExecutor implements BotExecutor {
     let resolved = false;
     const requestJson = JSON.stringify(request);
     let runningContainer: RunningContainer | null = null;
+    let cancelled = false;
+    const abortHandler = () => {
+      cancelled = true;
+      if (runningContainer) void this.terminateRunningContainer(runningContainer);
+    };
+    context.signal?.addEventListener('abort', abortHandler, { once: true });
 
     try {
       await fs.mkdir(tempDir, { recursive: true });
+      if (cancelled || context.signal?.aborted) throw new ExecutionCancelledError();
       await fs.writeFile(path.join(tempDir, 'request.json'), requestJson, 'utf8');
+      if (cancelled || context.signal?.aborted) throw new ExecutionCancelledError();
 
       const dockerArgs = this.buildDockerArgs(executionId, processConfig, tempDir, requestJson);
       const proc = spawn(this.config.dockerBinary!, dockerArgs, {
@@ -169,6 +181,9 @@ export class DockerExecutor implements BotExecutor {
         startTime,
       };
       this.runningContainers.set(executionId, runningContainer);
+      if (cancelled || context.signal?.aborted) {
+        await this.terminateRunningContainer(runningContainer);
+      }
 
       const timeoutId = setTimeout(() => {
         if (resolved || !runningContainer) return;
@@ -211,10 +226,15 @@ export class DockerExecutor implements BotExecutor {
         proc.once('error', error => finish(-1, error));
       });
     } finally {
+      context.signal?.removeEventListener('abort', abortHandler);
       if (runningContainer) {
         clearTimeout(runningContainer.timeoutId);
       }
       await fs.rm(tempDir, { recursive: true, force: true }).catch(() => {});
+    }
+
+    if (cancelled || context.signal?.aborted) {
+      throw new ExecutionCancelledError();
     }
 
     const durationMs = Date.now() - startTime;

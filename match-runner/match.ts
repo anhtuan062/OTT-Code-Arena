@@ -20,6 +20,7 @@ import {
 import type { GameState, MoveOption, ApplyResult, GameConfig } from '@engine/types.js';
 import type { BotError } from '@bot-protocol/types.js';
 import type { BotRequestMessage } from '@bot-runner/types.js';
+import { ExecutionCancelledError } from '@bot-executor/types.js';
 import type { BotProcessConfig, BotExecutionResult } from '@bot-executor/types.js';
 
 export class MatchRunner {
@@ -70,10 +71,11 @@ export class MatchRunner {
     this.startTime = new Date();
   }
 
-  async run(): Promise<MatchResult> {
+  async run(signal?: AbortSignal): Promise<MatchResult> {
     let currentState = this.engine.getState();
 
     while (currentState.status !== 'finished') {
+      if (signal?.aborted) throw new ExecutionCancelledError();
       const turn = currentState.turn;
       const currentPlayer = currentState.currentPlayer;
 
@@ -119,6 +121,7 @@ export class MatchRunner {
         matchId: this.config.matchId,
         turn,
         player: currentPlayer,
+        signal,
       };
 
       const botResult: BotExecutionResult = await this.botExecutor.execute(
@@ -126,6 +129,7 @@ export class MatchRunner {
         botProcessConfig,
         request
       );
+      if (signal?.aborted) throw new ExecutionCancelledError();
 
       // Build turn log
       const turnLog: TurnLog = {

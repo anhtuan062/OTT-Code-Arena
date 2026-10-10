@@ -16,6 +16,7 @@ import type {
   ExecutionContext,
   ResourceLimits,
 } from '@bot-executor/types.js';
+import { ExecutionCancelledError } from '@bot-executor/types.js';
 import type { BotResult, BotError } from '@bot-runner/types.js';
 
 export class BotRunnerAdapter implements BotExecutor {
@@ -48,6 +49,7 @@ export class BotRunnerAdapter implements BotExecutor {
     processConfig: BotProcessConfig,
     request: BotRequestMessage
   ): Promise<BotExecutionResult> {
+    if (context.signal?.aborted) throw new ExecutionCancelledError();
     // Convert BotProcessConfig to BotRunner's format
     const botRunnerConfig = {
       botId: processConfig.botId,
@@ -62,6 +64,7 @@ export class BotRunnerAdapter implements BotExecutor {
     };
 
     const result: BotResult = await this.botRunner.runBot(botRunnerConfig, request);
+    if (context.signal?.aborted) throw new ExecutionCancelledError();
 
     // Convert BotResult to BotExecutionResult
     return {
