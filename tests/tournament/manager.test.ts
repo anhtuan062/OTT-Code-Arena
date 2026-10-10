@@ -211,7 +211,7 @@ describe('Tournament Manager', () => {
       const result = await manager.startTournament('tourney-1');
       expect(result.success).toBe(true);
       expect(result.data?.status).toBe('running');
-      expect(result.data?.startedAt).toBeDefined();
+      expect(result.data?.startedAt).not.toBeNull();
     });
 
     it('should not start without schedule', async () => {
@@ -228,6 +228,36 @@ describe('Tournament Manager', () => {
       const result = await manager.startTournament('tourney-1');
       expect(result.success).toBe(false);
       expect(result.error).toContain('No schedule generated');
+    });
+
+    it('should not let close registration bypass schedule and start invariants', async () => {
+      const manager = new TournamentManager({ repository, executor: mockExecutor });
+      await createTestTournament(manager, 'tourney-1', 'Test');
+      await registerParticipants(manager, 'tourney-1', 2);
+      await manager.openRegistration('tourney-1');
+
+      const result = await manager.closeRegistration('tourney-1');
+      const tournament = (await manager.loadTournament('tourney-1')).data!;
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('No schedule generated');
+      expect(tournament.status).toBe('registration_open');
+      expect(tournament.rounds).toHaveLength(0);
+      expect(tournament.startedAt).toBeNull();
+    });
+
+    it('should let close registration start a scheduled tournament with startedAt', async () => {
+      const manager = new TournamentManager({ repository, executor: mockExecutor });
+      await createTestTournament(manager, 'tourney-1', 'Test');
+      await registerParticipants(manager, 'tourney-1', 2);
+      await manager.openRegistration('tourney-1');
+      await manager.generateSchedule('tourney-1');
+
+      const result = await manager.closeRegistration('tourney-1');
+
+      expect(result.success).toBe(true);
+      expect(result.data?.status).toBe('running');
+      expect(result.data?.startedAt).not.toBeNull();
     });
   });
 

@@ -260,10 +260,12 @@ export class TournamentManager {
   }
 
   /**
-   * Close registration
+   * Close registration. Kept as a compatibility alias for starting a
+   * scheduled tournament so every transition to running shares the same
+   * schedule validation and startedAt assignment.
    */
   async closeRegistration(tournamentId: string): Promise<TournamentOperationResult<Tournament>> {
-    return this.transitionStatus(tournamentId, 'registration_open', 'running');
+    return this.startTournament(tournamentId);
   }
 
   /**

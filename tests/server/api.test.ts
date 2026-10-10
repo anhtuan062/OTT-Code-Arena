@@ -125,6 +125,21 @@ describe('Server API Security', () => {
   });
 
   describe('Tournament Action Validation', () => {
+    it('should reject close_registration without a schedule without changing state', async () => {
+      const created = await agent.post('/api/tournaments').set('x-csrf-token', csrf).send({ name: 'Close validation' });
+      const tournamentId = created.body.tournamentId;
+      expect((await agent.post(`/api/tournaments/${tournamentId}/action`).set('x-csrf-token', csrf).send({ action: 'open_registration' })).status).toBe(200);
+
+      const close = await agent.post(`/api/tournaments/${tournamentId}/action`).set('x-csrf-token', csrf).send({ action: 'close_registration' });
+      const tournament = await agent.get(`/api/tournaments/${tournamentId}`);
+
+      expect(close.status).toBe(400);
+      expect(close.body.error).toContain('No schedule generated');
+      expect(tournament.body.status).toBe('registration_open');
+      expect(tournament.body.startedAt).toBeNull();
+      expect(tournament.body.rounds).toHaveLength(0);
+    });
+
     it('should prevent duplicate run_all tasks', async () => {
       // Create a tournament
       const createRes = await agent
