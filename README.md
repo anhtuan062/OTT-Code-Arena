@@ -75,7 +75,7 @@ Người tham gia có thể tự chọn chiến lược, ví dụ:
 - Tournament, registration, queue, and replay endpoints enforce the authenticated tournament owner.
 - The SPA restores sessions through `/api/auth/me` and provides login, registration, and logout flows.
 
-For production, set `NODE_ENV=production`, configure `CORS_ORIGIN` only when a separate trusted frontend origin is required, and provide Docker for the `sandbox-required` execution policy. Local bot source paths are not uploaded or built in this phase.
+For production, set `NODE_ENV=production` and `EXECUTION_POLICY=sandbox-required`, configure `CORS_ORIGIN` only when a separate trusted frontend origin is required, and provide Docker for the sandbox-required execution policy. Local bot source paths are not uploaded or built in this phase.
 
 Existing tournament JSON files created before ownership metadata was introduced are intentionally private-by-default and are not visible through the API until an operator assigns ownership as part of a controlled migration. No legacy in-memory bot registry is imported; bots must be registered by an authenticated user.
 
@@ -305,9 +305,21 @@ if __name__ == "__main__":
 - **development**: Uses ChildProcessExecutor (allows fallback when Docker unavailable). Suitable for trusted local bots.
 - **sandbox-required**: Requires DockerExecutor. Fails closed if Docker unavailable. For untrusted bot submissions.
 
+Server startup configuration is explicit in production:
+
+- `NODE_ENV=production` must be paired with `EXECUTION_POLICY=sandbox-required`.
+- `EXECUTION_POLICY=development` is rejected in production.
+- `NODE_ENV` accepts `development`, `test`, or `production`; invalid values are rejected.
+- `NODE_ENV` or `EXECUTION_POLICY` must be explicitly configured; an entirely unconfigured server refuses to start.
+- Local development must use `NODE_ENV=development` and `EXECUTION_POLICY=development`.
+- Tests use `NODE_ENV=test` through the Vitest setup.
+- If sandbox initialization fails under `sandbox-required`, startup fails and the server does not listen.
+
 ```typescript
-// Development mode (default)
-const executor = await createExecutor();
+// Development mode - configure this explicitly
+const executor = await createExecutor({
+  childProcessConfig: { executionPolicy: 'development' }
+});
 
 // Production mode - fails if Docker not available
 const executor = await createExecutor({
@@ -316,6 +328,26 @@ const executor = await createExecutor({
 
 // Tournament Manager with explicit policy
 const manager = await createTournamentManager(storageDir, undefined, 'sandbox-required');
+```
+
+Production launch:
+
+```bash
+NODE_ENV=production EXECUTION_POLICY=sandbox-required node dist/server/index.js
+```
+
+Local development launch:
+
+```bash
+NODE_ENV=development EXECUTION_POLICY=development node dist/server/index.js
+```
+
+On Windows PowerShell, set the variables before launching:
+
+```powershell
+$env:NODE_ENV = 'development'
+$env:EXECUTION_POLICY = 'development'
+node dist/server/index.js
 ```
 
 ### DockerExecutor Security Configuration (Verified via Static Analysis)

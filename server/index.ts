@@ -13,6 +13,7 @@ import { SqlBotRepository, type BotRecord } from './repositories/bot-repository.
 import { SqlUserRepository } from './repositories/user-repository.js';
 import { SqlSessionRepository } from './repositories/session-repository.js';
 import { SqlRateLimitRepository } from './repositories/rate-limit-repository.js';
+import type { ExecutionPolicy } from '../bot-executor/types.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -39,8 +40,6 @@ app.get('/style.css', (req, res) => res.sendFile(path.join(__dirname, '../../sty
 // Serve static icons if they were separate, but they are embedded in index.html
 
 // Initialize singleton Tournament Manager
-const EXECUTION_POLICY = process.env.NODE_ENV === 'production' ? 'sandbox-required' : 'development';
-
 let manager: Awaited<ReturnType<typeof createTournamentManager>>;
 let executionQueue = createExecutionQueue({ maxConcurrent: 2, maxQueueLength: 50 });
 let botRepository: SqlBotRepository;
@@ -49,9 +48,32 @@ let sessionRepository: SqlSessionRepository;
 let rateLimitRepository: SqlRateLimitRepository;
 const SESSION_COOKIE = 'ott_session';
 const SESSION_TTL_MS = 24 * 60 * 60 * 1000;
-const production = process.env.NODE_ENV === 'production';
+const production = process.env.NODE_ENV?.trim().toLowerCase() === 'production';
+
+export function resolveExecutionPolicy(env: NodeJS.ProcessEnv = process.env): ExecutionPolicy {
+  const nodeEnv = env.NODE_ENV?.trim().toLowerCase();
+  const configuredPolicy = env.EXECUTION_POLICY?.trim().toLowerCase();
+
+  if (nodeEnv && !['development', 'test', 'production'].includes(nodeEnv)) {
+    throw new Error(`Invalid NODE_ENV "${env.NODE_ENV}"`);
+  }
+  if (configuredPolicy && !['development', 'sandbox-required'].includes(configuredPolicy)) {
+    throw new Error(`Invalid EXECUTION_POLICY "${env.EXECUTION_POLICY}"`);
+  }
+  if (!nodeEnv && !configuredPolicy) {
+    throw new Error('NODE_ENV or EXECUTION_POLICY must be explicitly configured');
+  }
+  if (nodeEnv === 'production' && configuredPolicy !== 'sandbox-required') {
+    throw new Error('Production requires EXECUTION_POLICY=sandbox-required');
+  }
+
+  return configuredPolicy === 'sandbox-required' || nodeEnv === 'production'
+    ? 'sandbox-required'
+    : 'development';
+}
 
 export async function initServer(storageDir?: string) {
+  const executionPolicy = resolveExecutionPolicy();
   const dir = storageDir || path.join(__dirname, '../../data/tournaments');
   await fs.mkdir(dir, { recursive: true });
   executionQueue = createExecutionQueue({ maxConcurrent: 2, maxQueueLength: 50 });
@@ -64,8 +86,8 @@ export async function initServer(storageDir?: string) {
   sessionRepository = new SqlSessionRepository(db, SESSION_TTL_MS);
   rateLimitRepository = new SqlRateLimitRepository(db);
   sessionRepository.deleteExpired();
-  manager = await createTournamentManager(dir, undefined, EXECUTION_POLICY);
-  console.log(`Tournament Manager initialized with ${EXECUTION_POLICY} policy`);
+  manager = await createTournamentManager(dir, undefined, executionPolicy);
+  console.log(`Tournament Manager initialized with ${executionPolicy} policy`);
 }
 
 export function closeServer(): void {
@@ -400,13 +422,16 @@ export const appExport = app; // Exported for testing
 
 const PORT = process.env.PORT || 3000;
 
+export async function startServer(port: string | number = PORT) {
+  await initServer();
+  return app.listen(port, () => {
+    console.log(`Server listening on http://localhost:${port}`);
+  });
+}
+
 // Only start server if run directly (not imported for tests)
 if (process.argv[1] && process.argv[1].endsWith('server/index.js')) {
-  initServer().then(() => {
-    app.listen(PORT, () => {
-      console.log(`Server listening on http://localhost:${PORT}`);
-    });
-  }).catch(err => {
+  startServer().catch(err => {
     console.error('Failed to initialize server:', err);
     process.exit(1);
   });
