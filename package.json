@@ -7,11 +7,12 @@
   "types": "dist/index.d.ts",
   "scripts": {
     "build": "tsc && tsc-alias",
+    "start": "node dist/server/index.js",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "lint": "eslint . --ext .ts",
-    "dev": "tsx watch examples/sample-bot/index.ts",
+    "dev": "tsx watch server/index.ts",
     "engine:test": "vitest run tests/engine"
   },
   "keywords": [

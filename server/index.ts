@@ -7,6 +7,7 @@ import { createExecutor, clearExecutorCache } from '../bot-executor/index.js';
 import { configuredDockerImage } from '../bot-executor/image-config.js';
 import { createExecutionQueue } from '../bot-executor/execution-queue.js';
 import * as fs from 'fs/promises';
+import { existsSync } from 'node:fs';
 import bcrypt from 'bcryptjs';
 import { randomBytes, randomUUID } from 'crypto';
 import { closeSharedDatabase, initializeDatabase, setSharedDatabase } from './db.js';
@@ -15,9 +16,16 @@ import { SqlUserRepository } from './repositories/user-repository.js';
 import { SqlSessionRepository } from './repositories/session-repository.js';
 import { SqlRateLimitRepository } from './repositories/rate-limit-repository.js';
 import type { ExecutionPolicy } from '../bot-executor/types.js';
+import type { Server } from 'node:http';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+const projectRootCandidates = [
+  path.resolve(__dirname, '..'),
+  path.resolve(__dirname, '..', '..'),
+];
+const projectRoot = projectRootCandidates.find(root => existsSync(path.join(root, 'index.html')))
+  ?? projectRootCandidates[0]!;
 
 const app = express();
 app.use(cors({
@@ -35,9 +43,9 @@ app.use((err: any, req: express.Request, res: express.Response, next: express.Ne
 });
 
 // 2. Serve static files explicitly to prevent repository exposure
-app.get('/', (req, res) => res.sendFile(path.join(__dirname, '../../index.html')));
-app.get('/app.js', (req, res) => res.sendFile(path.join(__dirname, '../../app.js')));
-app.get('/style.css', (req, res) => res.sendFile(path.join(__dirname, '../../style.css')));
+app.get('/', (req, res) => res.sendFile(path.join(projectRoot, 'index.html')));
+app.get('/app.js', (req, res) => res.sendFile(path.join(projectRoot, 'app.js')));
+app.get('/style.css', (req, res) => res.sendFile(path.join(projectRoot, 'style.css')));
 // Serve static icons if they were separate, but they are embedded in index.html
 
 // Initialize singleton Tournament Manager
@@ -77,20 +85,26 @@ export async function initServer(storageDir?: string) {
   const executionPolicy = resolveExecutionPolicy();
   // Fail configuration before opening persistence or accepting a listener.
   if (executionPolicy === 'sandbox-required') configuredDockerImage(undefined, executionPolicy);
-  const dir = storageDir || path.join(__dirname, '../../data/tournaments');
+  const dir = storageDir || process.env.TOURNAMENT_DATA_DIR || path.join(projectRoot, 'data/tournaments');
   await fs.mkdir(dir, { recursive: true });
   executionQueue = createExecutionQueue({ maxConcurrent: 2, maxQueueLength: 50 });
   activeTournamentRuns.clear();
   closeSharedDatabase();
-  const db = await initializeDatabase({ path: path.join(dir, 'arena.sqlite') });
-  setSharedDatabase(db);
-  botRepository = new SqlBotRepository(db);
-  userRepository = new SqlUserRepository(db);
-  sessionRepository = new SqlSessionRepository(db, SESSION_TTL_MS);
-  rateLimitRepository = new SqlRateLimitRepository(db);
-  sessionRepository.deleteExpired();
-  manager = await createTournamentManager(dir, undefined, executionPolicy);
-  console.log(`Tournament Manager initialized with ${executionPolicy} policy`);
+  try {
+    const db = await initializeDatabase({ path: path.join(dir, 'arena.sqlite') });
+    setSharedDatabase(db);
+    botRepository = new SqlBotRepository(db);
+    userRepository = new SqlUserRepository(db);
+    sessionRepository = new SqlSessionRepository(db, SESSION_TTL_MS);
+    rateLimitRepository = new SqlRateLimitRepository(db);
+    sessionRepository.deleteExpired();
+    manager = await createTournamentManager(dir, undefined, executionPolicy);
+    console.log(`Tournament Manager initialized with ${executionPolicy} policy`);
+  } catch (error) {
+    closeSharedDatabase();
+    executionQueue.cancelAll();
+    throw error;
+  }
 }
 
 export function closeServer(): void {
@@ -425,17 +439,42 @@ export const appExport = app; // Exported for testing
 
 const PORT = process.env.PORT || 3000;
 
-export async function startServer(port: string | number = PORT) {
+export function isDirectExecution(moduleUrl: string, argv1 = process.argv[1]): boolean {
+  if (!argv1) return false;
+  try {
+    const modulePath = path.resolve(fileURLToPath(moduleUrl));
+    const invokedPath = path.resolve(argv1);
+    return process.platform === 'win32'
+      ? modulePath.toLowerCase() === invokedPath.toLowerCase()
+      : modulePath === invokedPath;
+  } catch {
+    return false;
+  }
+}
+
+export async function startServer(port: string | number = PORT): Promise<Server> {
   await initServer();
-  return app.listen(port, () => {
-    console.log(`Server listening on http://localhost:${port}`);
+  return await new Promise<Server>((resolve, reject) => {
+    const server = app.listen(port);
+    const onError = (error: Error) => {
+      server.close();
+      closeServer();
+      reject(error);
+    };
+    server.once('error', onError);
+    server.once('listening', () => {
+      server.off('error', onError);
+      console.log(`Server listening on http://localhost:${port}`);
+      resolve(server);
+    });
   });
 }
 
 // Only start server if run directly (not imported for tests)
-if (process.argv[1] && process.argv[1].endsWith('server/index.js')) {
-  startServer().catch(err => {
-    console.error('Failed to initialize server:', err);
+if (isDirectExecution(import.meta.url)) {
+  startServer().catch(error => {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(`Failed to start server: ${message}`);
     process.exit(1);
   });
 }

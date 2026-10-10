@@ -187,9 +187,46 @@ npm test
 
 #### Khởi chạy Web Interface (MVP)
 ```bash
-node dist/server/index.js
+npm start
 # Truy cập: http://localhost:3000
 ```
+`npm start` runs the built production entry point. Build first with `npm run build`.
+
+For local development with automatic TypeScript reload:
+```bash
+npm run dev
+```
+The development server uses `NODE_ENV=development` and `EXECUTION_POLICY=development`
+when those variables are set explicitly:
+```powershell
+$env:NODE_ENV = 'development'
+$env:EXECUTION_POLICY = 'development'
+npm run dev
+```
+On Unix-like shells:
+```bash
+NODE_ENV=development EXECUTION_POLICY=development npm run dev
+```
+
+`TOURNAMENT_DATA_DIR` optionally selects the persistence directory. Relative paths
+are resolved from the process working directory; absolute paths are used as-is.
+If it is omitted, the default is `data/tournaments` under the project root. Use
+a dedicated temporary directory for tests and local experiments rather than the
+default application data directory.
+
+Production requires Docker and an approved immutable `BOT_DOCKER_IMAGE` digest:
+```powershell
+$env:NODE_ENV = 'production'
+$env:EXECUTION_POLICY = 'sandbox-required'
+$env:BOT_DOCKER_IMAGE = 'ghcr.io/OWNER/ott-code-arena-bot@sha256:ACTUAL_64_HEX_DIGEST'
+npm run build
+npm start
+```
+Do not replace the digest with a tag or invent a digest. Startup rejects invalid
+production configuration before opening a listening socket and never falls back to
+host execution. If startup reports a configuration or Docker error, verify the
+environment variables, Docker daemon, and approved image before retrying.
+
 Từ giao diện web, bạn có thể tạo giải đấu, đăng ký bot (VD: mẫu có sẵn là `sample-bot` và `random-bot`), sinh lịch thi đấu, chạy các trận đấu và xem Replay.
 
 #### Chạy bot mẫu (first-move strategy)
@@ -223,7 +260,7 @@ console.log('Winner:', result.winner, '| Reason:', result.terminationReason, '| 
 #### Chạy với tsx (hot reload cho development)
 ```bash
 npm run dev
-# Runs examples/sample-bot with tsx watch
+# Runs the HTTP server with tsx watch
 ```
 
 #### Tạo Tournament Manager (Phase 4 & 5.1)
