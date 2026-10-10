@@ -58,22 +58,28 @@ jobs:
       - name: Verify network isolation
         run: |
           docker run --rm --network none node:20-alpine sh -c \
-            "wget -q -T 2 http://example.com 2>&1 || echo 'NETWORK_BLOCKED: network isolation confirmed'"
+            "if wget -q -T 2 http://example.com; then echo 'NETWORK_ACCESS_ALLOWED: isolation failed'; exit 1; else echo 'NETWORK_BLOCKED: network isolation confirmed'; fi"
 
       - name: Verify read-only filesystem
         run: |
           docker run --rm --read-only --tmpfs /tmp:rw,noexec,nosuid,size=10m node:20-alpine sh -c \
-            "touch /test-write 2>&1 || echo 'READONLY_FS: filesystem restriction confirmed'"
+            "if touch /test-write; then echo 'READONLY_FS_WRITABLE: restriction failed'; exit 1; else echo 'READONLY_FS: filesystem restriction confirmed'; fi"
 
       - name: Verify resource limits
         run: |
-          docker run --rm --memory=64m --pids-limit=16 node:20-alpine sh -c \
-            "echo 'RESOURCE_LIMITS: constraints applied successfully'"
+          container_id=$(docker run -d --memory=64m --pids-limit=16 node:20-alpine sleep 5)
+          trap 'docker rm -f "$container_id" >/dev/null 2>&1 || true' EXIT
+          limits=$(docker inspect --format '{{.HostConfig.Memory}} {{.HostConfig.PidsLimit}}' "$container_id")
+          test "$limits" = "67108864 16"
+          echo "RESOURCE_LIMITS: $limits"
 
       - name: Verify security options
         run: |
-          docker run --rm --security-opt no-new-privileges:true --cap-drop ALL node:20-alpine sh -c \
-            "echo 'SECURITY_OPTS: no-new-privileges and cap-drop ALL applied'"
+          container_id=$(docker run -d --security-opt no-new-privileges:true --cap-drop ALL node:20-alpine sleep 5)
+          trap 'docker rm -f "$container_id" >/dev/null 2>&1 || true' EXIT
+          security_options=$(docker inspect --format '{{join .HostConfig.SecurityOpt " "}} {{join .HostConfig.CapDrop " "}}' "$container_id")
+          test "$security_options" = "no-new-privileges:true ALL"
+          echo "SECURITY_OPTS: $security_options"
 
       - name: Upload test logs on failure
         if: failure()
