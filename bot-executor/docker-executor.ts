@@ -21,6 +21,7 @@ import type {
   ResourceLimits,
   ExecutorConfig,
 } from './types.js';
+import { validateDockerImage } from './image-config.js';
 
 interface DockerExecutorConfig extends ExecutorConfig {
   image: string;
@@ -57,7 +58,9 @@ export class DockerExecutor implements BotExecutor {
       defaultMaxStderrBytes: 10 * 1024 * 1024,
       allowedEnvVars: ['PATH', 'HOME', 'USER', 'TEMP', 'TMP', 'NODE_OPTIONS'],
       workingDirBase: process.cwd(),
-      image: 'ott-code-arena-bot:latest',
+      // Direct construction is kept non-throwing for diagnostics/tests; execution
+      // availability rejects an empty image. Factory creation validates eagerly.
+      image: config.image ?? process.env.BOT_DOCKER_IMAGE ?? '',
       dockerBinary: 'docker',
       networkMode: 'none',
       memoryLimit: '256m',
@@ -85,7 +88,11 @@ export class DockerExecutor implements BotExecutor {
     if (this.dockerAvailable) return true;
 
     try {
+      validateDockerImage(this.config.image, this.config.executionPolicy);
       await this.runDockerCommand(['version', '--format', '{{.Server.Version}}']);
+      // A reachable daemon alone is insufficient: fail before executing when the
+      // selected immutable/local image is absent rather than allowing Docker pull policy.
+      await this.runDockerCommand(['image', 'inspect', this.config.image]);
       this.dockerAvailable = true;
       return true;
     } catch {

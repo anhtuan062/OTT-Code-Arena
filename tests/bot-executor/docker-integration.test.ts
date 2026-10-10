@@ -13,8 +13,9 @@ import type { BotProcessConfig, BotRequestMessage, ExecutionContext, BotExecutio
 
 // Check Docker availability
 let dockerAvailable = false;
+const testImage = process.env.BOT_DOCKER_IMAGE || 'node:20-alpine';
 const dockerExecutor = createDockerExecutor({
-  image: 'node:20-alpine',
+  image: testImage,
   dockerBinary: 'docker',
   networkMode: 'none',
   memoryLimit: '256m',
@@ -95,7 +96,7 @@ describe('DockerExecutor - Integration Tests (requires Docker)', () => {
   beforeEach(() => {
     if (!dockerAvailable) return;
     executor = createDockerExecutor({
-      image: 'node:20-alpine',
+      image: testImage,
       dockerBinary: 'docker',
       networkMode: 'none',
       memoryLimit: '256m',

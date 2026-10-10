@@ -8,7 +8,7 @@ import {
 import { appExport, initServer, resolveExecutionPolicy, startServer } from '../../server/index.js';
 
 describe('Execution Policy', () => {
-  const unavailableDocker = { dockerBinary: '__ott_missing_docker_for_test__' };
+  const unavailableDocker = { dockerBinary: '__ott_missing_docker_for_test__', image: `ghcr.io/test/ott@sha256:${'a'.repeat(64)}` };
 
   beforeEach(() => {
     clearExecutorCache();

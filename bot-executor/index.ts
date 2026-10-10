@@ -7,6 +7,7 @@
 import type { BotExecutor, ExecutorConfig, DockerExecutorConfig, ExecutionPolicy } from './types.js';
 import { ChildProcessExecutor, createChildProcessExecutor } from './child-process-executor.js';
 import { DockerExecutor, createDockerExecutor } from './docker-executor.js';
+import { configuredDockerImage } from './image-config.js';
 
 export type ExecutorType = 'auto' | 'child-process' | 'docker';
 
@@ -26,19 +27,28 @@ export async function createExecutor(config: ExecutorFactoryConfig = {}): Promis
 
   const { type = 'auto', childProcessConfig, dockerConfig } = config;
   const policy = childProcessConfig?.executionPolicy ?? dockerConfig?.executionPolicy ?? 'development';
-
   if (type === 'child-process') {
-    if (policy === 'sandbox-required') {
-      throw new Error('Sandbox-required policy does not allow child-process executor');
-    }
+    if (policy === 'sandbox-required') throw new Error('Sandbox-required policy does not allow child-process executor');
     cachedExecutor = createChildProcessExecutor(childProcessConfig);
     cachedExecutorType = 'child-process';
     cachedPolicy = policy;
     return cachedExecutor;
   }
+  const image = dockerConfig?.image ?? process.env.BOT_DOCKER_IMAGE;
+  if (!image && type === 'auto' && policy === 'development') {
+    cachedExecutor = createChildProcessExecutor(childProcessConfig);
+    cachedExecutorType = 'child-process';
+    cachedPolicy = policy;
+    return cachedExecutor;
+  }
+  const resolvedDockerConfig = {
+    ...dockerConfig,
+    executionPolicy: policy,
+    image: configuredDockerImage(dockerConfig?.image, policy),
+  };
 
   if (type === 'docker') {
-    const dockerExecutor = createDockerExecutor(dockerConfig);
+    const dockerExecutor = createDockerExecutor(resolvedDockerConfig);
     const available = await dockerExecutor.isAvailable();
     if (!available) {
       throw new Error('Docker executor requested but Docker is not available');
@@ -50,7 +60,7 @@ export async function createExecutor(config: ExecutorFactoryConfig = {}): Promis
   }
 
   // Auto-detect: try Docker first
-  const dockerExecutor = createDockerExecutor(dockerConfig);
+  const dockerExecutor = createDockerExecutor(resolvedDockerConfig);
   const available = await dockerExecutor.isAvailable();
 
   if (available) {
@@ -95,4 +105,5 @@ export { DockerExecutor, createDockerExecutor } from './docker-executor.js';
 export { BotRunnerAdapter, createBotRunnerAdapter } from './bot-runner-adapter.js';
 export { ExecutionQueue, createExecutionQueue } from './execution-queue.js';
 export { ExecutionAuditLogger, createAuditLogger } from './audit-logger.js';
+export { configuredDockerImage, validateDockerImage, isProductionImagePolicy } from './image-config.js';
 export * from './types.js';

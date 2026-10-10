@@ -1,0 +1,43 @@
+name: Verified sandbox image build
+
+on:
+  workflow_dispatch:
+    inputs:
+      base_image:
+        description: 'Approved base image pinned by sha256 digest'
+        required: true
+        type: string
+      local_tag:
+        description: 'Temporary CI image tag (not published)'
+        required: false
+        default: 'ott-code-arena-bot:ci'
+        type: string
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+      - run: npm ci
+      - name: Validate approved immutable base
+        env:
+          BASE_IMAGE: ${{ inputs.base_image }}
+        run: |
+          echo "$BASE_IMAGE" | grep -Eq '@sha256:[a-f0-9]{64}$'
+      - name: Build non-published image
+        run: docker build --pull --build-arg BASE_IMAGE='${{ inputs.base_image }}' -t '${{ inputs.local_tag }}' .
+      - name: Record local image identity (not a registry manifest digest)
+        run: docker image inspect '${{ inputs.local_tag }}' --format 'local_image_id={{.Id}}' | tee image-identity.txt
+      - run: npm run build
+      - name: Run Docker security integration tests
+        env:
+          BOT_DOCKER_IMAGE: ${{ inputs.local_tag }}
+        run: npx vitest run tests/bot-executor/docker-integration.test.ts
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sandbox-image-identity
+          path: image-identity.txt

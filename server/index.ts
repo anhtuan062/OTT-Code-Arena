@@ -4,6 +4,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { createTournamentManager } from '../tournament/manager.js';
 import { createExecutor, clearExecutorCache } from '../bot-executor/index.js';
+import { configuredDockerImage } from '../bot-executor/image-config.js';
 import { createExecutionQueue } from '../bot-executor/execution-queue.js';
 import * as fs from 'fs/promises';
 import bcrypt from 'bcryptjs';
@@ -74,6 +75,8 @@ export function resolveExecutionPolicy(env: NodeJS.ProcessEnv = process.env): Ex
 
 export async function initServer(storageDir?: string) {
   const executionPolicy = resolveExecutionPolicy();
+  // Fail configuration before opening persistence or accepting a listener.
+  if (executionPolicy === 'sandbox-required') configuredDockerImage(undefined, executionPolicy);
   const dir = storageDir || path.join(__dirname, '../../data/tournaments');
   await fs.mkdir(dir, { recursive: true });
   executionQueue = createExecutionQueue({ maxConcurrent: 2, maxQueueLength: 50 });

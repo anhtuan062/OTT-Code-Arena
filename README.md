@@ -1,5 +1,40 @@
 # OTT Code Arena
 
+## Sandbox Docker image configuration
+
+Bot containers run Node.js and Python 3 from the dedicated sandbox image. The executor
+keeps network disabled, the root filesystem read-only, `/tmp` as a `noexec,nosuid`
+tmpfs, all capabilities dropped, `no-new-privileges`, and CPU/memory/PID limits.
+
+`BOT_DOCKER_IMAGE` is the single image-selection setting. In production (or under
+`sandbox-required`) it is mandatory and must be a registry-qualified immutable digest:
+
+```sh
+BOT_DOCKER_IMAGE=ghcr.io/OWNER/ott-code-arena-bot@sha256:ACTUAL_64_HEX_DIGEST
+```
+
+Do not use the placeholder value above. Obtain the digest from the approved registry
+manifest after review. Tags, including `latest`, are rejected in production. The
+executor checks that Docker and the selected image are available before accepting
+execution; it never falls back to host execution under `sandbox-required`.
+
+For intentional local development only, build with an approved, digest-pinned Node
+Alpine base and select the resulting local tag explicitly:
+
+```sh
+docker build --build-arg BASE_IMAGE='node:20-alpine@sha256:<approved-base-digest>' -t ott-code-arena-bot:dev .
+BOT_DOCKER_IMAGE=ott-code-arena-bot:dev npm test
+```
+
+The Dockerfile deliberately has no baked-in mutable base tag. Verify a candidate with
+`docker image inspect IMAGE --format '{{index .RepoDigests 0}} {{.Id}}'`, record the
+registry digest in the release review, then promote that exact digest to production.
+To roll back, change `BOT_DOCKER_IMAGE` to the previous approved digest and restart.
+If Docker/image inspection fails, install/start Docker and build or pull the exact
+approved image; production startup intentionally fails closed rather than using a
+local process. The manual `Verified sandbox image build` workflow builds and tests an
+input digest without publishing it, and uploads the observed local image identity.
+
 > Nền tảng tổ chức giải đấu lập trình bot cho trò chơi OTTv2 (Oẳn tù tì v2).
 
 ## 1. Mục tiêu dự án
