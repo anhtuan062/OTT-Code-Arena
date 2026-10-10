@@ -8,7 +8,7 @@
 import { describe, it, expect, beforeAll, afterAll, vi, beforeEach } from 'vitest';
 import * as fs from 'fs/promises';
 import * as path from 'path';
-import { DockerExecutor, createDockerExecutor } from '@bot-executor/index.js';
+import { DockerExecutor, createDockerExecutor, isSafeExecutionId } from '@bot-executor/index.js';
 import type { BotProcessConfig, BotRequestMessage, ExecutionContext, BotExecutionResult } from '@bot-executor/types.js';
 
 // Check Docker availability
@@ -442,6 +442,41 @@ describe('DockerExecutor - Integration Tests (requires Docker)', () => {
 });
 
 describe('DockerExecutor - Static verification (no Docker required)', () => {
+  it('rejects execution identifiers that could escape the temporary directory', () => {
+    expect(isSafeExecutionId('match-1-turn-2-A')).toBe(true);
+    expect(isSafeExecutionId('tournament_match-123_turn-7_B')).toBe(true);
+    expect(isSafeExecutionId('../outside')).toBe(false);
+    expect(isSafeExecutionId('nested/value')).toBe(false);
+    expect(isSafeExecutionId('nested\\value')).toBe(false);
+    expect(isSafeExecutionId('contains space')).toBe(false);
+    expect(isSafeExecutionId('contains\tcontrol')).toBe(false);
+    expect(isSafeExecutionId('.')).toBe(false);
+    expect(isSafeExecutionId('')).toBe(false);
+    expect(isSafeExecutionId('x'.repeat(129))).toBe(false);
+  });
+
+  it('rejects an unsafe execution before checking Docker availability', async () => {
+    const executor = createDockerExecutor({ image: 'test-image:latest' });
+    const availabilityCheck = vi.spyOn(executor, 'isAvailable');
+
+    const result = await executor.execute(
+      createContext('../outside'),
+      {
+        botId: 'test-bot',
+        command: 'node',
+        args: ['bot.js'],
+        timeoutMs: 2000,
+        maxStdoutBytes: 1024,
+        maxStderrBytes: 1024,
+      },
+      createValidRequest()
+    );
+
+    expect(result.success).toBe(false);
+    expect(result.error?.code).toBe('SECURITY_VIOLATION');
+    expect(availabilityCheck).not.toHaveBeenCalled();
+  });
+
   it('should construct correct docker run arguments', () => {
     const executor = createDockerExecutor({
       image: 'test-image:latest',

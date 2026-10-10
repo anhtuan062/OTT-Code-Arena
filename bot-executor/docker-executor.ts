@@ -106,6 +106,17 @@ export class DockerExecutor implements BotExecutor {
     processConfig: BotProcessConfig,
     request: BotRequestMessage
   ): Promise<BotExecutionResult> {
+    if (!isSafeExecutionId(context.executionId)) {
+      return this.createErrorResult(
+        'SECURITY_VIOLATION',
+        'Execution identifier contains unsupported characters',
+        false,
+        null,
+        '',
+        '',
+        0
+      );
+    }
     const available = await this.isAvailable();
     if (!available) {
       return this.createErrorResult(
@@ -480,6 +491,12 @@ export class DockerExecutor implements BotExecutor {
       durationMs,
     };
   }
+}
+
+export function isSafeExecutionId(executionId: string): boolean {
+  return executionId.length > 0
+    && executionId.length <= 128
+    && /^[A-Za-z0-9_-]+$/.test(executionId);
 }
 
 export function createDockerExecutor(config?: Partial<DockerExecutorConfig>): DockerExecutor {

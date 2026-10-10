@@ -101,7 +101,7 @@ export function clearExecutorCache(): void {
 }
 
 export { ChildProcessExecutor, createChildProcessExecutor } from './child-process-executor.js';
-export { DockerExecutor, createDockerExecutor } from './docker-executor.js';
+export { DockerExecutor, createDockerExecutor, isSafeExecutionId } from './docker-executor.js';
 export { BotRunnerAdapter, createBotRunnerAdapter } from './bot-runner-adapter.js';
 export { ExecutionQueue, createExecutionQueue } from './execution-queue.js';
 export { ExecutionAuditLogger, createAuditLogger } from './audit-logger.js';
