@@ -1,529 +1,525 @@
 const API_URL = '/api';
-let currentUser = null;
-let csrfToken = null;
+const state = {
+  user: null,
+  csrfToken: null,
+  activeView: 'auth-screen',
+  tournamentId: null,
+  replay: null,
+  replayMoveIndex: -1,
+  modalReturnFocus: null,
+  authRevision: 0,
+  viewRevision: 0,
+  loading: new Set(),
+  error: null,
+  pending: new Set(),
+};
 
-// Utilities
+const $ = (selector, root = document) => root.querySelector(selector);
+const create = (tag, options = {}) => {
+  const element = document.createElement(tag);
+  if (options.className) element.className = options.className;
+  if (options.text !== undefined) element.textContent = String(options.text);
+  if (options.type) element.type = options.type;
+  if (options.attrs) Object.entries(options.attrs).forEach(([name, value]) => element.setAttribute(name, String(value)));
+  return element;
+};
+const clear = (element) => element.replaceChildren();
+const textCell = (text, tag = 'td') => create(tag, { text });
+
+function icon(id) {
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('viewBox', '0 0 24 24');
+  svg.setAttribute('aria-hidden', 'true');
+  const use = document.createElementNS('http://www.w3.org/2000/svg', 'use');
+  use.setAttribute('href', `#${id}`);
+  svg.appendChild(use);
+  return svg;
+}
+
+function statusBadge(status) {
+  const normalized = safeStatusClass(status);
+  return create('span', {
+    className: `status-badge status-${normalized}`,
+    text: normalized.replaceAll('_', ' ').toUpperCase(),
+  });
+}
+
+function safeStatusClass(status) {
+  const normalized = String(status || 'unknown');
+  return /^[a-z][a-z0-9_-]*$/i.test(normalized) ? normalized : 'unknown';
+}
+
+function actionButton(label, action, key, className = 'secondary-btn') {
+  const button = create('button', { className, text: label, type: 'button' });
+  button.disabled = state.pending.has(key);
+  button.addEventListener('click', () => runPending(key, button, action));
+  return button;
+}
+
+async function runPending(key, button, action) {
+  if (state.pending.has(key)) return;
+  state.pending.add(key);
+  if (button) button.disabled = true;
+  try { return await action(); }
+  catch (error) {
+    if (!error?.notified) showToast(error?.message || 'Action failed. Please try again.', 'error');
+    return undefined;
+  } finally {
+    state.pending.delete(key);
+    if (button) button.disabled = false;
+  }
+}
+
 function showToast(message, type = 'info') {
-  const container = document.getElementById('toast-container');
+  const container = $('#toast-container');
   if (!container) return;
-  const toast = document.createElement('div');
-  toast.className = `toast toast-${type}`;
-  toast.innerHTML = `<span>${message}</span>`;
+  const toast = create('div', { className: `toast toast-${type}`, attrs: { role: type === 'error' ? 'alert' : 'status' } });
+  toast.appendChild(create('span', { text: message }));
   container.appendChild(toast);
   requestAnimationFrame(() => toast.classList.add('show'));
-  setTimeout(() => {
-    toast.classList.remove('show');
-    setTimeout(() => toast.remove(), 300);
-  }, 3000);
+  setTimeout(() => { toast.classList.remove('show'); setTimeout(() => toast.remove(), 300); }, 3000);
+}
+
+function renderMessage(container, message, retry) {
+  clear(container);
+  const wrapper = create('div', { className: 'ui-message' });
+  wrapper.appendChild(create('p', { text: message }));
+  if (retry) wrapper.appendChild(actionButton('Try again', retry, `retry:${container.id}`));
+  container.appendChild(wrapper);
+}
+
+function renderTableMessage(tbody, message, columns, retry) {
+  clear(tbody);
+  const row = create('tr');
+  const cell = create('td', { text: message, attrs: { colspan: columns } });
+  cell.className = 'table-message';
+  if (retry) cell.appendChild(actionButton('Try again', retry, `retry:${tbody.parentElement?.id || 'table'}`));
+  row.appendChild(cell);
+  tbody.appendChild(row);
 }
 
 function openModal(id) {
-  document.getElementById(id).classList.add('open');
+  const modal = document.getElementById(id);
+  if (!modal) return;
+  state.modalReturnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  modal.classList.add('open');
+  modal.setAttribute('aria-hidden', 'false');
+  const focusable = modal.querySelector('input, select, button');
+  if (focusable instanceof HTMLElement) focusable.focus();
 }
 
 function closeModal(id) {
-  document.getElementById(id).classList.remove('open');
+  const modal = document.getElementById(id);
+  if (!modal) return;
+  modal.classList.remove('open');
+  modal.setAttribute('aria-hidden', 'true');
+  if (state.modalReturnFocus?.isConnected) state.modalReturnFocus.focus();
+  state.modalReturnFocus = null;
 }
 
-function navigate(pageId) {
-  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
-  document.querySelectorAll('.nav-link').forEach(l => l.classList.remove('active'));
-
-  document.getElementById(pageId).classList.add('active');
-  const link = document.querySelector(`.nav-link[data-target="${pageId}"]`);
-  if (link) link.classList.add('active');
-
-  if (pageId === 'dashboard') loadDashboard();
-  else if (pageId === 'bots') loadBots();
-  else if (pageId === 'tournaments') loadTournaments();
+function trapModalFocus(event) {
+  if (event.key !== 'Tab') return;
+  const modal = document.querySelector('.modal-overlay.open');
+  if (!modal) return;
+  const focusable = [...modal.querySelectorAll('input, select, button:not([disabled])')];
+  if (!focusable.length) return;
+  const first = focusable[0];
+  const last = focusable[focusable.length - 1];
+  if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+  else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
 }
 
-function setAuthenticated(user, csrf) {
-  currentUser = user;
-  csrfToken = csrf;
-  document.getElementById('auth-screen').hidden = true;
-  document.getElementById('app-nav').hidden = false;
-  document.getElementById('current-user').textContent = user.username;
-  document.getElementById('dashboard').classList.add('active');
-  loadDashboard();
+function isCurrentView(view, authRevision, viewRevision, tournamentId) {
+  return state.user && state.authRevision === authRevision && state.viewRevision === viewRevision && state.activeView === view
+    && (tournamentId === undefined || state.tournamentId === tournamentId);
+}
+
+function navigate(view) {
+  const target = document.getElementById(view);
+  if (!target) return;
+  state.activeView = view;
+  state.viewRevision += 1;
+  document.querySelectorAll('.page').forEach(page => page.classList.remove('active'));
+  document.querySelectorAll('.nav-link').forEach(link => {
+    const active = link.dataset.target === view;
+    link.classList.toggle('active', active);
+    link.setAttribute('aria-current', active ? 'page' : 'false');
+  });
+  target.classList.add('active');
+  if (view === 'dashboard') void loadDashboard();
+  if (view === 'bots') void loadBots();
+  if (view === 'tournaments') void loadTournaments();
+}
+
+function setAuthenticated(user, csrfToken) {
+  state.authRevision += 1;
+  state.user = user;
+  state.csrfToken = csrfToken;
+  $('#auth-screen').hidden = true;
+  $('#app-nav').hidden = false;
+  $('#current-user').textContent = user.username;
+  navigate('dashboard');
 }
 
 function showAuthScreen() {
-  currentUser = null;
-  csrfToken = null;
-  document.getElementById('auth-screen').hidden = false;
-  document.getElementById('app-nav').hidden = true;
+  state.authRevision += 1;
+  state.viewRevision += 1;
+  state.user = null;
+  state.csrfToken = null;
+  state.tournamentId = null;
+  state.replay = null;
+  document.querySelectorAll('.modal-overlay.open').forEach(modal => {
+    modal.classList.remove('open');
+    modal.setAttribute('aria-hidden', 'true');
+  });
+  state.modalReturnFocus = null;
+  state.activeView = 'auth-screen';
+  $('#auth-screen').hidden = false;
+  $('#app-nav').hidden = true;
   document.querySelectorAll('.page:not(#auth-screen)').forEach(page => page.classList.remove('active'));
+  $('#auth-screen').classList.add('active');
 }
 
-// Navigation binding
-document.querySelectorAll('.nav-link').forEach(link => {
-  link.addEventListener('click', (e) => {
-    navigate(e.currentTarget.dataset.target);
-  });
-});
-
-setInterval(refreshQueueStats, 5000);
-
-// API Calls
-async function api(path, options = {}) {
+async function request(path, options = {}) {
+  const method = (options.method || 'GET').toUpperCase();
+  const headers = { Accept: 'application/json', ...options.headers };
+  if (options.body !== undefined && !headers['Content-Type']) headers['Content-Type'] = 'application/json';
+  if (state.csrfToken && !['GET', 'HEAD', 'OPTIONS'].includes(method)) headers['x-csrf-token'] = state.csrfToken;
+  let response;
   try {
-    const method = (options.method || 'GET').toUpperCase();
-    const headers = { 'Content-Type': 'application/json', ...options.headers };
-    if (csrfToken && method !== 'GET' && method !== 'HEAD') headers['x-csrf-token'] = csrfToken;
-    const res = await fetch(`${API_URL}${path}`, {
-      ...options,
-      credentials: 'same-origin',
-      headers
-    });
-    const data = res.status === 204 ? null : await res.json();
-    if (!res.ok) {
-      if (res.status === 401) showAuthScreen();
-      throw new Error(data?.error || 'API Error');
-    }
-    return data;
-  } catch (err) {
-    if (err.message) showToast(err.message, 'error');
-    throw err;
+    response = await fetch(`${API_URL}${path}`, { ...options, method, headers, credentials: 'same-origin' });
+  } catch {
+    throw new Error('Network error. Check your connection and try again.');
+  }
+  let body = null;
+  if (response.status !== 204) {
+    try { body = await response.json(); }
+    catch { throw new Error(response.ok ? 'Invalid server response.' : `Request failed (${response.status}).`); }
+  }
+  if (!response.ok) {
+    if (response.status === 401) showAuthScreen();
+    const error = new Error(body?.error || `Request failed (${response.status}).`);
+    error.status = response.status;
+    throw error;
+  }
+  return body;
+}
+
+async function api(path, options = {}) {
+  try { return await request(path, options); }
+  catch (error) {
+    state.error = error.message || 'Request failed.';
+    if (error && typeof error === 'object') error.notified = true;
+    showToast(state.error, 'error');
+    throw error;
   }
 }
 
 async function restoreSession() {
   try {
-    const result = await api('/auth/me');
+    const result = await request('/auth/me');
     setAuthenticated(result.user, result.csrfToken);
-  } catch {
-    showAuthScreen();
-  }
+  } catch { showAuthScreen(); }
 }
 
-document.getElementById('login-form').addEventListener('submit', async (event) => {
-  event.preventDefault();
-  try {
-    const result = await api('/auth/login', {
-      method: 'POST',
-      body: JSON.stringify({
-        username: document.getElementById('login-username').value,
-        password: document.getElementById('login-password').value
-      })
-    });
-    setAuthenticated(result.user, result.csrfToken);
-  } catch {}
-});
-
-document.getElementById('register-form').addEventListener('submit', async (event) => {
-  event.preventDefault();
-  try {
-    const result = await api('/auth/register', {
-      method: 'POST',
-      body: JSON.stringify({
-        username: document.getElementById('register-username').value,
-        password: document.getElementById('register-password').value
-      })
-    });
-    setAuthenticated(result.user, result.csrfToken);
-  } catch {}
-});
-
-document.getElementById('logout-button').addEventListener('click', async () => {
-  try {
-    await api('/auth/logout', { method: 'POST' });
-  } finally {
-    showAuthScreen();
-  }
-});
-
-restoreSession();
-
-// ---------------------------------------------------
-// Dashboard
-// ---------------------------------------------------
 async function refreshQueueStats() {
+  if (!state.user) return;
+  const authRevision = state.authRevision;
+  const viewRevision = state.viewRevision;
   try {
-    const stats = await api('/system/queue');
-    document.getElementById('queue-stats').textContent =
-      `Queue: ${stats.activeCount}/${stats.maxConcurrent} active, ${stats.queueLength} queued`;
-  } catch (e) {
-    document.getElementById('queue-stats').textContent = 'Queue status offline';
+    const stats = await request('/system/queue');
+    if (!isCurrentView(state.activeView, authRevision, viewRevision)) return;
+    $('#queue-stats').textContent = `Queue: ${stats.activeCount}/${stats.maxConcurrent} active, ${stats.queueLength} queued`;
+  } catch {
+    if (isCurrentView(state.activeView, authRevision, viewRevision)) $('#queue-stats').textContent = 'Queue status unavailable';
   }
 }
 
 async function loadDashboard() {
-  refreshQueueStats();
-  const [tourneys, bots] = await Promise.all([
-    api('/tournaments').catch(() => []),
-    api('/bots').catch(() => [])
-  ]);
-
-  document.getElementById('dash-tourney-count').textContent = tourneys.length;
-  document.getElementById('dash-bot-count').textContent = bots.length;
-
-  const tbody = document.querySelector('#dash-recent-tourneys tbody');
-  tbody.innerHTML = '';
-
-  tourneys.slice(0, 5).forEach(t => {
-    const tr = document.createElement('tr');
-    tr.innerHTML = `
-      <td>${t.name}</td>
-      <td>${t.format}</td>
-      <td><span class="status-badge status-${t.status}">${t.status.replace('_', ' ').toUpperCase()}</span></td>
-      <td>${t.participants.length}</td>
-      <td><button class="secondary-btn" style="padding: 4px 8px;" onclick="viewTournament('${t.tournamentId}')">View</button></td>
-    `;
-    tbody.appendChild(tr);
-  });
+  const table = $('#dash-recent-tourneys tbody');
+  const authRevision = state.authRevision;
+  const viewRevision = state.viewRevision;
+  state.loading.add('dashboard');
+  state.error = null;
+  renderTableMessage(table, 'Loading tournaments…', 5);
+  void refreshQueueStats();
+  try {
+    const [tournaments, bots] = await Promise.all([request('/tournaments'), request('/bots')]);
+    if (!isCurrentView('dashboard', authRevision, viewRevision)) return;
+    $('#dash-tourney-count').textContent = tournaments.length;
+    $('#dash-bot-count').textContent = bots.length;
+    clear(table);
+    if (!tournaments.length) return renderTableMessage(table, 'No tournaments yet. Create one to get started.', 5);
+    tournaments.slice(0, 5).forEach(tournament => {
+      const row = create('tr');
+      row.append(textCell(tournament.name), textCell(tournament.format), (() => { const cell = create('td'); cell.appendChild(statusBadge(tournament.status)); return cell; })(), textCell(tournament.participants.length));
+      const action = create('td'); action.appendChild(actionButton('View', () => viewTournament(tournament.tournamentId), `view:${tournament.tournamentId}`)); row.appendChild(action);
+      table.appendChild(row);
+    });
+  } catch (error) { if (isCurrentView('dashboard', authRevision, viewRevision)) { state.error = error.message || 'Unable to load dashboard.'; renderTableMessage(table, state.error, 5, loadDashboard); } }
+  finally { state.loading.delete('dashboard'); }
 }
 
-// ---------------------------------------------------
-// Bots
-// ---------------------------------------------------
 async function loadBots() {
-  const bots = await api('/bots');
-  const tbody = document.querySelector('#bots-table tbody');
-  tbody.innerHTML = '';
-  bots.forEach(b => {
-    const tr = document.createElement('tr');
-    tr.innerHTML = `
-      <td><code>${b.id}</code></td>
-      <td>${b.name}</td>
-      <td><code>${b.command}</code></td>
-      <td><code>${b.args.join(' ')}</code></td>
-      <td>${new Date(b.registeredAt).toLocaleString()}</td>
-    `;
-    tbody.appendChild(tr);
-  });
+  const table = $('#bots-table tbody');
+  const authRevision = state.authRevision;
+  const viewRevision = state.viewRevision;
+  state.loading.add('bots');
+  state.error = null;
+  renderTableMessage(table, 'Loading bots…', 5);
+  try {
+    const bots = await request('/bots');
+    if (!isCurrentView('bots', authRevision, viewRevision)) return;
+    clear(table);
+    if (!bots.length) return renderTableMessage(table, 'No bots registered yet.', 5);
+    bots.forEach(bot => {
+      const row = create('tr');
+      const command = textCell(bot.command); const args = textCell(bot.args.join(' '));
+      row.append(textCell(bot.id), textCell(bot.name), command, args, textCell(new Date(bot.registeredAt).toLocaleString()));
+      table.appendChild(row);
+    });
+  } catch (error) { if (isCurrentView('bots', authRevision, viewRevision)) { state.error = error.message || 'Unable to load bots.'; renderTableMessage(table, state.error, 5, loadBots); } }
+  finally { state.loading.delete('bots'); }
+}
+
+async function loadTournaments() {
+  const table = $('#tourneys-table tbody');
+  const authRevision = state.authRevision;
+  const viewRevision = state.viewRevision;
+  state.loading.add('tournaments');
+  state.error = null;
+  renderTableMessage(table, 'Loading tournaments…', 4);
+  try {
+    const tournaments = await request('/tournaments');
+    if (!isCurrentView('tournaments', authRevision, viewRevision)) return;
+    clear(table);
+    if (!tournaments.length) return renderTableMessage(table, 'No tournaments yet. Create one to get started.', 4);
+    tournaments.forEach(tournament => {
+      const row = create('tr');
+      row.append(textCell(tournament.tournamentId), textCell(tournament.name));
+      const status = create('td'); status.appendChild(statusBadge(tournament.status)); row.appendChild(status);
+      const action = create('td'); action.appendChild(actionButton('View', () => viewTournament(tournament.tournamentId), `view:${tournament.tournamentId}`)); row.appendChild(action);
+      table.appendChild(row);
+    });
+  } catch (error) { if (isCurrentView('tournaments', authRevision, viewRevision)) { state.error = error.message || 'Unable to load tournaments.'; renderTableMessage(table, state.error, 4, loadTournaments); } }
+  finally { state.loading.delete('tournaments'); }
 }
 
 async function submitNewBot() {
-  const name = document.getElementById('new-bot-name').value;
-  const command = document.getElementById('new-bot-cmd').value;
-  const argsRaw = document.getElementById('new-bot-args').value;
-  const args = argsRaw ? argsRaw.split(',').map(s => s.trim()) : [];
-
-  try {
+  const button = $('#submit-bot');
+  const authRevision = state.authRevision;
+  await runPending('create-bot', button, async () => {
+    const name = $('#new-bot-name').value;
+    const command = $('#new-bot-cmd').value;
+    const argsRaw = $('#new-bot-args').value;
+    const args = argsRaw ? argsRaw.split(',').map(value => value.trim()) : [];
     await api('/bots', { method: 'POST', body: JSON.stringify({ name, command, args }) });
+    if (!state.user || state.authRevision !== authRevision) return;
     closeModal('add-bot-modal');
-    document.getElementById('new-bot-name').value = '';
-    document.getElementById('new-bot-cmd').value = '';
-    document.getElementById('new-bot-args').value = '';
-    showToast('Bot registered successfully', 'success');
-    loadBots();
-  } catch (e) {
-    // Error handled in api()
-  }
-}
-
-// ---------------------------------------------------
-// Tournaments
-// ---------------------------------------------------
-async function loadTournaments() {
-  const tourneys = await api('/tournaments');
-  const tbody = document.querySelector('#tourneys-table tbody');
-  tbody.innerHTML = '';
-  tourneys.forEach(t => {
-    const tr = document.createElement('tr');
-    tr.innerHTML = `
-      <td><code>${t.tournamentId}</code></td>
-      <td>${t.name}</td>
-      <td><span class="status-badge status-${t.status}">${t.status.replace('_', ' ').toUpperCase()}</span></td>
-      <td><button class="secondary-btn" style="padding: 4px 8px;" onclick="viewTournament('${t.tournamentId}')">View</button></td>
-    `;
-    tbody.appendChild(tr);
+    $('#new-bot-name').value = ''; $('#new-bot-cmd').value = ''; $('#new-bot-args').value = '';
+    showToast('Bot registered successfully.', 'success');
+    await loadBots();
   });
 }
 
-async function submitNewTourney() {
-  const name = document.getElementById('new-tourney-name').value;
-  try {
-    const result = await api('/tournaments', { method: 'POST', body: JSON.stringify({ name }) });
-    closeModal('add-tourney-modal');
-    document.getElementById('new-tourney-name').value = '';
-    showToast('Tournament created', 'success');
-    viewTournament(result.tournamentId);
-  } catch (e) {
-    // Handled
-  }
+async function submitNewTournament() {
+  const button = $('#submit-tournament');
+  const authRevision = state.authRevision;
+  await runPending('create-tournament', button, async () => {
+    const result = await api('/tournaments', { method: 'POST', body: JSON.stringify({ name: $('#new-tourney-name').value }) });
+    if (!state.user || state.authRevision !== authRevision) return;
+    closeModal('add-tourney-modal'); $('#new-tourney-name').value = '';
+    showToast('Tournament created.', 'success'); await viewTournament(result.tournamentId);
+  });
 }
 
-let currentTourneyId = null;
-
 async function viewTournament(id) {
-  currentTourneyId = id;
+  state.tournamentId = id;
   navigate('tournament-detail');
   await refreshTournamentDetail();
 }
 
+function appendTournamentAction(container, tournamentId, authRevision, label, action) {
+  const button = actionButton(label, () => tournamentAction(tournamentId, authRevision, action), `tournament:${tournamentId}:${label}`, 'primary-btn');
+  button.style.padding = '8px';
+  container.appendChild(button);
+}
+
 async function refreshTournamentDetail() {
-  if (!currentTourneyId) return;
-  const t = await api(`/tournaments/${currentTourneyId}`);
-
-  document.getElementById('td-name').textContent = t.name;
-  document.getElementById('td-status').className = `status-badge status-${t.status}`;
-  document.getElementById('td-status').textContent = t.status.replace('_', ' ').toUpperCase();
-  document.getElementById('td-pcount').textContent = t.participants.length;
-
-  const plist = document.getElementById('td-participants');
-  plist.innerHTML = '';
-  t.participants.forEach(p => {
-    const li = document.createElement('li');
-    li.style.padding = '8px 0';
-    li.style.borderBottom = '1px solid var(--border-light)';
-    li.innerHTML = `<strong>${p.name}</strong> <span style="color:var(--text-faint); font-size:0.8rem;">(${p.bot.botId})</span>`;
-    plist.appendChild(li);
-  });
-
-  // Actions based on status
-  const actions = document.getElementById('td-actions');
-  actions.innerHTML = '';
-  const btnReg = document.getElementById('btn-register-bot');
-  btnReg.style.display = 'none';
-
-  if (t.status === 'draft') {
-    actions.innerHTML += `<button class="primary-btn" style="padding:8px;" onclick="tourneyAction('open_registration')">Open Registration</button>`;
-  } else if (t.status === 'registration_open') {
-    btnReg.style.display = 'block';
-    actions.innerHTML += `<button class="primary-btn" style="padding:8px;" onclick="tourneyAction('generate_schedule')">Generate Schedule</button>`;
-  } else if (t.status === 'running') {
-    actions.innerHTML += `<button class="primary-btn" style="padding:8px;" onclick="tourneyAction('run_all')">Run All Matches</button>`;
-  }
-
-  // Load standings
-  const tbody = document.querySelector('#td-standings tbody');
-  tbody.innerHTML = '';
-  t.standings.forEach((s, idx) => {
-    const tr = document.createElement('tr');
-    tr.innerHTML = `
-      <td>${idx + 1}</td>
-      <td><strong>${s.participantName}</strong></td>
-      <td>${s.matchesPlayed}</td>
-      <td>${s.wins}</td>
-      <td>${s.draws}</td>
-      <td>${s.losses}</td>
-      <td><strong>${s.points}</strong></td>
-    `;
-    tbody.appendChild(tr);
-  });
-
-  if (t.status === 'completed' || t.status === 'running') {
-    api(`/tournaments/${currentTourneyId}/stats`).then(stats => {
-      document.getElementById('td-stats').textContent =
-        `Matches: ${stats.completedMatches}/${stats.totalMatches} | Avg Turns: ${stats.averageTurns}`;
-    }).catch(()=>{});
-  }
-
-  // Schedule
-  const sched = document.getElementById('td-schedule');
-  sched.innerHTML = '';
-  t.rounds.forEach(r => {
-    const roundDiv = document.createElement('div');
-    roundDiv.innerHTML = `<h4 style="color:var(--text-secondary); border-bottom:1px solid var(--border-light); padding-bottom:5px; margin-bottom:10px;">Round ${r.roundNumber}</h4>`;
-
-    const table = document.createElement('table');
-    table.className = 'data-table';
-    let thtml = `<thead><tr><th>Match</th><th>Player A</th><th>Player B</th><th>Status</th><th>Winner</th><th>Action</th></tr></thead><tbody>`;
-
-    r.pairings.forEach(p => {
-      const pA = t.participants.find(x => x.participantId === p.participantA)?.name || p.participantA;
-      const pB = p.participantB ? (t.participants.find(x => x.participantId === p.participantB)?.name || p.participantB) : 'BYE';
-
-      let winnerName = '-';
-      if (p.matchResult) {
-        if (p.matchResult.winner === 'A') winnerName = pA;
-        else if (p.matchResult.winner === 'B') winnerName = pB;
-        else if (p.matchResult.winner === 'draw') winnerName = 'Draw';
-      }
-
-      thtml += `<tr>
-        <td><code style="font-size:0.75rem;">${p.pairingId}</code></td>
-        <td>${pA}</td>
-        <td>${pB}</td>
-        <td><span class="status-badge status-${p.status}">${p.status.toUpperCase()}</span></td>
-        <td>${winnerName}</td>
-        <td>
-          ${p.matchId ? `<button class="secondary-btn" style="padding:4px 8px;" onclick="playReplay('${t.tournamentId}', '${p.matchId}')">Watch</button>` : ''}
-        </td>
-      </tr>`;
+  if (!state.tournamentId) return;
+  const tournamentId = state.tournamentId;
+  const authRevision = state.authRevision;
+  const viewRevision = state.viewRevision;
+  try {
+    const tournament = await request(`/tournaments/${tournamentId}`);
+    if (!isCurrentView('tournament-detail', authRevision, viewRevision, tournamentId)) return;
+    $('#td-name').textContent = tournament.name;
+    const badge = $('#td-status'); badge.className = `status-badge status-${safeStatusClass(tournament.status)}`; badge.textContent = String(tournament.status).replaceAll('_', ' ').toUpperCase();
+    $('#td-pcount').textContent = tournament.participants.length;
+    const participants = $('#td-participants'); clear(participants);
+    if (!tournament.participants.length) participants.appendChild(create('li', { text: 'No participants registered yet.' }));
+    tournament.participants.forEach(participant => {
+      const item = create('li'); item.style.padding = '8px 0'; item.style.borderBottom = '1px solid var(--border-light)';
+      const name = create('strong', { text: participant.name }); const bot = create('span', { text: ` (${participant.bot.botId})` }); bot.style.color = 'var(--text-faint)'; bot.style.fontSize = '.8rem';
+      item.append(name, bot); participants.appendChild(item);
     });
-    table.innerHTML = thtml + '</tbody>';
-    roundDiv.appendChild(table);
-    sched.appendChild(roundDiv);
+
+    const actions = $('#td-actions'); clear(actions);
+    const register = $('#btn-register-bot'); register.hidden = tournament.status !== 'registration_open';
+    if (tournament.status === 'draft') appendTournamentAction(actions, tournamentId, authRevision, 'Open Registration', 'open_registration');
+    if (tournament.status === 'registration_open') appendTournamentAction(actions, tournamentId, authRevision, 'Generate Schedule', 'generate_schedule');
+    if (tournament.status === 'running') appendTournamentAction(actions, tournamentId, authRevision, 'Run All Matches', 'run_all');
+
+    renderStandings(tournament.standings);
+    renderSchedule(tournament);
+    if (tournament.status === 'completed' || tournament.status === 'running') {
+      request(`/tournaments/${tournamentId}/stats`).then(stats => {
+        if (isCurrentView('tournament-detail', authRevision, viewRevision, tournamentId)) $('#td-stats').textContent = `Matches: ${stats.completedMatches}/${stats.totalMatches} | Avg Turns: ${stats.averageTurns}`;
+      }).catch(() => {
+        if (isCurrentView('tournament-detail', authRevision, viewRevision, tournamentId)) $('#td-stats').textContent = '';
+      });
+    } else $('#td-stats').textContent = '';
+  } catch (error) {
+    if (isCurrentView('tournament-detail', authRevision, viewRevision, tournamentId)) {
+      $('#td-name').textContent = 'Tournament unavailable'; renderMessage($('#td-schedule'), error.message || 'Unable to load tournament.', refreshTournamentDetail);
+    }
+  }
+}
+
+function renderStandings(standings) {
+  const tbody = $('#td-standings tbody'); clear(tbody);
+  if (!standings.length) return renderTableMessage(tbody, 'Standings appear after participants are registered.', 7);
+  standings.forEach((standing, index) => {
+    const row = create('tr');
+    row.append(textCell(index + 1), textCell(standing.participantName), textCell(standing.matchesPlayed), textCell(standing.wins), textCell(standing.draws), textCell(standing.losses), textCell(standing.points));
+    tbody.appendChild(row);
   });
 }
 
-async function tourneyAction(action) {
-  try {
-    await api(`/tournaments/${currentTourneyId}/action`, { method: 'POST', body: JSON.stringify({ action }) });
-    showToast(`Action ${action} successful`, 'success');
-    if (action === 'generate_schedule') {
-      await api(`/tournaments/${currentTourneyId}/action`, { method: 'POST', body: JSON.stringify({ action: 'start' }) });
-    }
-    refreshTournamentDetail();
-  } catch (e) {}
+function renderSchedule(tournament) {
+  const schedule = $('#td-schedule'); clear(schedule);
+  if (!tournament.rounds.length) return renderMessage(schedule, 'A schedule will appear after registration is complete.');
+  tournament.rounds.forEach(round => {
+    const section = create('section');
+    const heading = create('h4', { text: `Round ${round.roundNumber}` }); heading.style.color = 'var(--text-secondary)'; heading.style.borderBottom = '1px solid var(--border-light)'; heading.style.paddingBottom = '5px'; heading.style.marginBottom = '10px'; section.appendChild(heading);
+    const table = create('table', { className: 'data-table' });
+    const head = create('thead'); const headRow = create('tr'); ['Match', 'Player A', 'Player B', 'Status', 'Winner', 'Action'].forEach(label => headRow.appendChild(textCell(label, 'th'))); head.appendChild(headRow);
+    const body = create('tbody');
+    round.pairings.forEach(pairing => {
+      const playerA = tournament.participants.find(participant => participant.participantId === pairing.participantA)?.name || pairing.participantA;
+      const playerB = pairing.participantB ? (tournament.participants.find(participant => participant.participantId === pairing.participantB)?.name || pairing.participantB) : 'BYE';
+      let winner = '-'; if (pairing.matchResult?.winner === 'A') winner = playerA; else if (pairing.matchResult?.winner === 'B') winner = playerB; else if (pairing.matchResult?.winner === 'draw') winner = 'Draw';
+      const row = create('tr'); row.append(textCell(pairing.pairingId), textCell(playerA), textCell(playerB));
+      const status = create('td'); status.appendChild(statusBadge(pairing.status)); row.appendChild(status); row.appendChild(textCell(winner));
+      const action = create('td'); if (pairing.matchId) action.appendChild(actionButton('Watch', () => playReplay(tournament.tournamentId, pairing.matchId), `replay:${pairing.matchId}`)); row.appendChild(action); body.appendChild(row);
+    });
+    table.append(head, body); section.appendChild(table); schedule.appendChild(section);
+  });
 }
 
-async function submitTourneyRegistration() {
-  const name = document.getElementById('reg-part-name').value;
-  const botId = document.getElementById('reg-bot-select').value;
-  try {
-    await api(`/tournaments/${currentTourneyId}/register`, { method: 'POST', body: JSON.stringify({ participantName: name, botId }) });
-    closeModal('register-bot-tourney-modal');
-    document.getElementById('reg-part-name').value = '';
-    showToast('Registered successfully', 'success');
-    refreshTournamentDetail();
-  } catch (e) {}
-}
-
-// Populate bot select when opening modal
-document.getElementById('btn-register-bot')?.addEventListener('click', async () => {
-  const bots = await api('/bots').catch(()=>[]);
-  const sel = document.getElementById('reg-bot-select');
-  sel.innerHTML = bots.map(b => `<option value="${b.id}">${b.name} (${b.id})</option>`).join('');
-});
-
-
-// ---------------------------------------------------
-// REPLAY VIEWER
-// ---------------------------------------------------
-let currentReplay = null;
-let currentReplayMoveIndex = -1;
-
-const BOARD_SIZE = 9;
-const PIECE_TYPES = {
-  dam: { icon: 'icon-piece-dam', name: 'Búa' },
-  la: { icon: 'icon-piece-la', name: 'Lá' },
-  keo: { icon: 'icon-piece-keo', name: 'Kéo' }
-};
-
-function closeReplay() {
-  navigate('tournament-detail');
-  currentReplay = null;
-}
-
-function svgUse(iconId) {
-  return `<svg viewBox="0 0 24 24" aria-hidden="true"><use href="#${iconId}"></use></svg>`;
-}
-
-async function playReplay(tourneyId, matchId) {
-  try {
-    const replay = await api(`/tournaments/${tourneyId}/replays/${matchId}`);
-    currentReplay = replay;
-
-    // Setup UI
-    document.getElementById('r-p1-name').textContent = "PLAYER A"; // We could fetch real names if we pass them
-    document.getElementById('r-p2-name').textContent = "PLAYER B";
-
-    let wtxt = '';
-    if (replay.winner === 'A') wtxt = 'PLAYER A WON';
-    else if (replay.winner === 'B') wtxt = 'PLAYER B WON';
-    else wtxt = 'DRAW';
-
-    document.getElementById('r-result-text').textContent = `Result: ${wtxt} (${replay.terminationReason || 'unknown'})`;
-
-    navigate('replay-view');
-    goToReplayTurn(-1); // Start at initial state
-  } catch (e) {
-    showToast('Failed to load replay', 'error');
+async function tournamentAction(tournamentId, authRevision, action) {
+  await api(`/tournaments/${tournamentId}/action`, { method: 'POST', body: JSON.stringify({ action }) });
+  if (action === 'generate_schedule') await api(`/tournaments/${tournamentId}/action`, { method: 'POST', body: JSON.stringify({ action: 'start' }) });
+  if (state.user && state.authRevision === authRevision && state.tournamentId === tournamentId) {
+    showToast(`Action ${action.replaceAll('_', ' ')} successful.`, 'success');
+    await refreshTournamentDetail();
   }
 }
 
-function renderReplayBoard(state) {
-  const boardEl = document.getElementById('r-board');
-  boardEl.innerHTML = '';
+async function submitTournamentRegistration() {
+  const button = $('#submit-registration');
+  const tournamentId = state.tournamentId;
+  const authRevision = state.authRevision;
+  await runPending('register-participant', button, async () => {
+    await api(`/tournaments/${tournamentId}/register`, { method: 'POST', body: JSON.stringify({ participantName: $('#reg-part-name').value, botId: $('#reg-bot-select').value }) });
+    if (!state.user || state.authRevision !== authRevision || state.tournamentId !== tournamentId) return;
+    closeModal('register-bot-tourney-modal'); $('#reg-part-name').value = ''; showToast('Registered successfully.', 'success'); await refreshTournamentDetail();
+  });
+}
 
-  for (let row = 0; row < BOARD_SIZE; row++) {
-    for (let col = 0; col < BOARD_SIZE; col++) {
-      const cell = document.createElement('div');
-      cell.className = 'cell';
-
-      if ((row === 0 && col === 0) || (row === 8 && col === 8)) {
-        cell.classList.add('goal');
-        cell.innerHTML = `<span class="goal-flag">${svgUse('icon-flag')}</span>`;
-      }
-
-      const pieceId = state.board[row][col];
-      if (pieceId) {
-        const piece = state.pieces[pieceId];
-        const pel = document.createElement('span');
-        pel.className = `piece player${piece.player === 'A' ? '1' : '2'}`;
-        pel.innerHTML = svgUse(PIECE_TYPES[piece.type].icon);
-        cell.appendChild(pel);
-      }
-      boardEl.appendChild(cell);
-    }
+async function populateBotSelect() {
+  const select = $('#reg-bot-select'); clear(select);
+  const authRevision = state.authRevision;
+  const tournamentId = state.tournamentId;
+  try {
+    const bots = await request('/bots');
+    if (!state.user || state.authRevision !== authRevision || state.tournamentId !== tournamentId) return false;
+    if (!bots.length) { select.appendChild(create('option', { text: 'No bots available', attrs: { value: '' } })); return true; }
+    bots.forEach(bot => select.appendChild(create('option', { text: `${bot.name} (${bot.id})`, attrs: { value: bot.id } })));
+  } catch {
+    if (state.user && state.authRevision === authRevision && state.tournamentId === tournamentId) select.appendChild(create('option', { text: 'Unable to load bots', attrs: { value: '' } }));
   }
+  return state.user && state.authRevision === authRevision && state.tournamentId === tournamentId;
+}
+
+const PIECE_TYPES = { dam: 'icon-piece-dam', la: 'icon-piece-la', keo: 'icon-piece-keo' };
+function closeReplay() { navigate('tournament-detail'); state.replay = null; }
+async function playReplay(tournamentId, matchId) {
+  const authRevision = state.authRevision;
+  const viewRevision = state.viewRevision;
+  const replay = await api(`/tournaments/${tournamentId}/replays/${matchId}`);
+  if (!isCurrentView('tournament-detail', authRevision, viewRevision, tournamentId)) return;
+  state.replay = replay; state.replayMoveIndex = -1;
+  $('#r-p1-name').textContent = 'PLAYER A'; $('#r-p2-name').textContent = 'PLAYER B';
+  const result = replay.winner === 'A' ? 'PLAYER A WON' : replay.winner === 'B' ? 'PLAYER B WON' : 'DRAW';
+  $('#r-result-text').textContent = `Result: ${result} (${replay.terminationReason || 'unknown'})`;
+  navigate('replay-view'); goToReplayTurn(-1);
 }
 
 function buildStateAt(moveIndex) {
-  if (!currentReplay) return null;
-  // Deep clone initial state
-  const state = JSON.parse(JSON.stringify(currentReplay.initialState));
-
-  // Apply moves up to index
-  for (let i = 0; i <= moveIndex; i++) {
-    const move = currentReplay.moves[i];
-
-    // Find piece
-    let pieceId = null;
-    let pieceObj = null;
-    for (const [pid, p] of Object.entries(state.pieces)) {
-      if (p.row === move.from.row && p.col === move.from.col) {
-        pieceId = pid;
-        pieceObj = p;
-        break;
-      }
-    }
-
-    if (pieceObj) {
-      // Remove from old
-      state.board[move.from.row][move.from.col] = null;
-      // Capture target if any
-      const targetId = state.board[move.to.row][move.to.col];
-      if (targetId) {
-        delete state.pieces[targetId];
-      }
-      // Move to new
-      pieceObj.row = move.to.row;
-      pieceObj.col = move.to.col;
-      state.board[move.to.row][move.to.col] = pieceId;
-    }
+  if (!state.replay) return null;
+  const board = JSON.parse(JSON.stringify(state.replay.initialState));
+  for (let index = 0; index <= moveIndex; index += 1) {
+    const move = state.replay.moves[index]; if (!move) continue;
+    const pieceId = Object.keys(board.pieces).find(id => board.pieces[id].row === move.from.row && board.pieces[id].col === move.from.col);
+    if (!pieceId) continue;
+    const target = board.board[move.to.row][move.to.col]; if (target) delete board.pieces[target];
+    board.board[move.from.row][move.from.col] = null; board.pieces[pieceId].row = move.to.row; board.pieces[pieceId].col = move.to.col; board.board[move.to.row][move.to.col] = pieceId;
   }
-  return state;
+  return board;
+}
+
+function renderReplayBoard(board) {
+  const element = $('#r-board'); clear(element);
+  for (let row = 0; row < 9; row += 1) for (let col = 0; col < 9; col += 1) {
+    const cell = create('div', { className: 'cell' });
+    if ((row === 0 && col === 0) || (row === 8 && col === 8)) { cell.classList.add('goal'); const flag = create('span', { className: 'goal-flag' }); flag.appendChild(icon('icon-flag')); cell.appendChild(flag); }
+    const id = board.board[row][col]; const piece = id && board.pieces[id];
+    if (piece) { const token = create('span', { className: `piece player${piece.player === 'A' ? '1' : '2'}` }); token.appendChild(icon(PIECE_TYPES[piece.type])); cell.appendChild(token); }
+    element.appendChild(cell);
+  }
 }
 
 function goToReplayTurn(index) {
-  if (!currentReplay) return;
-  if (index < -1) index = -1;
-  if (index >= currentReplay.moves.length) index = currentReplay.moves.length - 1;
-
-  currentReplayMoveIndex = index;
-  document.getElementById('r-turn-display').textContent = `${index + 1} / ${currentReplay.moves.length}`;
-
-  const state = buildStateAt(index);
-  if (state) renderReplayBoard(state);
+  if (!state.replay) return;
+  state.replayMoveIndex = Math.max(-1, Math.min(index, state.replay.moves.length - 1));
+  $('#r-turn-display').textContent = `${state.replayMoveIndex + 1} / ${state.replay.moves.length}`;
+  const board = buildStateAt(state.replayMoveIndex); if (board) renderReplayBoard(board);
 }
 
-document.getElementById('btn-replay-start').addEventListener('click', () => goToReplayTurn(-1));
-document.getElementById('btn-replay-prev').addEventListener('click', () => goToReplayTurn(currentReplayMoveIndex - 1));
-document.getElementById('btn-replay-next').addEventListener('click', () => goToReplayTurn(currentReplayMoveIndex + 1));
-document.getElementById('btn-replay-end').addEventListener('click', () => {
-  if (currentReplay) goToReplayTurn(currentReplay.moves.length - 1);
-});
-
-// Render static board coordinates for replay
-function setupReplayCoords() {
-  const cols = 'abcdefghi'.split('');
-  const header = document.getElementById('coord-header');
-  const side = document.getElementById('coord-side');
-  if(header && side) {
-    header.innerHTML = '<div class="corner" style="width:25px"></div>' + cols.map(c => `<div class="coord" style="width:min(6.8vw, 61px);text-align:center">${c}</div>`).join('');
-    side.innerHTML = Array.from({length:9}, (_,i)=>`<div class="coord" style="height:min(6.8vw, 61px);display:flex;align-items:center">${i+1}</div>`).join('');
-  }
+function setupReplayCoordinates() {
+  const header = $('#coord-header'); const side = $('#coord-side'); clear(header); clear(side);
+  header.appendChild(create('div', { className: 'corner' }));
+  'abcdefghi'.split('').forEach(column => { const item = create('div', { className: 'coord', text: column }); item.style.width = 'min(6.8vw, 61px)'; header.appendChild(item); });
+  Array.from({ length: 9 }, (_, index) => index + 1).forEach(row => { const item = create('div', { className: 'coord', text: row }); item.style.height = 'min(6.8vw, 61px)'; side.appendChild(item); });
 }
-setupReplayCoords();
 
-// Polling for tournament updates while on the detail page
-setInterval(() => {
-  if (document.getElementById('tournament-detail').classList.contains('active')) {
-    refreshTournamentDetail();
-  }
-}, 5000);
+function bindEvents() {
+  document.querySelectorAll('.nav-link').forEach(link => link.addEventListener('click', () => navigate(link.dataset.target)));
+  $('#login-form').addEventListener('submit', event => { event.preventDefault(); void runPending('login', $('#login-submit'), async () => { const result = await api('/auth/login', { method: 'POST', body: JSON.stringify({ username: $('#login-username').value, password: $('#login-password').value }) }); setAuthenticated(result.user, result.csrfToken); }); });
+  $('#register-form').addEventListener('submit', event => { event.preventDefault(); void runPending('register', $('#register-submit'), async () => { const result = await api('/auth/register', { method: 'POST', body: JSON.stringify({ username: $('#register-username').value, password: $('#register-password').value }) }); setAuthenticated(result.user, result.csrfToken); }); });
+  $('#logout-button').addEventListener('click', () => void runPending('logout', $('#logout-button'), async () => { try { await api('/auth/logout', { method: 'POST' }); } finally { showAuthScreen(); } }));
+  $('#open-bot-modal').addEventListener('click', () => openModal('add-bot-modal')); $('#open-tournament-modal').addEventListener('click', () => openModal('add-tourney-modal'));
+  $('#back-to-tournaments').addEventListener('click', () => navigate('tournaments')); $('#btn-register-bot').addEventListener('click', async () => { if (await populateBotSelect()) openModal('register-bot-tourney-modal'); });
+  $('#close-replay').addEventListener('click', closeReplay); $('#submit-bot').addEventListener('click', () => void submitNewBot()); $('#submit-tournament').addEventListener('click', () => void submitNewTournament()); $('#submit-registration').addEventListener('click', () => void submitTournamentRegistration());
+  document.querySelectorAll('[data-close-modal]').forEach(button => button.addEventListener('click', () => closeModal(button.dataset.closeModal)));
+  document.querySelectorAll('.modal-overlay').forEach(modal => modal.addEventListener('click', event => { if (event.target === modal) closeModal(modal.id); }));
+  document.addEventListener('keydown', event => {
+    if (event.key === 'Escape') document.querySelectorAll('.modal-overlay.open').forEach(modal => closeModal(modal.id));
+    else trapModalFocus(event);
+  });
+  $('#btn-replay-start').addEventListener('click', () => goToReplayTurn(-1)); $('#btn-replay-prev').addEventListener('click', () => goToReplayTurn(state.replayMoveIndex - 1)); $('#btn-replay-next').addEventListener('click', () => goToReplayTurn(state.replayMoveIndex + 1)); $('#btn-replay-end').addEventListener('click', () => state.replay && goToReplayTurn(state.replay.moves.length - 1));
+}
+
+bindEvents(); setupReplayCoordinates(); void restoreSession();
+setInterval(() => { if (state.user) void refreshQueueStats(); if (state.activeView === 'tournament-detail') void refreshTournamentDetail(); }, 5000);

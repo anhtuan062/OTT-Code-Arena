@@ -16,8 +16,12 @@
     }
     .nav-brand { font-weight: bold; font-size: 1.2rem; color: var(--accent-blue); display: flex; align-items: center; gap: 8px;}
     .nav-links { display: flex; gap: 15px; margin-left: 20px; }
-    .nav-link { cursor: pointer; color: var(--text-secondary); text-decoration: none; padding: 6px 12px; border-radius: 8px; }
+    .nav-link { cursor: pointer; color: var(--text-secondary); text-decoration: none; padding: 6px 12px; border: 0; background: transparent; font: inherit; border-radius: 8px; }
     .nav-link:hover, .nav-link.active { background: var(--bg-soft); color: var(--accent-blue); }
+
+    .ui-message, .table-message { color: var(--text-secondary); text-align: center; padding: 22px; }
+    .ui-message p { margin-bottom: 12px; }
+    .table-message .secondary-btn { width: auto; margin-left: 12px; padding: 6px 10px; }
 
     .page { display: none; padding: 24px; max-width: 1200px; margin: 0 auto; width: 100%; }
     .page.active { display: block; animation: fadeIn 0.2s ease; }
@@ -55,14 +59,14 @@
         <h3>Sign in</h3>
         <div class="form-group"><label for="login-username">Username</label><input id="login-username" required autocomplete="username"></div>
         <div class="form-group"><label for="login-password">Password</label><input id="login-password" type="password" required autocomplete="current-password"></div>
-        <button class="primary-btn" type="submit">Sign in</button>
+        <button class="primary-btn" id="login-submit" type="submit">Sign in</button>
       </form>
       <hr style="margin: 24px 0; border: 0; border-top: 1px solid var(--border-light);">
       <form id="register-form">
         <h3>Create account</h3>
         <div class="form-group"><label for="register-username">Username</label><input id="register-username" required minlength="3" maxlength="32" autocomplete="username"></div>
         <div class="form-group"><label for="register-password">Password (12+ characters)</label><input id="register-password" type="password" required minlength="12" maxlength="128" autocomplete="new-password"></div>
-        <button class="secondary-btn" type="submit">Register</button>
+        <button class="secondary-btn" id="register-submit" type="submit">Register</button>
       </form>
     </div>
   </section>
@@ -74,9 +78,9 @@
       OTT Code Arena
     </div>
     <div class="nav-links">
-      <a class="nav-link active" data-target="dashboard">Dashboard</a>
-      <a class="nav-link" data-target="bots">Bots</a>
-      <a class="nav-link" data-target="tournaments">Tournaments</a>
+      <button class="nav-link active" type="button" data-target="dashboard" aria-current="page">Dashboard</button>
+      <button class="nav-link" type="button" data-target="bots">Bots</button>
+      <button class="nav-link" type="button" data-target="tournaments">Tournaments</button>
     </div>
     <div style="margin-left:auto; display:flex; align-items:center; gap:12px;">
       <span id="current-user" style="color:var(--text-secondary);"></span>
@@ -111,7 +115,7 @@
   <div id="bots" class="page">
     <div class="page-header">
       <h2>Bot Management</h2>
-      <button class="primary-btn" style="width: auto; padding: 10px 20px;" onclick="openModal('add-bot-modal')">Register Bot</button>
+      <button class="primary-btn" id="open-bot-modal" type="button" style="width: auto; padding: 10px 20px;">Register Bot</button>
     </div>
     <table class="data-table" id="bots-table">
       <thead><tr><th>Bot ID</th><th>Name</th><th>Command</th><th>Args</th><th>Registered</th></tr></thead>
@@ -123,7 +127,7 @@
   <div id="tournaments" class="page">
     <div class="page-header">
       <h2>Tournaments</h2>
-      <button class="primary-btn" style="width: auto; padding: 10px 20px;" onclick="openModal('add-tourney-modal')">Create Tournament</button>
+      <button class="primary-btn" id="open-tournament-modal" type="button" style="width: auto; padding: 10px 20px;">Create Tournament</button>
     </div>
     <table class="data-table" id="tourneys-table">
       <thead><tr><th>ID</th><th>Name</th><th>Status</th><th>Action</th></tr></thead>
@@ -135,7 +139,7 @@
   <div id="tournament-detail" class="page">
     <div class="page-header">
       <div style="display: flex; align-items: center; gap: 15px;">
-        <button class="secondary-btn" style="width: auto; padding: 8px;" onclick="navigate('tournaments')">
+        <button class="secondary-btn" id="back-to-tournaments" type="button" aria-label="Back to tournaments" style="width: auto; padding: 8px;">
           <svg viewBox="0 0 24 24"><use href="#icon-arrow-left"></use></svg>
         </button>
         <h2 id="td-name">Loading...</h2>
@@ -148,7 +152,7 @@
       <div class="card">
         <h3>Participants (<span id="td-pcount">0</span>)</h3>
         <ul id="td-participants" style="list-style: none; margin-top: 15px; padding: 0;"></ul>
-        <button id="btn-register-bot" class="secondary-btn" style="margin-top: 15px; display: none;" onclick="openModal('register-bot-tourney-modal')">Register Bot</button>
+        <button id="btn-register-bot" type="button" class="secondary-btn" style="margin-top: 15px; display: none;">Register Bot</button>
       </div>
       <div class="card" style="overflow-x: auto;">
         <h3 style="display: flex; justify-content: space-between;">
@@ -170,7 +174,7 @@
   <div id="replay-view" class="page">
     <div class="page-header">
       <div style="display: flex; align-items: center; gap: 15px;">
-        <button class="secondary-btn" style="width: auto; padding: 8px;" onclick="closeReplay()">
+        <button class="secondary-btn" id="close-replay" type="button" aria-label="Back to tournament" style="width: auto; padding: 8px;">
           <svg viewBox="0 0 24 24"><use href="#icon-arrow-left"></use></svg> Back
         </button>
         <h2>Match Replay</h2>
@@ -207,44 +211,44 @@
     </div>
 
     <div class="replay-controls">
-      <button class="icon-btn" id="btn-replay-start"><svg viewBox="0 0 24 24"><use href="#icon-arrow-left"></use></svg></button>
-      <button class="icon-btn" id="btn-replay-prev"><svg viewBox="0 0 24 24"><use href="#icon-arrow-left"></use></svg></button>
+      <button class="icon-btn" id="btn-replay-start" type="button" aria-label="First replay move"><svg viewBox="0 0 24 24"><use href="#icon-arrow-left"></use></svg></button>
+      <button class="icon-btn" id="btn-replay-prev" type="button" aria-label="Previous replay move"><svg viewBox="0 0 24 24"><use href="#icon-arrow-left"></use></svg></button>
       <span style="display: flex; align-items: center; min-width: 80px; justify-content: center; font-weight: bold;" id="r-turn-display">0 / 0</span>
-      <button class="icon-btn" id="btn-replay-next"><svg viewBox="0 0 24 24"><use href="#icon-arrow-right"></use></svg></button>
-      <button class="icon-btn" id="btn-replay-end"><svg viewBox="0 0 24 24"><use href="#icon-arrow-right"></use></svg></button>
+      <button class="icon-btn" id="btn-replay-next" type="button" aria-label="Next replay move"><svg viewBox="0 0 24 24"><use href="#icon-arrow-right"></use></svg></button>
+      <button class="icon-btn" id="btn-replay-end" type="button" aria-label="Last replay move"><svg viewBox="0 0 24 24"><use href="#icon-arrow-right"></use></svg></button>
     </div>
     <div style="text-align: center; margin-top: 15px; font-weight: bold; color: var(--goal-color);" id="r-result-text"></div>
   </div>
 
 
   <!-- MODALS -->
-  <div class="modal-overlay" id="add-bot-modal">
+  <div class="modal-overlay" id="add-bot-modal" role="dialog" aria-modal="true" aria-labelledby="add-bot-title" aria-hidden="true">
     <div class="modal-box">
-      <div class="modal-head"><h4>REGISTER BOT</h4><button class="modal-close" onclick="closeModal('add-bot-modal')">×</button></div>
-      <div class="form-group"><label>Bot Name</label><input type="text" id="new-bot-name" class="input-shell" style="width: 100%" placeholder="My Bot"></div>
-      <div class="form-group"><label>Command</label><input type="text" id="new-bot-cmd" class="input-shell" style="width: 100%" placeholder="node"></div>
-      <div class="form-group"><label>Arguments (comma separated)</label><input type="text" id="new-bot-args" class="input-shell" style="width: 100%" placeholder="bot.js,--fast"></div>
-      <button class="primary-btn" onclick="submitNewBot()">Register</button>
+      <div class="modal-head"><h4 id="add-bot-title">REGISTER BOT</h4><button class="modal-close" type="button" data-close-modal="add-bot-modal" aria-label="Close register bot dialog">×</button></div>
+      <div class="form-group"><label for="new-bot-name">Bot Name</label><input type="text" id="new-bot-name" class="input-shell" style="width: 100%" placeholder="My Bot"></div>
+      <div class="form-group"><label for="new-bot-cmd">Command</label><input type="text" id="new-bot-cmd" class="input-shell" style="width: 100%" placeholder="node"></div>
+      <div class="form-group"><label for="new-bot-args">Arguments (comma separated)</label><input type="text" id="new-bot-args" class="input-shell" style="width: 100%" placeholder="bot.js,--fast"></div>
+      <button class="primary-btn" id="submit-bot" type="button">Register</button>
     </div>
   </div>
 
-  <div class="modal-overlay" id="add-tourney-modal">
+  <div class="modal-overlay" id="add-tourney-modal" role="dialog" aria-modal="true" aria-labelledby="add-tourney-title" aria-hidden="true">
     <div class="modal-box">
-      <div class="modal-head"><h4>CREATE TOURNAMENT</h4><button class="modal-close" onclick="closeModal('add-tourney-modal')">×</button></div>
-      <div class="form-group"><label>Tournament Name</label><input type="text" id="new-tourney-name" class="input-shell" style="width: 100%"></div>
-      <button class="primary-btn" onclick="submitNewTourney()">Create</button>
+      <div class="modal-head"><h4 id="add-tourney-title">CREATE TOURNAMENT</h4><button class="modal-close" type="button" data-close-modal="add-tourney-modal" aria-label="Close create tournament dialog">×</button></div>
+      <div class="form-group"><label for="new-tourney-name">Tournament Name</label><input type="text" id="new-tourney-name" class="input-shell" style="width: 100%"></div>
+      <button class="primary-btn" id="submit-tournament" type="button">Create</button>
     </div>
   </div>
 
-  <div class="modal-overlay" id="register-bot-tourney-modal">
+  <div class="modal-overlay" id="register-bot-tourney-modal" role="dialog" aria-modal="true" aria-labelledby="register-participant-title" aria-hidden="true">
     <div class="modal-box">
-      <div class="modal-head"><h4>REGISTER PARTICIPANT</h4><button class="modal-close" onclick="closeModal('register-bot-tourney-modal')">×</button></div>
-      <div class="form-group"><label>Participant Name</label><input type="text" id="reg-part-name" class="input-shell" style="width: 100%"></div>
+      <div class="modal-head"><h4 id="register-participant-title">REGISTER PARTICIPANT</h4><button class="modal-close" type="button" data-close-modal="register-bot-tourney-modal" aria-label="Close register participant dialog">×</button></div>
+      <div class="form-group"><label for="reg-part-name">Participant Name</label><input type="text" id="reg-part-name" class="input-shell" style="width: 100%"></div>
       <div class="form-group">
-        <label>Select Bot</label>
+        <label for="reg-bot-select">Select Bot</label>
         <select id="reg-bot-select" style="width: 100%; padding: 10px; border-radius: 8px; border: 1px solid var(--border-light);"></select>
       </div>
-      <button class="primary-btn" onclick="submitTourneyRegistration()">Register</button>
+      <button class="primary-btn" id="submit-registration" type="button">Register</button>
     </div>
   </div>
 
