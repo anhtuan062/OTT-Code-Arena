@@ -32,4 +32,15 @@ describe('SPA rendering and request foundations', () => {
     expect(app).toContain("isCurrentView('tournament-detail'");
     expect(app).toContain('function trapModalFocus');
   });
+
+  it('keeps the responsive shell controls bound through JavaScript', async () => {
+    const [app, page] = await Promise.all([readProjectFile('app.js'), readProjectFile('index.html')]);
+
+    expect(app).toContain('function toggleMobileNavigation');
+    expect(app).toContain("$('#mobile-menu-toggle').addEventListener('click', toggleMobileNavigation)");
+    expect(app).toContain('closeMobileNavigation();');
+    expect(page).toContain('id="app-topbar"');
+    expect(page).toContain('id="sidebar-backdrop"');
+    expect(page).toContain('id="dash-queue-value"');
+  });
 });

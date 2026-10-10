@@ -47,6 +47,54 @@
     /* Fix game view layout for replay */
     #replay-view { max-width: 1250px; margin: 0 auto; padding: 20px; }
     .replay-controls { display: flex; justify-content: center; gap: 10px; margin-top: 20px; padding: 15px; background: var(--bg-card); border-radius: 14px; box-shadow: var(--shadow-sm); }
+
+    /* Phase 2: application shell and dashboard */
+    :root { --accent-blue: #16803c; --accent-cyan: #0f9f58; --bg-primary: #f6f8f6; --bg-soft: #eef5ef; --border-light: #dfe7e0; --text-primary: #1e2b22; --text-secondary: #647168; }
+    body { background: #f6f8f6; }
+    .app-sidebar { position: fixed; inset: 0 auto 0 0; z-index: 50; width: 248px; padding: 28px 16px 20px; background: #fff; border-right: 1px solid var(--border-light); display: flex; flex-direction: column; }
+    .sidebar-brand { display: flex; gap: 11px; align-items: center; padding: 0 10px 29px; border-bottom: 1px solid var(--border-light); color: var(--text-primary); }
+    .brand-symbol { width: 38px; height: 38px; border-radius: 11px; display: grid; place-items: center; background: #e4f3e9; color: var(--accent-blue); }
+    .brand-symbol svg { width: 21px; height: 21px; }
+    .sidebar-brand strong { display: block; font-size: .94rem; letter-spacing: -.01em; }
+    .sidebar-brand small { display: block; margin-top: 3px; color: var(--text-faint); font-size: .57rem; font-weight: 800; letter-spacing: .13em; }
+    .nav-links { display: grid; gap: 5px; margin: 24px 0 0; }
+    .nav-link { width: 100%; display: flex; align-items: center; gap: 10px; padding: 11px 12px; border: 0; border-radius: 9px; background: transparent; color: var(--text-secondary); font-size: .88rem; font-weight: 650; text-align: left; }
+    .nav-dot { width: 7px; height: 7px; border-radius: 50%; background: #b8c4ba; }
+    .nav-link:hover, .nav-link.active { background: #eaf6ed; color: #126b34; }
+    .nav-link.active .nav-dot { background: var(--accent-blue); box-shadow: 0 0 0 4px rgba(22,128,60,.12); }
+    .sidebar-footer { margin-top: auto; padding: 15px 10px 0; border-top: 1px solid var(--border-light); color: var(--text-faint); font-size: .73rem; }
+    .app-topbar { position: sticky; top: 0; z-index: 30; min-height: 80px; margin-left: 248px; padding: 14px 40px; background: rgba(255,255,255,.92); border-bottom: 1px solid var(--border-light); backdrop-filter: blur(10px); display: flex; align-items: center; justify-content: space-between; gap: 20px; }
+    .topbar-title p, .section-kicker { margin: 0 0 4px; color: #16803c; font-size: .63rem; font-weight: 800; letter-spacing: .13em; }
+    .topbar-title h1 { font-size: 1.15rem; letter-spacing: -.02em; }
+    .topbar-user { display: flex; align-items: center; gap: 10px; }
+    .user-avatar { width: 35px; height: 35px; border-radius: 50%; display: grid; place-items: center; background: #e4f3e9; color: #126b34; font-size: .78rem; font-weight: 800; }
+    .user-identity { display: grid; gap: 2px; min-width: 86px; }
+    .user-identity strong { font-size: .82rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .user-identity small { color: var(--text-faint); font-size: .67rem; }
+    .logout-button { width: auto; padding: 8px 12px; font-size: .76rem; }
+    .mobile-menu-toggle, .sidebar-backdrop { display: none; }
+    .page { width: calc(100% - 248px); max-width: 1320px; margin-left: 248px; margin-right: 0; padding: 38px 40px; }
+    #replay-view { width: calc(100% - 248px); max-width: 1320px; margin-left: 248px; margin-right: 0; }
+    .dashboard-page { padding-top: 36px; }
+    .dashboard-welcome { display: flex; justify-content: space-between; align-items: flex-end; gap: 28px; padding: 30px 32px; border: 1px solid #dbe9df; border-radius: 18px; background: #fff; box-shadow: 0 8px 24px rgba(30,43,34,.04); }
+    .dashboard-welcome h2 { max-width: 640px; font-size: clamp(1.7rem, 3vw, 2.45rem); letter-spacing: -.045em; line-height: 1.05; }
+    .dashboard-welcome h2 span { color: #16803c; }
+    .welcome-copy { max-width: 610px; margin-top: 12px; color: var(--text-secondary); line-height: 1.6; }
+    .dashboard-actions { display: flex; flex-wrap: wrap; gap: 9px; flex-shrink: 0; }
+    .dashboard-action { width: auto; min-height: 42px; padding: 10px 14px; font-size: .82rem; }
+    .primary-btn.dashboard-action { background: #16803c; box-shadow: none; }
+    .primary-btn.dashboard-action:hover { background: #11652f; box-shadow: none; }
+    .summary-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; margin-top: 18px; }
+    .summary-card { min-width: 0; display: flex; align-items: flex-start; gap: 14px; padding: 21px; background: #fff; border: 1px solid var(--border-light); border-radius: 15px; box-shadow: 0 5px 16px rgba(30,43,34,.035); }
+    .summary-icon { width: 38px; height: 38px; flex: 0 0 38px; display: grid; place-items: center; border-radius: 11px; font-size: .76rem; font-weight: 800; }
+    .summary-icon-bots { background: #e5f4ea; color: #126b34; }.summary-icon-tournaments { background: #eef0ff; color: #4551aa; }.summary-icon-queue { background: #fff4dd; color: #9a6514; }
+    .summary-card p { color: var(--text-secondary); font-size: .77rem; font-weight: 650; }.summary-card strong { display: block; margin: 5px 0 3px; font-size: 1.55rem; letter-spacing: -.04em; }.summary-card small { color: var(--text-faint); font-size: .7rem; }
+    .dashboard-section { margin-top: 34px; }.section-header { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; margin-bottom: 13px; }.section-header h3 { font-size: 1.1rem; letter-spacing: -.02em; }.queue-status { padding: 7px 10px; border: 1px solid var(--border-light); border-radius: 999px; background: #fff; color: var(--text-secondary); font-size: .72rem; white-space: nowrap; }
+    .recent-tournaments-card { overflow-x: auto; border: 1px solid var(--border-light); border-radius: 15px; background: #fff; box-shadow: 0 5px 16px rgba(30,43,34,.035); }.dashboard-page .data-table { margin: 0; border-radius: 0; box-shadow: none; }.dashboard-page .data-table th { background: #f8faf8; }.dashboard-page .data-table td { vertical-align: middle; }
+    .status-badge { display: inline-flex; align-items: center; min-height: 24px; padding: 4px 9px; font-size: .66rem; letter-spacing: .02em; }.status-registration_open { background: #e4f3e9; color: #126b34; }.status-running { background: #fff4dd; color: #8a5b12; }.status-completed { background: #edf0ef; color: #55625a; }
+    .visually-hidden { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+    @media (max-width: 900px) { .app-sidebar { width: 264px; transform: translateX(-100%); transition: transform .2s ease; box-shadow: 12px 0 30px rgba(30,43,34,.1); }.app-sidebar.open { transform: translateX(0); }.sidebar-backdrop { position: fixed; inset: 0; z-index: 40; display: block; border: 0; background: rgba(20,32,24,.28); }.app-topbar { margin-left: 0; padding: 13px 24px; }.mobile-menu-toggle { width: 40px; height: 40px; display: grid; align-content: center; gap: 4px; border: 1px solid var(--border-light); border-radius: 9px; background: #fff; }.mobile-menu-toggle span { width: 17px; height: 2px; margin: 0 auto; background: var(--text-primary); }.topbar-title { margin-right: auto; }.page, #replay-view { width: 100%; max-width: none; margin-left: 0; margin-right: 0; padding: 30px 24px; }.dashboard-welcome { align-items: flex-start; flex-direction: column; }.summary-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }.summary-card { padding: 17px; gap: 10px; }.summary-icon { width: 33px; height: 33px; flex-basis: 33px; } }
+    @media (max-width: 640px) { .app-topbar { min-height: 68px; padding: 10px 16px; }.topbar-title p, .user-identity small { display: none; }.topbar-title h1 { font-size: 1rem; }.user-identity { display: none; }.logout-button { padding: 8px 9px; font-size: .72rem; }.page { padding: 22px 16px 30px; }.dashboard-welcome { padding: 24px 21px; border-radius: 15px; }.dashboard-welcome h2 { font-size: 1.72rem; }.dashboard-actions { width: 100%; }.dashboard-action { flex: 1; justify-content: center; }.summary-grid { grid-template-columns: 1fr; gap: 10px; }.summary-card { padding: 16px 17px; }.summary-card strong { font-size: 1.35rem; }.section-header { align-items: flex-start; flex-direction: column; }.queue-status { white-space: normal; }.dashboard-page .data-table th, .dashboard-page .data-table td { padding: 11px 12px; }.dashboard-page .data-table th:nth-child(2), .dashboard-page .data-table td:nth-child(2) { display: none; } }
   </style>
 </head>
 <body>
@@ -72,43 +120,71 @@
   </section>
 
   <!-- NAVIGATION -->
-  <nav class="nav-bar" id="app-nav" hidden>
-    <div class="nav-brand">
-      <svg viewBox="0 0 24 24" width="24" height="24"><use href="#icon-shield"></use></svg>
-      OTT Code Arena
+  <button id="sidebar-backdrop" class="sidebar-backdrop" type="button" aria-label="Close navigation" hidden></button>
+  <aside class="app-sidebar" id="app-nav" aria-label="Primary navigation" hidden>
+    <div class="sidebar-brand">
+      <span class="brand-symbol" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#icon-shield"></use></svg></span>
+      <span><strong>OTT Code Arena</strong><small>COMPETITIVE CODING</small></span>
     </div>
-    <div class="nav-links">
-      <button class="nav-link active" type="button" data-target="dashboard" aria-current="page">Dashboard</button>
-      <button class="nav-link" type="button" data-target="bots">Bots</button>
-      <button class="nav-link" type="button" data-target="tournaments">Tournaments</button>
+    <nav class="nav-links" aria-label="Workspace">
+      <button class="nav-link active" type="button" data-target="dashboard" aria-current="page"><span class="nav-dot" aria-hidden="true"></span>Dashboard</button>
+      <button class="nav-link" type="button" data-target="bots"><span class="nav-dot" aria-hidden="true"></span>Bots</button>
+      <button class="nav-link" type="button" data-target="tournaments"><span class="nav-dot" aria-hidden="true"></span>Tournaments</button>
+    </nav>
+    <div class="sidebar-footer">Build, test, compete.</div>
+  </aside>
+
+  <header class="app-topbar" id="app-topbar" hidden>
+    <button id="mobile-menu-toggle" class="mobile-menu-toggle" type="button" aria-label="Open navigation" aria-expanded="false"><span></span><span></span><span></span></button>
+    <div class="topbar-title"><p>WORKSPACE</p><h1 id="page-title">Dashboard</h1></div>
+    <div class="topbar-user">
+      <span class="user-avatar" id="user-avatar" aria-hidden="true">U</span>
+      <span class="user-identity"><strong id="current-user">User</strong><small>Competitor</small></span>
+      <button class="secondary-btn logout-button" id="logout-button" type="button">Log out</button>
     </div>
-    <div style="margin-left:auto; display:flex; align-items:center; gap:12px;">
-      <span id="current-user" style="color:var(--text-secondary);"></span>
-      <button class="secondary-btn" id="logout-button" style="width:auto; padding:7px 12px;">Log out</button>
-    </div>
-  </nav>
+  </header>
 
   <!-- DASHBOARD -->
-  <div id="dashboard" class="page">
-    <div class="page-header">
-      <h2>Platform Dashboard</h2>
-      <div id="queue-stats" style="font-size: 0.85rem; color: var(--text-secondary);">Queue: Loading...</div>
-    </div>
-    <div class="card-grid">
-      <div class="card">
-        <h3>Tournaments</h3>
-        <h1 id="dash-tourney-count" style="margin: 10px 0; font-size: 3rem; color: var(--accent-blue);">0</h1>
+  <div id="dashboard" class="page dashboard-page">
+    <section class="dashboard-welcome" aria-labelledby="dashboard-welcome-title">
+      <div>
+        <p class="section-kicker">YOUR COMPETITION HUB</p>
+        <h2 id="dashboard-welcome-title">Welcome back, <span id="dashboard-username">competitor</span>.</h2>
+        <p class="welcome-copy">Create bots, assemble a tournament, and follow every match from one focused workspace.</p>
       </div>
-      <div class="card">
-        <h3>Registered Bots</h3>
-        <h1 id="dash-bot-count" style="margin: 10px 0; font-size: 3rem; color: var(--accent-cyan);">0</h1>
+      <div class="dashboard-actions">
+        <button class="secondary-btn dashboard-action" id="dashboard-create-bot" type="button">Register bot</button>
+        <button class="primary-btn dashboard-action" id="dashboard-create-tournament" type="button">Create tournament</button>
       </div>
-    </div>
-    <h3 style="margin-top: 30px;">Recent Tournaments</h3>
-    <table class="data-table" id="dash-recent-tourneys">
-      <thead><tr><th>Name</th><th>Format</th><th>Status</th><th>Participants</th><th>Action</th></tr></thead>
-      <tbody></tbody>
-    </table>
+    </section>
+
+    <section class="summary-grid" aria-label="Workspace summary">
+      <article class="summary-card">
+        <span class="summary-icon summary-icon-bots" aria-hidden="true">B</span>
+        <div><p>Registered bots</p><strong id="dash-bot-count">—</strong><small id="dash-bot-detail">Loading dashboard data</small></div>
+      </article>
+      <article class="summary-card">
+        <span class="summary-icon summary-icon-tournaments" aria-hidden="true">T</span>
+        <div><p>Tournaments</p><strong id="dash-tourney-count">—</strong><small id="dash-tourney-detail">Loading dashboard data</small></div>
+      </article>
+      <article class="summary-card">
+        <span class="summary-icon summary-icon-queue" aria-hidden="true">Q</span>
+        <div><p>Execution queue</p><strong id="dash-queue-value">—</strong><small id="dash-queue-detail">Loading queue status</small></div>
+      </article>
+    </section>
+
+    <section class="dashboard-section" aria-labelledby="recent-tournaments-title">
+      <div class="section-header">
+        <div><p class="section-kicker">COMPETITION ACTIVITY</p><h3 id="recent-tournaments-title">Recent tournaments</h3></div>
+        <span id="queue-stats" class="queue-status">Queue: Loading...</span>
+      </div>
+      <div class="recent-tournaments-card">
+        <table class="data-table" id="dash-recent-tourneys">
+          <thead><tr><th>Name</th><th>Format</th><th>Status</th><th>Participants</th><th><span class="visually-hidden">Action</span></th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </section>
   </div>
 
   <!-- BOTS -->

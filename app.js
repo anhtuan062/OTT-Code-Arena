@@ -129,6 +129,28 @@ function trapModalFocus(event) {
   else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
 }
 
+function toggleMobileNavigation() {
+  const sidebar = $('#app-nav');
+  const backdrop = $('#sidebar-backdrop');
+  const toggle = $('#mobile-menu-toggle');
+  const open = !sidebar.classList.contains('open');
+  sidebar.classList.toggle('open', open);
+  backdrop.hidden = !open;
+  toggle.setAttribute('aria-expanded', String(open));
+  toggle.setAttribute('aria-label', open ? 'Close navigation' : 'Open navigation');
+}
+
+function closeMobileNavigation() {
+  const sidebar = $('#app-nav');
+  const backdrop = $('#sidebar-backdrop');
+  const toggle = $('#mobile-menu-toggle');
+  if (!sidebar || !backdrop || !toggle) return;
+  sidebar.classList.remove('open');
+  backdrop.hidden = true;
+  toggle.setAttribute('aria-expanded', 'false');
+  toggle.setAttribute('aria-label', 'Open navigation');
+}
+
 function isCurrentView(view, authRevision, viewRevision, tournamentId) {
   return state.user && state.authRevision === authRevision && state.viewRevision === viewRevision && state.activeView === view
     && (tournamentId === undefined || state.tournamentId === tournamentId);
@@ -145,6 +167,10 @@ function navigate(view) {
     link.classList.toggle('active', active);
     link.setAttribute('aria-current', active ? 'page' : 'false');
   });
+  const pageTitles = { dashboard: 'Dashboard', bots: 'Bots', tournaments: 'Tournaments', 'tournament-detail': 'Tournament details', 'replay-view': 'Match replay' };
+  const pageTitle = $('#page-title');
+  if (pageTitle) pageTitle.textContent = pageTitles[view] || 'OTT Code Arena';
+  closeMobileNavigation();
   target.classList.add('active');
   if (view === 'dashboard') void loadDashboard();
   if (view === 'bots') void loadBots();
@@ -157,7 +183,10 @@ function setAuthenticated(user, csrfToken) {
   state.csrfToken = csrfToken;
   $('#auth-screen').hidden = true;
   $('#app-nav').hidden = false;
+  $('#app-topbar').hidden = false;
   $('#current-user').textContent = user.username;
+  $('#dashboard-username').textContent = user.username;
+  $('#user-avatar').textContent = user.username.slice(0, 1).toUpperCase();
   navigate('dashboard');
 }
 
@@ -176,6 +205,8 @@ function showAuthScreen() {
   state.activeView = 'auth-screen';
   $('#auth-screen').hidden = false;
   $('#app-nav').hidden = true;
+  $('#app-topbar').hidden = true;
+  closeMobileNavigation();
   document.querySelectorAll('.page:not(#auth-screen)').forEach(page => page.classList.remove('active'));
   $('#auth-screen').classList.add('active');
 }
@@ -216,10 +247,14 @@ async function api(path, options = {}) {
 }
 
 async function restoreSession() {
+  $('#auth-status').textContent = 'Restoring your secure session…';
   try {
     const result = await request('/auth/me');
     setAuthenticated(result.user, result.csrfToken);
-  } catch { showAuthScreen(); }
+  } catch {
+    $('#auth-status').textContent = 'Sign in to manage your bots and tournaments.';
+    showAuthScreen();
+  }
 }
 
 async function refreshQueueStats() {
@@ -230,8 +265,14 @@ async function refreshQueueStats() {
     const stats = await request('/system/queue');
     if (!isCurrentView(state.activeView, authRevision, viewRevision)) return;
     $('#queue-stats').textContent = `Queue: ${stats.activeCount}/${stats.maxConcurrent} active, ${stats.queueLength} queued`;
+    $('#dash-queue-value').textContent = `${stats.activeCount} / ${stats.maxConcurrent}`;
+    $('#dash-queue-detail').textContent = stats.queueLength ? `${stats.queueLength} waiting` : 'No bots waiting';
   } catch {
-    if (isCurrentView(state.activeView, authRevision, viewRevision)) $('#queue-stats').textContent = 'Queue status unavailable';
+    if (isCurrentView(state.activeView, authRevision, viewRevision)) {
+      $('#queue-stats').textContent = 'Queue status unavailable';
+      $('#dash-queue-value').textContent = '—';
+      $('#dash-queue-detail').textContent = 'Queue status unavailable';
+    }
   }
 }
 
@@ -241,6 +282,10 @@ async function loadDashboard() {
   const viewRevision = state.viewRevision;
   state.loading.add('dashboard');
   state.error = null;
+  $('#dash-tourney-count').textContent = '—';
+  $('#dash-bot-count').textContent = '—';
+  $('#dash-tourney-detail').textContent = 'Loading dashboard data';
+  $('#dash-bot-detail').textContent = 'Loading dashboard data';
   renderTableMessage(table, 'Loading tournaments…', 5);
   void refreshQueueStats();
   try {
@@ -248,6 +293,8 @@ async function loadDashboard() {
     if (!isCurrentView('dashboard', authRevision, viewRevision)) return;
     $('#dash-tourney-count').textContent = tournaments.length;
     $('#dash-bot-count').textContent = bots.length;
+    $('#dash-tourney-detail').textContent = tournaments.length ? 'In your workspace' : 'Create your first event';
+    $('#dash-bot-detail').textContent = bots.length ? 'Ready for competition' : 'Register your first bot';
     clear(table);
     if (!tournaments.length) return renderTableMessage(table, 'No tournaments yet. Create one to get started.', 5);
     tournaments.slice(0, 5).forEach(tournament => {
@@ -256,7 +303,16 @@ async function loadDashboard() {
       const action = create('td'); action.appendChild(actionButton('View', () => viewTournament(tournament.tournamentId), `view:${tournament.tournamentId}`)); row.appendChild(action);
       table.appendChild(row);
     });
-  } catch (error) { if (isCurrentView('dashboard', authRevision, viewRevision)) { state.error = error.message || 'Unable to load dashboard.'; renderTableMessage(table, state.error, 5, loadDashboard); } }
+  } catch (error) {
+    if (isCurrentView('dashboard', authRevision, viewRevision)) {
+      state.error = error.message || 'Unable to load dashboard.';
+      $('#dash-tourney-count').textContent = '—';
+      $('#dash-bot-count').textContent = '—';
+      $('#dash-tourney-detail').textContent = 'Unable to load data';
+      $('#dash-bot-detail').textContent = 'Unable to load data';
+      renderTableMessage(table, state.error, 5, loadDashboard);
+    }
+  }
   finally { state.loading.delete('dashboard'); }
 }
 
@@ -510,12 +566,17 @@ function bindEvents() {
   $('#register-form').addEventListener('submit', event => { event.preventDefault(); void runPending('register', $('#register-submit'), async () => { const result = await api('/auth/register', { method: 'POST', body: JSON.stringify({ username: $('#register-username').value, password: $('#register-password').value }) }); setAuthenticated(result.user, result.csrfToken); }); });
   $('#logout-button').addEventListener('click', () => void runPending('logout', $('#logout-button'), async () => { try { await api('/auth/logout', { method: 'POST' }); } finally { showAuthScreen(); } }));
   $('#open-bot-modal').addEventListener('click', () => openModal('add-bot-modal')); $('#open-tournament-modal').addEventListener('click', () => openModal('add-tourney-modal'));
+  $('#dashboard-create-bot').addEventListener('click', () => openModal('add-bot-modal')); $('#dashboard-create-tournament').addEventListener('click', () => openModal('add-tourney-modal'));
+  $('#mobile-menu-toggle').addEventListener('click', toggleMobileNavigation); $('#sidebar-backdrop').addEventListener('click', closeMobileNavigation);
   $('#back-to-tournaments').addEventListener('click', () => navigate('tournaments')); $('#btn-register-bot').addEventListener('click', async () => { if (await populateBotSelect()) openModal('register-bot-tourney-modal'); });
   $('#close-replay').addEventListener('click', closeReplay); $('#submit-bot').addEventListener('click', () => void submitNewBot()); $('#submit-tournament').addEventListener('click', () => void submitNewTournament()); $('#submit-registration').addEventListener('click', () => void submitTournamentRegistration());
   document.querySelectorAll('[data-close-modal]').forEach(button => button.addEventListener('click', () => closeModal(button.dataset.closeModal)));
   document.querySelectorAll('.modal-overlay').forEach(modal => modal.addEventListener('click', event => { if (event.target === modal) closeModal(modal.id); }));
   document.addEventListener('keydown', event => {
-    if (event.key === 'Escape') document.querySelectorAll('.modal-overlay.open').forEach(modal => closeModal(modal.id));
+    if (event.key === 'Escape') {
+      document.querySelectorAll('.modal-overlay.open').forEach(modal => closeModal(modal.id));
+      closeMobileNavigation();
+    }
     else trapModalFocus(event);
   });
   $('#btn-replay-start').addEventListener('click', () => goToReplayTurn(-1)); $('#btn-replay-prev').addEventListener('click', () => goToReplayTurn(state.replayMoveIndex - 1)); $('#btn-replay-next').addEventListener('click', () => goToReplayTurn(state.replayMoveIndex + 1)); $('#btn-replay-end').addEventListener('click', () => state.replay && goToReplayTurn(state.replay.moves.length - 1));
