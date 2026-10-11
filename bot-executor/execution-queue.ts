@@ -25,6 +25,7 @@ export class ExecutionQueue extends EventEmitter {
   private queue: QueueTask[] = [];
   private active: Map<string, QueueTask> = new Map();
   private cancelled: Set<string> = new Set();
+  private recentStatuses = new Map<string, QueueTaskStatus>();
   private _disposed = false;
 
   constructor(config: Partial<ExecutionQueueConfig> = {}) {
@@ -92,6 +93,7 @@ export class ExecutionQueue extends EventEmitter {
       this.queue.splice(queueIndex, 1);
       task.status = 'cancelled';
       task.completedAt = Date.now();
+      this.rememberStatus(task.id, task.status);
       task.settled = true;
       task.reject(new Error(`Task ${id} cancelled while queued`));
       this.emit('cancelled', { id, wasActive: false });
@@ -101,6 +103,7 @@ export class ExecutionQueue extends EventEmitter {
     const activeTask = this.active.get(id);
     if (activeTask) {
       activeTask.status = 'cancelled';
+      this.rememberStatus(activeTask.id, activeTask.status);
       activeTask.controller.abort();
       if (!activeTask.settled) {
         activeTask.settled = true;
@@ -143,6 +146,24 @@ export class ExecutionQueue extends EventEmitter {
     };
   }
 
+  getStatus(id: string): QueueTaskStatus | null {
+    const active = this.active.get(id);
+    if (active) return active.status;
+    const queued = this.queue.find(task => task.id === id);
+    if (queued) return queued.status;
+    return this.recentStatuses.get(id) ?? null;
+  }
+
+  private rememberStatus(id: string, status: QueueTaskStatus): void {
+    this.recentStatuses.delete(id);
+    this.recentStatuses.set(id, status);
+    while (this.recentStatuses.size > 100) {
+      const oldest = this.recentStatuses.keys().next().value as string | undefined;
+      if (!oldest) break;
+      this.recentStatuses.delete(oldest);
+    }
+  }
+
   private startTask(task: QueueTask): void {
     task.status = 'active';
     task.startedAt = Date.now();
@@ -156,6 +177,7 @@ export class ExecutionQueue extends EventEmitter {
         if (wasCancelled()) {
           task.status = 'cancelled';
           task.completedAt = Date.now();
+          this.rememberStatus(task.id, task.status);
           if (!task.settled) {
             task.settled = true;
             task.reject(new Error(`Task ${task.id} cancelled during execution`));
@@ -163,6 +185,7 @@ export class ExecutionQueue extends EventEmitter {
         } else {
           task.status = 'completed';
           task.completedAt = Date.now();
+          this.rememberStatus(task.id, task.status);
           if (!task.settled) {
             task.settled = true;
             task.resolve(result);
@@ -173,6 +196,7 @@ export class ExecutionQueue extends EventEmitter {
       .catch((error) => {
         task.status = wasCancelled() ? 'cancelled' : 'failed';
         task.completedAt = Date.now();
+        this.rememberStatus(task.id, task.status);
         if (!task.settled) {
           task.settled = true;
           task.reject(error);
@@ -193,6 +217,7 @@ export class ExecutionQueue extends EventEmitter {
       if (this.cancelled.has(next.id)) {
         next.status = 'cancelled';
         next.completedAt = Date.now();
+        this.rememberStatus(next.id, next.status);
         next.settled = true;
         next.reject(new Error(`Task ${next.id} cancelled while queued`));
         this.emit('cancelled', { id: next.id, wasActive: false });

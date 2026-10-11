@@ -85,6 +85,17 @@ export function isGoalSquare(pos: Position): boolean {
   return GOAL_SQUARES.some(g => g.row === pos.row && g.col === pos.col);
 }
 
+/**
+ * Each player wins by reaching the goal on the opponent's starting side.
+ * Player A starts at the top and targets i9; Player B starts at the bottom
+ * and targets a1.
+ */
+export function isPlayerGoalSquare(pos: Position, player: Player): boolean {
+  return player === 'A'
+    ? pos.row === 8 && pos.col === 8
+    : pos.row === 0 && pos.col === 0;
+}
+
 export function algebraicToPos(alg: string): Position | null {
   if (alg.length !== 2) return null;
   const colChar = alg.charAt(0).toLowerCase();

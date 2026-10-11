@@ -65,6 +65,18 @@ import type { MatchConfig, BotDefinition } from '@match-runner/types.js';
 import { MatchReplay, MatchResult, MatchRunner } from '@match-runner/index.js';
 import type { BotExecutor } from '@bot-executor/types.js';
 import { isExecutionCancelledError } from '@bot-executor/types.js';
+import { createHash } from 'crypto';
+
+function createMatchId(tournamentId: string, pairingId: string): string {
+  const candidate = `${tournamentId}-${pairingId}`;
+  if (/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(candidate)) {
+    return candidate;
+  }
+
+  // Preserve the historical readable ID when it is safe. Long participant
+  // identifiers can otherwise exceed the repository's 128-character limit.
+  return `m-${createHash('sha256').update(candidate).digest('hex')}`;
+}
 
 /**
  * Tournament application configuration
@@ -431,6 +443,8 @@ export class TournamentManager {
       return { success: false, error: 'Tournament execution cancelled' };
     }
 
+    await this.reconcileInterruptedPairings(tournament);
+
     const results: ExecutedMatchResult[] = [];
     let pairing = getNextEligiblePairing(tournament.rounds);
 
@@ -510,10 +524,20 @@ export class TournamentManager {
       return { success: false, error: 'Participant not found' };
     }
 
-    const matchId = `${tournament.tournamentId}-${pairing.pairingId}`;
+    const matchId = createMatchId(tournament.tournamentId, pairing.pairingId);
 
     // Mark pairing as in progress
-    markPairingInProgress(tournament.rounds, pairing.pairingId, matchId);
+    if (!markPairingInProgress(tournament.rounds, pairing.pairingId, matchId)) {
+      return { success: false, error: `Pairing ${pairing.pairingId} is not available` };
+    }
+
+    // Persist ownership of the pairing before starting any external work.
+    // If this fails, no Docker execution may begin for an untracked match.
+    try {
+      await this.saveTournament(tournament);
+    } catch (error) {
+      return { success: false, error: `Unable to persist match start: ${error}` };
+    }
 
     // Convert tournament bots to match runner bot definitions
     const botA: import('@match-runner/types.js').BotDefinition = {
@@ -839,20 +863,49 @@ export class TournamentManager {
     const matchRecords = await this.repository.listMatchResults(tournamentId);
     tournament.standings = computeStandings(tournament.participants, matchRecords, tournament.scoringConfig);
 
-    // Update pairing statuses from match records
-    for (const record of matchRecords) {
+    await this.reconcileInterruptedPairings(tournament, matchRecords);
+
+    await this.saveTournament(tournament);
+    return { success: true, data: tournament };
+  }
+
+  /**
+   * Reconcile durable pairing state with committed match results.
+   *
+   * A committed result is authoritative. An in-progress pairing without a
+   * committed result belongs to an execution interrupted after its start was
+   * persisted, so it becomes eligible again after the previous writer has
+   * released storage ownership.
+   */
+  private async reconcileInterruptedPairings(
+    tournament: Tournament,
+    matchRecords?: TournamentMatchRecord[]
+  ): Promise<void> {
+    const records = matchRecords ?? await this.repository.listMatchResults(tournament.tournamentId);
+    const completedPairingIds = new Set(records.map(record => record.pairingId));
+
+    for (const round of tournament.rounds) {
+      for (const pairing of round.pairings) {
+        if (pairing.status === 'in_progress' && !completedPairingIds.has(pairing.pairingId)) {
+          pairing.status = 'scheduled';
+          pairing.matchId = null;
+          pairing.matchResult = null;
+          pairing.startedAt = null;
+          pairing.completedAt = null;
+        }
+      }
+    }
+
+    for (const record of records) {
       const pairing = findPairing(tournament.rounds, record.pairingId);
       if (pairing && pairing.status !== 'completed') {
         pairing.status = 'completed';
         pairing.matchId = record.matchId;
         pairing.matchResult = record;
-        pairing.startedAt = record.completedAt; // Approximate
+        pairing.startedAt = record.completedAt;
         pairing.completedAt = record.completedAt;
       }
     }
-
-    await this.saveTournament(tournament);
-    return { success: true, data: tournament };
   }
 }
 

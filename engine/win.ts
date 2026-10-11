@@ -3,7 +3,7 @@
  */
 
 import { GameState, WinReason, Player, Position, GOAL_SQUARES } from './types.js';
-import { getPlayerPieces, isGoalSquare } from './state.js';
+import { getPlayerPieces, isPlayerGoalSquare } from './state.js';
 
 export interface WinCheckResult {
   isWin: boolean;
@@ -62,7 +62,7 @@ export function checkWin(state: GameState): WinCheckResult {
   // Check goal squares
   if (state.lastMove) {
     const lastPos = state.lastMove.to;
-    if (isGoalSquare(lastPos)) {
+    if (isPlayerGoalSquare(lastPos, state.lastMove.player)) {
       return {
         isWin: true,
         winner: state.lastMove.player,

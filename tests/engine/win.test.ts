@@ -45,7 +45,43 @@ describe('Engine Win/Draw', () => {
       expect(result.reason).toBe('type_elimination');
     });
 
-    it('should detect goal square a1', () => {
+    it('should detect Player B reaching a1', () => {
+      const testState = cloneState(state);
+      testState.lastMove = {
+        pieceId: 'B-dam-1',
+        from: { row: 0, col: 1 },
+        to: { row: 0, col: 0 },
+        captures: null,
+        player: 'B',
+        turn: 5,
+      };
+      testState.currentPlayer = 'B';
+
+      const result = checkWin(testState);
+      expect(result.isWin).toBe(true);
+      expect(result.winner).toBe('B');
+      expect(result.reason).toBe('goal_reached');
+    });
+
+    it('should detect Player A reaching i9', () => {
+      const testState = cloneState(state);
+      testState.lastMove = {
+        pieceId: 'A-keo-1',
+        from: { row: 8, col: 7 },
+        to: { row: 8, col: 8 },
+        captures: null,
+        player: 'A',
+        turn: 10,
+      };
+      testState.currentPlayer = 'A';
+
+      const result = checkWin(testState);
+      expect(result.isWin).toBe(true);
+      expect(result.winner).toBe('A');
+      expect(result.reason).toBe('goal_reached');
+    });
+
+    it('should not treat Player A reaching a1 as a goal win', () => {
       const testState = cloneState(state);
       testState.lastMove = {
         pieceId: 'A-dam-1',
@@ -55,15 +91,11 @@ describe('Engine Win/Draw', () => {
         player: 'A',
         turn: 5,
       };
-      testState.currentPlayer = 'B';
 
-      const result = checkWin(testState);
-      expect(result.isWin).toBe(true);
-      expect(result.winner).toBe('A');
-      expect(result.reason).toBe('goal_reached');
+      expect(checkWin(testState)).toEqual({ isWin: false, winner: null, reason: null });
     });
 
-    it('should detect goal square i9', () => {
+    it('should not treat Player B reaching i9 as a goal win', () => {
       const testState = cloneState(state);
       testState.lastMove = {
         pieceId: 'B-keo-1',
@@ -73,12 +105,8 @@ describe('Engine Win/Draw', () => {
         player: 'B',
         turn: 10,
       };
-      testState.currentPlayer = 'A';
 
-      const result = checkWin(testState);
-      expect(result.isWin).toBe(true);
-      expect(result.winner).toBe('B');
-      expect(result.reason).toBe('goal_reached');
+      expect(checkWin(testState)).toEqual({ isWin: false, winner: null, reason: null });
     });
 
     it('should return finished state as win', () => {
@@ -202,8 +230,8 @@ describe('Engine Win/Draw', () => {
       const testState = cloneState(state);
       testState.lastMove = {
         pieceId: 'A-dam-1',
-        from: { row: 0, col: 1 },
-        to: { row: 0, col: 0 },
+        from: { row: 8, col: 7 },
+        to: { row: 8, col: 8 },
         captures: null,
         player: 'A',
         turn: 5,

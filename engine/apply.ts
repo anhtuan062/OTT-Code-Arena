@@ -11,7 +11,7 @@ import type {
   ApplyResult,
   WinReason,
 } from './types.js';
-import { cloneState, getPieceById, getPieceAt, getPlayerPieces, opponent, isGoalSquare } from './state.js';
+import { cloneState, getPieceById, getPieceAt, getPlayerPieces, opponent, isPlayerGoalSquare } from './state.js';
 import { validateMove } from './moves.js';
 
 function checkTypeElimination(state: GameState, player: Player): WinReason | null {
@@ -28,8 +28,8 @@ function checkTypeElimination(state: GameState, player: Player): WinReason | nul
   return null;
 }
 
-function checkGoalSquare(pos: Position): WinReason | null {
-  if (isGoalSquare(pos)) {
+function checkGoalSquare(pos: Position, player: Player): WinReason | null {
+  if (isPlayerGoalSquare(pos, player)) {
     return 'goal_reached';
   }
   return null;
@@ -88,7 +88,7 @@ export function applyMove(state: GameState, move: MoveOption): ApplyResult {
 
   // Check goal square
   if (!winReason) {
-    winReason = checkGoalSquare(move.to);
+    winReason = checkGoalSquare(move.to, piece.player);
   }
 
   if (winReason) {

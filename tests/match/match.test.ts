@@ -258,6 +258,10 @@ describe('Match Runner', () => {
       expect(currentState.turn).toBe(result.finalState.turn);
       expect(currentState.winner).toBe(result.finalState.winner);
       expect(currentState.status).toBe(result.finalState.status);
+      expect(currentState.winReason).toBe(result.finalState.winReason);
+      expect(replay.finalState).toEqual(result.finalState);
+      expect(replay.winner).toBe(result.winner);
+      expect(replay.terminationReason).toBe(result.terminationReason);
     });
 
     it('should represent forfeit correctly without fabricating in-game moves', async () => {

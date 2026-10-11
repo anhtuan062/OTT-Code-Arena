@@ -346,7 +346,13 @@ app.post('/api/tournaments/:id/action', requireAuth, requireCsrf, async (req, re
 
         executionQueue.submit(`run_all_${tournamentId}`, async (signal) => {
           try {
-            await manager.runAllMatches(tournamentId, signal);
+            const executionResult = await manager.runAllMatches(tournamentId, signal);
+            if (!executionResult.success) {
+              if (signal.aborted || executionResult.error === 'Tournament execution cancelled') {
+                return;
+              }
+              throw new Error(executionResult.error ?? 'Tournament execution failed');
+            }
           } finally {
             activeTournamentRuns.delete(tournamentId);
           }
@@ -431,7 +437,12 @@ app.get('/api/tournaments/:id/replays/:matchId', requireAuth, async (req, res) =
 // QUEUE STATS
 // ---------------------------------------------------------
 app.get('/api/system/queue', requireAuth, (req, res) => {
-  res.json(executionQueue.getStats());
+  const stats = executionQueue.getStats();
+  const taskId = typeof req.query.id === 'string' ? req.query.id : undefined;
+  res.json({
+    ...stats,
+    ...(taskId ? { taskId, status: executionQueue.getStatus(taskId) } : {}),
+  });
 });
 
 // Error handling fallback

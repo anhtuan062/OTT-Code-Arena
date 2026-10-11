@@ -188,14 +188,49 @@ describe('Engine Apply', () => {
   });
 
   describe('Win Detection - Goal Square', () => {
-    it('should detect win when piece reaches a1 (0,0)', () => {
+    it('should not award Player A goal victory for the three-move a1 reproduction', () => {
+      let currentState = cloneState(state);
+
+      const first = applyMoveByCoords(currentState, 'A-dam-1', 0, 1);
+      expect(first.success).toBe(true);
+      currentState = first.state;
+
+      const second = applyMoveByCoords(currentState, 'B-dam-1', 7, 6);
+      expect(second.success).toBe(true);
+      currentState = second.state;
+
+      const third = applyMoveByCoords(currentState, 'A-dam-1', 0, 0);
+      expect(third.success).toBe(true);
+      expect(third.state.status).toBe('playing');
+      expect(third.state.winner).toBeNull();
+      expect(third.state.winReason).toBeNull();
+    });
+
+    it('should detect win when Player B reaches a1 (0,0)', () => {
       const testState = cloneState(state);
-      const piece = getPieceById(testState, 'A-dam-1')!;
+      const piece = getPieceById(testState, 'B-dam-1')!;
       piece.row = 0;
       piece.col = 1; // Adjacent to a1
-      testState.currentPlayer = 'A';
+      testState.currentPlayer = 'B';
 
       const move = generateLegalMovesForPiece(testState, piece.id).find(m => m.to.row === 0 && m.to.col === 0);
+      expect(move).toBeDefined();
+
+      const result = applyMove(testState, move!);
+      expect(result.success).toBe(true);
+      expect(result.state.status).toBe('finished');
+      expect(result.state.winner).toBe('B');
+      expect(result.state.winReason).toBe('goal_reached');
+    });
+
+    it('should detect win when Player A reaches i9 (8,8)', () => {
+      const testState = cloneState(state);
+      const piece = getPieceById(testState, 'A-dam-1')!;
+      piece.row = 8;
+      piece.col = 7; // Adjacent to i9
+      testState.currentPlayer = 'A';
+
+      const move = generateLegalMovesForPiece(testState, piece.id).find(m => m.to.row === 8 && m.to.col === 8);
       expect(move).toBeDefined();
 
       const result = applyMove(testState, move!);
@@ -205,11 +240,28 @@ describe('Engine Apply', () => {
       expect(result.state.winReason).toBe('goal_reached');
     });
 
-    it('should detect win when piece reaches i9 (8,8)', () => {
+    it('should not finish when Player A reaches a1', () => {
+      const testState = cloneState(state);
+      const piece = getPieceById(testState, 'A-dam-1')!;
+      piece.row = 0;
+      piece.col = 1;
+      testState.currentPlayer = 'A';
+
+      const move = generateLegalMovesForPiece(testState, piece.id).find(m => m.to.row === 0 && m.to.col === 0);
+      expect(move).toBeDefined();
+
+      const result = applyMove(testState, move!);
+      expect(result.success).toBe(true);
+      expect(result.state.status).toBe('playing');
+      expect(result.state.winner).toBeNull();
+      expect(result.state.winReason).toBeNull();
+    });
+
+    it('should not finish when Player B reaches i9', () => {
       const testState = cloneState(state);
       const piece = getPieceById(testState, 'B-dam-1')!;
       piece.row = 8;
-      piece.col = 7; // Adjacent to i9
+      piece.col = 7;
       testState.currentPlayer = 'B';
 
       const move = generateLegalMovesForPiece(testState, piece.id).find(m => m.to.row === 8 && m.to.col === 8);
@@ -217,9 +269,9 @@ describe('Engine Apply', () => {
 
       const result = applyMove(testState, move!);
       expect(result.success).toBe(true);
-      expect(result.state.status).toBe('finished');
-      expect(result.state.winner).toBe('B');
-      expect(result.state.winReason).toBe('goal_reached');
+      expect(result.state.status).toBe('playing');
+      expect(result.state.winner).toBeNull();
+      expect(result.state.winReason).toBeNull();
     });
 
     it('should not declare win for non-goal squares', () => {
@@ -242,24 +294,24 @@ describe('Engine Apply', () => {
     it('should prioritize type elimination over goal square if both occur', () => {
       // This tests the order: type elimination checked first
       const testState = cloneState(state);
-      // B has only 1 keo at a1 (0,0), A has dam adjacent
+      // B has only 1 keo at i9 (8,8), A has dam adjacent
       testState.pieces = testState.pieces.filter(p => !(p.player === 'B' && p.type === 'keo' && p.id !== 'B-keo-1'));
       const victim = getPieceById(testState, 'B-keo-1')!;
-      victim.row = 0;
-      victim.col = 0; // a1 - goal square
+      victim.row = 8;
+      victim.col = 8; // i9 - A's goal square
 
       const attacker = getPieceById(testState, 'A-dam-1')!;
-      attacker.row = 0;
-      attacker.col = 1;
+      attacker.row = 8;
+      attacker.col = 7;
 
       testState.pieces = testState.pieces.filter(p =>
-        !(p.row === 0 && p.col === 1 && p.id !== attacker.id) &&
-        !(p.row === 0 && p.col === 0 && p.id !== victim.id)
+        !(p.row === 8 && p.col === 7 && p.id !== attacker.id) &&
+        !(p.row === 8 && p.col === 8 && p.id !== victim.id)
       );
       // attacker and victim are already in the array, no need to push
       testState.currentPlayer = 'A';
 
-      const move = generateLegalMovesForPiece(testState, attacker.id).find(m => m.to.row === 0 && m.to.col === 0);
+      const move = generateLegalMovesForPiece(testState, attacker.id).find(m => m.to.row === 8 && m.to.col === 8);
       expect(move).toBeDefined();
 
       const result = applyMove(testState, move!);

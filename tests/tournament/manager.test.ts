@@ -334,6 +334,90 @@ describe('Tournament Manager', () => {
       expect(tournament.completedAt).toBeDefined();
     });
 
+    it('persists in-progress pairing before invoking the executor', async () => {
+      let persistedBeforeExecution = false;
+      const executor: MatchExecutor = {
+        async executeMatch(matchId) {
+          const persisted = (await repository.load('durable-start'))!;
+          const pairing = persisted.rounds[0]?.pairings[0];
+          persistedBeforeExecution = pairing?.status === 'in_progress' && pairing.matchId === matchId;
+          return createMockMatchResult(matchId);
+        },
+        async isAvailable() { return true; },
+      };
+      const manager = new TournamentManager({ repository, executor });
+
+      await createTestTournament(manager, 'durable-start', 'Durable start');
+      await registerParticipants(manager, 'durable-start', 2);
+      await manager.openRegistration('durable-start');
+      await manager.generateSchedule('durable-start');
+      await manager.startTournament('durable-start');
+
+      const result = await manager.runNextMatch('durable-start');
+      expect(result.success).toBe(true);
+      expect(persistedBeforeExecution).toBe(true);
+    });
+
+    it('does not invoke the executor when the in-progress transition cannot be saved', async () => {
+      let executed = false;
+      const executor: MatchExecutor = {
+        async executeMatch(matchId) {
+          executed = true;
+          return createMockMatchResult(matchId);
+        },
+        async isAvailable() { return true; },
+      };
+      const manager = new TournamentManager({ repository, executor });
+      await createTestTournament(manager, 'durable-failure', 'Durable failure');
+      await registerParticipants(manager, 'durable-failure', 2);
+      await manager.openRegistration('durable-failure');
+      await manager.generateSchedule('durable-failure');
+      await manager.startTournament('durable-failure');
+
+      const originalSave = repository.save.bind(repository);
+      let failNextSave = true;
+      repository.save = async tournament => {
+        if (failNextSave) {
+          failNextSave = false;
+          throw new Error('injected start persistence failure');
+        }
+        await originalSave(tournament);
+      };
+
+      const result = await manager.runNextMatch('durable-failure');
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('Unable to persist match start');
+      expect(executed).toBe(false);
+      repository.save = originalSave;
+    });
+
+    it('uses a strict bounded match ID when participant IDs are long', async () => {
+      let executedMatchId = '';
+      const executor: MatchExecutor = {
+        async executeMatch(matchId) {
+          executedMatchId = matchId;
+          return createMockMatchResult(matchId);
+        },
+        async isAvailable() { return true; },
+      };
+      const manager = new TournamentManager({ repository, executor });
+      const participantA = `participant-a-${'x'.repeat(55)}`;
+      const participantB = `participant-b-${'y'.repeat(55)}`;
+
+      await createTestTournament(manager, 'long-match-id', 'Long match ID');
+      await manager.registerParticipant('long-match-id', participantA, 'A', createTestBot('bot-a'));
+      await manager.registerParticipant('long-match-id', participantB, 'B', createTestBot('bot-b'));
+      await manager.openRegistration('long-match-id');
+      await manager.generateSchedule('long-match-id');
+      await manager.startTournament('long-match-id');
+
+      const result = await manager.runNextMatch('long-match-id');
+      expect(result.success).toBe(true);
+      expect(executedMatchId).toMatch(/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/);
+      expect(executedMatchId.length).toBeLessThanOrEqual(128);
+      expect(await repository.loadMatchResult('long-match-id', executedMatchId)).toBeTruthy();
+    });
+
     it('should get standings', async () => {
       const manager = new TournamentManager({
         repository,
@@ -570,6 +654,59 @@ describe('Tournament Manager', () => {
   });
 
   describe('Resuming Tournament', () => {
+    it('resets an interrupted in-progress pairing without a committed result', async () => {
+      const manager = new TournamentManager({
+        repository,
+        executor: mockExecutor,
+      });
+
+      await createTestTournament(manager, 'resume-in-progress', 'Resume in progress');
+      await registerParticipants(manager, 'resume-in-progress', 2);
+      await manager.openRegistration('resume-in-progress');
+      await manager.generateSchedule('resume-in-progress');
+      await manager.startTournament('resume-in-progress');
+
+      const interrupted = (await manager.loadTournament('resume-in-progress')).data!;
+      const pairing = interrupted.rounds[0].pairings[0];
+      pairing.status = 'in_progress';
+      pairing.matchId = 'resume-in-progress-interrupted';
+      pairing.startedAt = new Date().toISOString();
+      await repository.save(interrupted);
+
+      const result = await manager.resumeTournament('resume-in-progress');
+      expect(result.success).toBe(true);
+      expect(result.data?.rounds[0]?.pairings[0]?.status).toBe('scheduled');
+      expect(result.data?.rounds[0]?.pairings[0]?.matchId).toBeNull();
+    });
+
+    it('runAllMatches recovers an interrupted pairing before selecting work', async () => {
+      const manager = new TournamentManager({
+        repository,
+        executor: mockExecutor,
+      });
+
+      await createTestTournament(manager, 'resume-run-all', 'Resume run all');
+      await registerParticipants(manager, 'resume-run-all', 2);
+      await manager.openRegistration('resume-run-all');
+      await manager.generateSchedule('resume-run-all');
+      await manager.startTournament('resume-run-all');
+
+      const interrupted = (await manager.loadTournament('resume-run-all')).data!;
+      const pairing = interrupted.rounds[0].pairings[0];
+      pairing.status = 'in_progress';
+      pairing.matchId = 'resume-run-all-interrupted';
+      pairing.startedAt = new Date().toISOString();
+      await repository.save(interrupted);
+
+      const matchId = 'resume-run-all-P1-v-P2-r1';
+      mockExecutor.setMatchResult(matchId, createMockMatchResult(matchId));
+      const result = await manager.runAllMatches('resume-run-all');
+
+      expect(result.success).toBe(true);
+      expect(result.data).toHaveLength(1);
+      expect((await manager.loadTournament('resume-run-all')).data?.status).toBe('completed');
+    });
+
     it('should resume interrupted tournament', async () => {
       const manager = new TournamentManager({
         repository,

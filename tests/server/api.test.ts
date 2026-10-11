@@ -168,6 +168,35 @@ describe('Server API Security', () => {
       expect(statuses).toContain(200);
       expect(statuses).toContain(409);
     });
+
+    it('propagates a background run_all failure to the execution queue', async () => {
+      const createRes = await agent
+        .post('/api/tournaments')
+        .set('x-csrf-token', csrf)
+        .send({ name: 'Background Failure Test' });
+      const tId = createRes.body.tournamentId;
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+      try {
+        const response = await agent
+          .post(`/api/tournaments/${tId}/action`)
+          .set('x-csrf-token', csrf)
+          .send({ action: 'run_all' });
+
+        expect(response.status).toBe(200);
+
+        const deadline = Date.now() + 1000;
+        while (Date.now() < deadline && !errorSpy.mock.calls.length) {
+          await new Promise(resolve => setTimeout(resolve, 10));
+        }
+
+        expect(errorSpy.mock.calls.some(([message]) =>
+          String(message).includes('Execution queue error')
+        )).toBe(true);
+      } finally {
+        errorSpy.mockRestore();
+      }
+    });
   });
 
   describe('Replay API Validation', () => {
