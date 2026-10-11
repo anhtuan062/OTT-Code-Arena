@@ -31,6 +31,7 @@ describe('Tournament Manager', () => {
   });
 
   afterEach(async () => {
+    repository.close();
     try {
       await fs.rm(testDir, { recursive: true, force: true });
     } catch {}
@@ -362,6 +363,141 @@ describe('Tournament Manager', () => {
       const result = await manager.cancelTournament('tourney-1');
       expect(result.success).toBe(true);
       expect(result.data?.status).toBe('cancelled');
+    });
+
+    it('bounds cancellation while a result write never settles', async () => {
+      const manager = new TournamentManager({
+        repository,
+        executor: mockExecutor,
+        persistenceTimeoutMs: 100,
+      });
+      await createTestTournament(manager, 'cancel-stalled-write', 'Stalled write');
+
+      let release!: () => void;
+      const stalledWrite = new Promise<void>(resolve => { release = resolve; });
+      const pendingWrites = (manager as unknown as {
+        pendingResultWrites: Map<string, Set<Promise<void>>>;
+      }).pendingResultWrites;
+      pendingWrites.set('cancel-stalled-write', new Set([stalledWrite]));
+
+      const startedAt = Date.now();
+      const result = await manager.cancelTournament('cancel-stalled-write');
+      const elapsedMs = Date.now() - startedAt;
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('still in progress');
+      expect(elapsedMs).toBeLessThan(1000);
+      expect((await manager.loadTournament('cancel-stalled-write')).data?.status).toBe('draft');
+
+      release();
+      pendingWrites.delete('cancel-stalled-write');
+    });
+
+    it('cancels after rejected result persistence without waiting indefinitely', async () => {
+      const manager = new TournamentManager({
+        repository,
+        executor: mockExecutor,
+        persistenceTimeoutMs: 100,
+      });
+      await createTestTournament(manager, 'cancel-rejected-write', 'Rejected write');
+
+      const pendingWrites = (manager as unknown as {
+        pendingResultWrites: Map<string, Set<Promise<void>>>;
+      }).pendingResultWrites;
+      pendingWrites.set('cancel-rejected-write', new Set([
+        Promise.reject(new Error('injected result write failure')),
+      ]));
+
+      const result = await manager.cancelTournament('cancel-rejected-write');
+
+      expect(result.success).toBe(true);
+      expect(result.data?.status).toBe('cancelled');
+    });
+
+    it('returns a failure when terminal cancellation persistence stalls', async () => {
+      const manager = new TournamentManager({
+        repository,
+        executor: mockExecutor,
+        persistenceTimeoutMs: 100,
+      });
+      await createTestTournament(manager, 'cancel-stalled-terminal', 'Stalled terminal write');
+
+      const originalSave = repository.save.bind(repository);
+      repository.save = async () => new Promise<void>(() => {});
+
+      const startedAt = Date.now();
+      const result = await manager.cancelTournament('cancel-stalled-terminal');
+      const elapsedMs = Date.now() - startedAt;
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('timed out');
+      expect(elapsedMs).toBeLessThan(1000);
+      repository.save = originalSave;
+    });
+
+    it('blocks restart until a timed-out late save finishes', async () => {
+      const manager = new TournamentManager({
+        repository,
+        executor: mockExecutor,
+        persistenceTimeoutMs: 25,
+      });
+      await createTestTournament(manager, 'cancel-restart-write', 'Restart write');
+
+      const originalSave = repository.save.bind(repository);
+      let release!: () => void;
+      let lateSaveCompleted!: () => void;
+      const lateSaveDone = new Promise<void>(resolve => { lateSaveCompleted = resolve; });
+      let firstSave = true;
+      repository.save = async (tournament) => {
+        if (firstSave) {
+          firstSave = false;
+          const snapshot = structuredClone(tournament);
+          await new Promise<void>(resolve => { release = resolve; });
+          await originalSave(snapshot);
+          lateSaveCompleted();
+          return;
+        }
+        await originalSave(tournament);
+      };
+
+      const timedOut = await manager.cancelTournament('cancel-restart-write');
+      expect(timedOut.success).toBe(false);
+      await expect(
+        manager.updateMetadata('cancel-restart-write', { recovery: 'must-not-overtake' })
+      ).rejects.toThrow('persistence is still in progress');
+
+      // A restarted process cannot bypass the live writer's ownership.
+      const restartedRepository = new FileTournamentRepository({ baseDir: testDir });
+      await expect(restartedRepository.initialize()).rejects.toThrow('already owned');
+      release();
+      await lateSaveDone;
+
+      repository.save = originalSave;
+      repository.close();
+      await restartedRepository.initialize();
+      const restartedManager = new TournamentManager({ repository: restartedRepository, executor: mockExecutor });
+      await restartedManager.updateMetadata('cancel-restart-write', { recovery: 'newer-write' });
+
+      const persisted = (await restartedManager.loadTournament('cancel-restart-write')).data!;
+      expect(persisted.metadata).toEqual({ recovery: 'newer-write' });
+      expect(persisted.status).toBe('cancelled');
+      restartedRepository.close();
+    });
+
+    it('handles repeated cancellation without changing the terminal result', async () => {
+      const manager = new TournamentManager({
+        repository,
+        executor: mockExecutor,
+        persistenceTimeoutMs: 100,
+      });
+      await createTestTournament(manager, 'cancel-repeat', 'Repeated cancellation');
+
+      const first = await manager.cancelTournament('cancel-repeat');
+      const second = await manager.cancelTournament('cancel-repeat');
+
+      expect(first.success).toBe(true);
+      expect(second.success).toBe(false);
+      expect((await manager.loadTournament('cancel-repeat')).data?.status).toBe('cancelled');
     });
 
     it('keeps cancellation terminal while an active match is stopping', async () => {

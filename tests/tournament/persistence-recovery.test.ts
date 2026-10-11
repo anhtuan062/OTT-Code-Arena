@@ -23,6 +23,7 @@ describe('FileTournamentRepository - Recovery Tests', () => {
   });
 
   afterEach(async () => {
+    repository.close();
     try {
       await fs.rm(testBaseDir, { recursive: true, force: true });
     } catch {}

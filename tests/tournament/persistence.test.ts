@@ -34,6 +34,7 @@ describe('Tournament Persistence', () => {
   });
 
   afterEach(async () => {
+    repository.close();
     try {
       await fs.rm(testDir, { recursive: true, force: true });
     } catch {}

@@ -7,7 +7,7 @@
 
 import * as fs from 'fs/promises';
 import * as path from 'path';
-import { randomUUID } from 'crypto';
+import { createHash, randomUUID } from 'crypto';
 import {
   Tournament,
   TournamentParticipant,
@@ -22,6 +22,7 @@ import {
   DEFAULT_SCORING_CONFIG,
 } from './types.js';
 import type { MatchReplay } from '@match-runner/types.js';
+import { StorageOwnership } from './ownership.js';
 
 export interface TournamentRepository {
   save(tournament: Tournament): Promise<void>;
@@ -38,6 +39,7 @@ export interface TournamentRepository {
   loadMatchResult(tournamentId: string, matchId: string): Promise<TournamentMatchRecord | null>;
   loadReplay(tournamentId: string, matchId: string): Promise<MatchReplay | null>;
   listMatchResults(tournamentId: string): Promise<TournamentMatchRecord[]>;
+  close?(): void;
 }
 
 export interface TournamentStorageConfig {
@@ -52,10 +54,15 @@ export class FileTournamentRepository implements TournamentRepository {
   private baseDir: string;
   private indent: number;
   private readonly writeLocks = new Map<string, Promise<void>>();
+  private readonly ownership: StorageOwnership;
+  private initialization?: Promise<void>;
+  private activeWrites = 0;
+  private closeRequested = false;
 
   constructor(config: TournamentStorageConfig) {
-    this.baseDir = config.baseDir;
+    this.baseDir = path.resolve(config.baseDir);
     this.indent = config.indent ?? 2;
+    this.ownership = new StorageOwnership(this.baseDir);
   }
 
   private getTournamentDir(tournamentId: string): string {
@@ -76,6 +83,10 @@ export class FileTournamentRepository implements TournamentRepository {
     return path.join(this.getTournamentDir(tournamentId), `replay-${matchId}.json`);
   }
 
+  private getMatchCommitFile(tournamentId: string, matchId: string): string {
+    return path.join(this.getTournamentDir(tournamentId), `match-${matchId}.commit.json`);
+  }
+
   private assertSafeId(id: string, label: string): void {
     if (!/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(id)) {
       throw new Error(`Invalid ${label} identifier`);
@@ -83,21 +94,50 @@ export class FileTournamentRepository implements TournamentRepository {
   }
 
   private async withWriteLock<T>(key: string, operation: () => Promise<T>): Promise<T> {
+    await this.ensureOwnership();
     const previous = this.writeLocks.get(key) ?? Promise.resolve();
     let release!: () => void;
     const current = new Promise<void>(resolve => { release = resolve; });
     this.writeLocks.set(key, current);
+    this.activeWrites++;
     await previous;
     try {
       return await operation();
     } finally {
       release();
       if (this.writeLocks.get(key) === current) this.writeLocks.delete(key);
+      this.activeWrites--;
+      this.releaseIfIdle();
     }
   }
 
   async initialize(): Promise<void> {
-    await fs.mkdir(this.baseDir, { recursive: true });
+    if (!this.initialization) {
+      this.initialization = this.ownership.acquire().then(() => {
+        this.baseDir = this.ownership.canonicalDirectory;
+      }).catch(error => {
+        this.initialization = undefined;
+        throw error;
+      });
+    }
+    await this.initialization;
+  }
+
+  close(): void {
+    this.closeRequested = true;
+    this.releaseIfIdle();
+  }
+
+  private async ensureOwnership(): Promise<void> {
+    if (this.closeRequested) throw new Error('Tournament repository is closed');
+    await this.initialize();
+    this.ownership.assertHeld();
+  }
+
+  private releaseIfIdle(): void {
+    if (this.closeRequested && this.activeWrites === 0) {
+      this.ownership.release();
+    }
   }
 
   async save(tournament: Tournament): Promise<void> {
@@ -165,7 +205,22 @@ export class FileTournamentRepository implements TournamentRepository {
       return JSON.parse(data) as Tournament;
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-        return null;
+        const dir = this.getTournamentDir(tournamentId);
+        let entries: string[];
+        try {
+          entries = await fs.readdir(dir);
+        } catch (directoryError) {
+          if ((directoryError as NodeJS.ErrnoException).code === 'ENOENT') return null;
+          throw directoryError;
+        }
+        const backups = entries.filter(entry => /^tournament\.json(?:\..+)?\.bak$/.test(entry));
+        if (backups.length === 0) return null;
+        if (backups.length > 1) {
+          throw new Error(`Ambiguous tournament recovery for ${tournamentId}: multiple backup files exist`);
+        }
+        await this.ensureOwnership();
+        await fs.rename(path.join(dir, backups[0]!), file);
+        return JSON.parse(await fs.readFile(file, 'utf-8')) as Tournament;
       }
       throw error;
     }
@@ -277,10 +332,26 @@ export class FileTournamentRepository implements TournamentRepository {
       }
     };
 
+    const resultData = JSON.stringify(result, null, this.indent);
+    const replayData = JSON.stringify(replay, null, this.indent);
     await Promise.all([
-      this.writeAndReplace(resultFile, JSON.stringify(result, null, this.indent), renameWithBackup),
-      this.writeAndReplace(replayFile, JSON.stringify(replay, null, this.indent), renameWithBackup),
+      this.writeAndReplace(resultFile, resultData, renameWithBackup),
+      this.writeAndReplace(replayFile, replayData, renameWithBackup),
     ]);
+
+    // The marker is written last. Readers only accept a pair whose files and
+    // hashes match this marker, so a crash between the two replacements cannot
+    // expose a result/replay pair from different writes.
+    const commit = {
+      matchId,
+      resultHash: createHash('sha256').update(resultData).digest('hex'),
+      replayHash: createHash('sha256').update(replayData).digest('hex'),
+    };
+    await this.writeAndReplace(
+      this.getMatchCommitFile(tournamentId, matchId),
+      JSON.stringify(commit, null, this.indent),
+      renameWithBackup
+    );
   }
 
   private async writeAndReplace(
@@ -303,16 +374,8 @@ export class FileTournamentRepository implements TournamentRepository {
   async loadMatchResult(tournamentId: string, matchId: string): Promise<TournamentMatchRecord | null> {
     this.assertSafeId(tournamentId, 'tournament');
     this.assertSafeId(matchId, 'match');
-    const file = this.getMatchResultFile(tournamentId, matchId);
-    try {
-      const data = await fs.readFile(file, 'utf-8');
-      return JSON.parse(data) as TournamentMatchRecord;
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-        return null;
-      }
-      throw error;
-    }
+    const pair = await this.loadCommittedMatch(tournamentId, matchId);
+    return pair?.result ?? null;
   }
 
   /**
@@ -321,16 +384,61 @@ export class FileTournamentRepository implements TournamentRepository {
   async loadReplay(tournamentId: string, matchId: string): Promise<MatchReplay | null> {
     this.assertSafeId(tournamentId, 'tournament');
     this.assertSafeId(matchId, 'match');
-    const file = this.getReplayFile(tournamentId, matchId);
-    try {
-      const data = await fs.readFile(file, 'utf-8');
-      return JSON.parse(data) as MatchReplay;
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-        return null;
+    const pair = await this.loadCommittedMatch(tournamentId, matchId);
+    return pair?.replay ?? null;
+  }
+
+  private async loadCommittedMatch(tournamentId: string, matchId: string): Promise<{
+    result: TournamentMatchRecord;
+    replay: MatchReplay;
+  } | null> {
+    const resultFile = this.getMatchResultFile(tournamentId, matchId);
+    const replayFile = this.getReplayFile(tournamentId, matchId);
+    const commitFile = this.getMatchCommitFile(tournamentId, matchId);
+    const read = async (file: string): Promise<string | null> => {
+      try {
+        return await fs.readFile(file, 'utf-8');
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
+        throw error;
       }
-      throw error;
+    };
+
+    const [resultData, replayData, commitData] = await Promise.all([
+      read(resultFile), read(replayFile), read(commitFile),
+    ]);
+    if (resultData === null && replayData === null && commitData === null) return null;
+    if (resultData === null || replayData === null) {
+      throw new Error(`Incomplete persisted match ${matchId}: result, replay, and commit marker are required`);
     }
+
+    const result = JSON.parse(resultData) as TournamentMatchRecord;
+    const replay = JSON.parse(replayData) as MatchReplay;
+    if (commitData === null) {
+      // Explicit legacy compatibility: markerless pairs are accepted only
+      // when both JSON documents identify the same match. They cannot provide
+      // the hash-based protection of new writes and should be migrated before
+      // multi-writer operation is ever supported.
+      if (result.matchId !== matchId || replay.matchId !== matchId || result.replayRef !== matchId) {
+        throw new Error(`Inconsistent legacy persisted match ${matchId}`);
+      }
+      return { result, replay };
+    }
+    const commit = JSON.parse(commitData) as {
+      matchId?: string;
+      resultHash?: string;
+      replayHash?: string;
+    };
+    const resultHash = createHash('sha256').update(resultData).digest('hex');
+    const replayHash = createHash('sha256').update(replayData).digest('hex');
+    if (
+      result.matchId !== matchId || replay.matchId !== matchId || commit.matchId !== matchId ||
+      commit.resultHash !== resultHash || commit.replayHash !== replayHash ||
+      result.replayRef !== matchId
+    ) {
+      throw new Error(`Inconsistent persisted match ${matchId}: result, replay, and commit marker do not match`);
+    }
+    return { result, replay };
   }
 
   /**
@@ -341,12 +449,20 @@ export class FileTournamentRepository implements TournamentRepository {
     const dir = this.getTournamentDir(tournamentId);
     try {
       const files = await fs.readdir(dir);
-      const resultFiles = files.filter(f => f.startsWith('match-') && f.endsWith('.json'));
+      const matchIds = new Set<string>();
+      for (const file of files) {
+        if (file.startsWith('match-') && file.endsWith('.json')) {
+          const suffix = file.endsWith('.commit.json') ? '.commit.json' : '.json';
+          matchIds.add(file.slice('match-'.length, -suffix.length));
+        } else if (file.startsWith('replay-') && file.endsWith('.json')) {
+          matchIds.add(file.slice('replay-'.length, -'.json'.length));
+        }
+      }
 
       const results: TournamentMatchRecord[] = [];
-      for (const file of resultFiles) {
-        const data = await fs.readFile(path.join(dir, file), 'utf-8');
-        results.push(JSON.parse(data));
+      for (const matchId of matchIds) {
+        const pair = await this.loadCommittedMatch(tournamentId, matchId);
+        if (pair) results.push(pair.result);
       }
       return results;
     } catch (error) {

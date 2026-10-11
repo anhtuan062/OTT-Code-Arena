@@ -49,7 +49,7 @@ app.get('/style.css', (req, res) => res.sendFile(path.join(projectRoot, 'style.c
 // Serve static icons if they were separate, but they are embedded in index.html
 
 // Initialize singleton Tournament Manager
-let manager: Awaited<ReturnType<typeof createTournamentManager>>;
+let manager!: Awaited<ReturnType<typeof createTournamentManager>>;
 let executionQueue = createExecutionQueue({ maxConcurrent: 2, maxQueueLength: 50 });
 let botRepository: SqlBotRepository;
 let userRepository: SqlUserRepository;
@@ -89,8 +89,12 @@ export async function initServer(storageDir?: string) {
   await fs.mkdir(dir, { recursive: true });
   executionQueue = createExecutionQueue({ maxConcurrent: 2, maxQueueLength: 50 });
   activeTournamentRuns.clear();
+  manager?.close();
   closeSharedDatabase();
   try {
+    // Acquire tournament storage ownership before opening any writable
+    // database in the shared data directory.
+    manager = await createTournamentManager(dir, undefined, executionPolicy);
     const db = await initializeDatabase({ path: path.join(dir, 'arena.sqlite') });
     setSharedDatabase(db);
     botRepository = new SqlBotRepository(db);
@@ -98,9 +102,9 @@ export async function initServer(storageDir?: string) {
     sessionRepository = new SqlSessionRepository(db, SESSION_TTL_MS);
     rateLimitRepository = new SqlRateLimitRepository(db);
     sessionRepository.deleteExpired();
-    manager = await createTournamentManager(dir, undefined, executionPolicy);
     console.log(`Tournament Manager initialized with ${executionPolicy} policy`);
   } catch (error) {
+    manager?.close();
     closeSharedDatabase();
     executionQueue.cancelAll();
     throw error;
@@ -110,6 +114,7 @@ export async function initServer(storageDir?: string) {
 export function closeServer(): void {
   executionQueue.cancelAll();
   activeTournamentRuns.clear();
+  manager?.close();
   closeSharedDatabase();
 }
 

@@ -75,6 +75,7 @@ export interface TournamentAppConfig {
   defaultMatchConfig?: Partial<TournamentMatchConfig>;
   defaultScoringConfig?: Partial<TournamentScoringConfig>;
   storageDir?: string;
+  persistenceTimeoutMs?: number;
 }
 
 /**
@@ -97,12 +98,58 @@ export class TournamentManager {
   private readonly cancelledTournaments = new Set<string>();
   private readonly pendingResultWrites = new Map<string, Set<Promise<void>>>();
   private readonly terminalTransitionLocks = new Map<string, Promise<void>>();
+  private readonly tournamentWriteLocks = new Map<string, Promise<void>>();
+  private readonly persistenceTimeoutMs: number;
 
   constructor(config: TournamentAppConfig) {
     this.repository = config.repository;
     this.executor = config.executor;
     this.defaultMatchConfig = { ...DEFAULT_TOURNAMENT_MATCH_CONFIG, ...config.defaultMatchConfig };
     this.defaultScoringConfig = { ...DEFAULT_SCORING_CONFIG, ...config.defaultScoringConfig };
+    this.persistenceTimeoutMs = config.persistenceTimeoutMs ?? 5000;
+  }
+
+  /** Release repository ownership after callers have stopped submitting work. */
+  close(): void {
+    this.repository.close?.();
+  }
+
+  private async saveTournament(tournament: Tournament): Promise<void> {
+    if (this.tournamentWriteLocks.has(tournament.tournamentId)) {
+      throw new Error(`Tournament ${tournament.tournamentId} persistence is still in progress`);
+    }
+    const previous = this.tournamentWriteLocks.get(tournament.tournamentId) ?? Promise.resolve();
+    let release!: () => void;
+    const current = new Promise<void>(resolve => { release = resolve; });
+    this.tournamentWriteLocks.set(tournament.tournamentId, current);
+    await previous;
+    try {
+      await this.repository.save(tournament);
+    } finally {
+      release();
+      if (this.tournamentWriteLocks.get(tournament.tournamentId) === current) {
+        this.tournamentWriteLocks.delete(tournament.tournamentId);
+      }
+    }
+  }
+
+  private async awaitPersistence<T>(operation: Promise<T>, label: string): Promise<T> {
+    // This only bounds the caller. JavaScript promises and the repository
+    // operation remain active after the timeout unless the repository itself
+    // supports cancellation.
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
+    try {
+      return await Promise.race([
+        operation,
+        new Promise<T>((_, reject) => {
+          timeoutId = setTimeout(() => {
+            reject(new Error(`${label} timed out after ${this.persistenceTimeoutMs}ms`));
+          }, this.persistenceTimeoutMs);
+        }),
+      ]);
+    } finally {
+      if (timeoutId) clearTimeout(timeoutId);
+    }
   }
 
   /**
@@ -141,7 +188,7 @@ export class TournamentManager {
       tournament.scoringConfig = { ...this.defaultScoringConfig };
     }
 
-    await this.repository.save(tournament);
+    await this.saveTournament(tournament);
     return { success: true, data: tournament };
   }
 
@@ -170,7 +217,7 @@ export class TournamentManager {
     const loadResult = await this.loadTournament(tournamentId);
     if (!loadResult.success || !loadResult.data) return loadResult;
     loadResult.data.metadata = { ...(loadResult.data.metadata ?? {}), ...metadata };
-    await this.repository.save(loadResult.data);
+    await this.saveTournament(loadResult.data);
     return loadResult;
   }
 
@@ -224,7 +271,7 @@ export class TournamentManager {
     };
 
     tournament.participants.push(participant);
-    await this.repository.save(tournament);
+    await this.saveTournament(tournament);
     return { success: true, data: tournament };
   }
 
@@ -252,7 +299,7 @@ export class TournamentManager {
     }
 
     tournament.participants.splice(index, 1);
-    await this.repository.save(tournament);
+    await this.saveTournament(tournament);
     return { success: true, data: tournament };
   }
 
@@ -314,7 +361,7 @@ export class TournamentManager {
     // Initialize standings
     tournament.standings = computeStandings(tournament.participants, [], tournament.scoringConfig);
 
-    await this.repository.save(tournament);
+    await this.saveTournament(tournament);
     return { success: true, data: tournament };
   }
 
@@ -339,7 +386,7 @@ export class TournamentManager {
 
     tournament.status = 'running';
     tournament.startedAt = new Date().toISOString();
-    await this.repository.save(tournament);
+    await this.saveTournament(tournament);
     return { success: true, data: tournament };
   }
 
@@ -517,7 +564,7 @@ export class TournamentManager {
       pairing.status = 'scheduled'; // Reset to allow retry
       pairing.matchId = null;
       pairing.startedAt = null;
-      await this.repository.save(tournament);
+      await this.saveTournament(tournament);
       return { success: false, error: `Match execution failed: ${error}` };
     }
 
@@ -562,7 +609,7 @@ export class TournamentManager {
         pairing.status = 'scheduled';
         pairing.matchId = null;
         pairing.startedAt = null;
-        await this.repository.save(tournament);
+        await this.saveTournament(tournament);
       }
       return { success: false, error: `Match result persistence failed: ${error}` };
     } finally {
@@ -587,7 +634,7 @@ export class TournamentManager {
     if (signal?.aborted || this.cancelledTournaments.has(tournament.tournamentId)) {
       return { success: false, error: 'Tournament execution cancelled' };
     }
-    await this.repository.save(tournament);
+    await this.saveTournament(tournament);
 
     return {
       success: true,
@@ -623,7 +670,7 @@ export class TournamentManager {
     if (this.cancelledTournaments.has(tournamentId)) {
       return { success: false, error: 'Tournament execution cancelled' };
     }
-    await this.repository.save(tournament);
+    await this.saveTournament(tournament);
     return { success: true, data: tournament };
     });
   }
@@ -633,11 +680,35 @@ export class TournamentManager {
    */
   async cancelTournament(tournamentId: string): Promise<TournamentOperationResult<Tournament>> {
     this.cancelledTournaments.add(tournamentId);
-    return this.withTerminalTransitionLock(tournamentId, async () => {
-      const writes = this.pendingResultWrites.get(tournamentId);
-      if (writes) await Promise.allSettled([...writes]);
-      return this.transitionStatus(tournamentId, 'cancelled');
-    });
+    try {
+      return await this.withTerminalTransitionLock(tournamentId, async () => {
+        const writes = this.pendingResultWrites.get(tournamentId);
+        if (writes) {
+          const outcomes = await Promise.allSettled(
+            [...writes].map(write => this.awaitPersistence(write, 'Match result persistence'))
+          );
+          if (outcomes.some(outcome =>
+            outcome.status === 'rejected' &&
+            outcome.reason instanceof Error &&
+            outcome.reason.message.includes('timed out')
+          )) {
+            return {
+              success: false,
+              error: 'Tournament cancellation persistence is still in progress; retry cancellation',
+            };
+          }
+        }
+        return await this.awaitPersistence(
+          this.transitionStatus(tournamentId, 'cancelled'),
+          'Tournament cancellation'
+        );
+      });
+    } catch (error) {
+      return {
+        success: false,
+        error: `Tournament cancellation persistence failed: ${error instanceof Error ? error.message : String(error)}`,
+      };
+    }
   }
 
   private async withTerminalTransitionLock<T>(
@@ -648,7 +719,15 @@ export class TournamentManager {
     let release!: () => void;
     const current = new Promise<void>(resolve => { release = resolve; });
     this.terminalTransitionLocks.set(tournamentId, current);
-    await previous;
+    try {
+      await this.awaitPersistence(previous, 'Terminal transition lock');
+    } catch (error) {
+      release();
+      if (this.terminalTransitionLocks.get(tournamentId) === current) {
+        this.terminalTransitionLocks.delete(tournamentId);
+      }
+      throw error;
+    }
     try {
       return await operation();
     } finally {
@@ -740,7 +819,7 @@ export class TournamentManager {
       // No additional timestamp needed
     }
 
-    await this.repository.save(tournament);
+    await this.saveTournament(tournament);
     return { success: true, data: tournament };
   }
 
@@ -772,7 +851,7 @@ export class TournamentManager {
       }
     }
 
-    await this.repository.save(tournament);
+    await this.saveTournament(tournament);
     return { success: true, data: tournament };
   }
 }
@@ -789,31 +868,32 @@ export async function createTournamentManager(
   const repository = new FileTournamentRepository({ baseDir: storageDir });
   await repository.initialize();
 
-  let matchExecutor = executor;
-  if (!matchExecutor) {
-    let botExecutor: BotExecutor | undefined;
-    try {
-      const { createExecutor } = await import('@bot-executor/index.js');
-      botExecutor = await createExecutor({
-        ...executorConfig,
-        childProcessConfig: { executionPolicy: executionPolicy ?? 'development' }
-      });
-    } catch (error) {
-      // If sandbox-required but Docker unavailable, throw
-      if (executionPolicy === 'sandbox-required') {
-        throw new Error(`Failed to create sandbox executor: ${error}`);
+  try {
+    let matchExecutor = executor;
+    if (!matchExecutor) {
+      let botExecutor: BotExecutor | undefined;
+      try {
+        const { createExecutor } = await import('@bot-executor/index.js');
+        botExecutor = await createExecutor({
+          ...executorConfig,
+          childProcessConfig: { executionPolicy: executionPolicy ?? 'development' }
+        });
+      } catch (error) {
+        // If sandbox-required but Docker unavailable, throw
+        if (executionPolicy === 'sandbox-required') {
+          throw new Error(`Failed to create sandbox executor: ${error}`);
+        }
+        // In development mode, fall back to BotRunnerAdapter (handled by MatchRunner)
       }
-      // In development mode, fall back to BotRunnerAdapter (handled by MatchRunner)
+      const { DEFAULT_MATCH_CONFIG } = await import('@match-runner/types.js');
+      matchExecutor = await createMatchRunnerExecutor(DEFAULT_MATCH_CONFIG, botExecutor);
     }
-    const { DEFAULT_MATCH_CONFIG } = await import('@match-runner/types.js');
-    matchExecutor = await createMatchRunnerExecutor(DEFAULT_MATCH_CONFIG, botExecutor);
-  }
 
-  return new TournamentManager({
-    repository,
-    executor: matchExecutor,
-    storageDir,
-  });
+    return new TournamentManager({ repository, executor: matchExecutor, storageDir });
+  } catch (error) {
+    repository.close();
+    throw error;
+  }
 }
 
 /**

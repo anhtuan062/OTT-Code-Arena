@@ -50,6 +50,7 @@ describe('Persistence Recovery - Fault Injection', () => {
   });
 
   afterEach(async () => {
+    repository.close();
     try {
       await fs.rm(testBaseDir, { recursive: true, force: true });
     } catch {}
@@ -96,12 +97,33 @@ describe('Persistence Recovery - Fault Injection', () => {
 
       await fs.rename(targetFile, backupFile);
 
-      const loadedNull = await repository.load('fault-3');
-      expect(loadedNull).toBeNull();
-
-      await fs.rename(backupFile, targetFile);
       const restored = await repository.load('fault-3');
       expect(restored?.name).toBe('Original');
+    });
+
+    it('should reject ambiguous backup recovery instead of choosing arbitrarily', async () => {
+      const tournamentId = 'fault-ambiguous-backup';
+      const dir = path.join(testBaseDir, tournamentId);
+      await fs.mkdir(dir, { recursive: true });
+      const data = JSON.stringify(createTestTournament(tournamentId, 'Recoverable'));
+      await fs.writeFile(path.join(dir, 'tournament.json.first.bak'), data, 'utf-8');
+      await fs.writeFile(path.join(dir, 'tournament.json.second.bak'), data, 'utf-8');
+
+      await expect(repository.load(tournamentId)).rejects.toThrow('Ambiguous tournament recovery');
+    });
+
+    it('should surface a corrupt primary even when a backup exists', async () => {
+      const tournamentId = 'fault-corrupt-primary';
+      const dir = path.join(testBaseDir, tournamentId);
+      await fs.mkdir(dir, { recursive: true });
+      await fs.writeFile(path.join(dir, 'tournament.json'), '{corrupt', 'utf-8');
+      await fs.writeFile(
+        path.join(dir, 'tournament.json.bak'),
+        JSON.stringify(createTestTournament(tournamentId, 'Backup')),
+        'utf-8'
+      );
+
+      await expect(repository.load(tournamentId)).rejects.toThrow();
     });
   });
 
@@ -182,6 +204,75 @@ describe('Persistence Recovery - Fault Injection', () => {
       await repository.save(createTestTournament('match-fault-4'));
       const results = await repository.listMatchResults('match-fault-4');
       expect(results).toEqual([]);
+    });
+
+    it('should surface a result file left without its replay after an interrupted write', async () => {
+      const tournamentId = 'match-fault-partial';
+      await repository.save(createTestTournament(tournamentId));
+      const dir = path.join(testBaseDir, tournamentId);
+      await fs.writeFile(
+        path.join(dir, 'match-orphan.json'),
+        JSON.stringify({
+          matchId: 'orphan',
+          pairingId: 'pairing-orphan',
+          participantA: 'P1',
+          participantB: 'P2',
+          winner: 'A',
+          terminationReason: 'goal_reached',
+          turnCount: 1,
+          durationMs: 1,
+          replayRef: 'orphan',
+          completedAt: new Date().toISOString(),
+        }),
+        'utf-8'
+      );
+
+      await expect(repository.listMatchResults(tournamentId)).rejects.toThrow('Incomplete persisted match orphan');
+    });
+
+    it('should reject a replay written without a result', async () => {
+      const tournamentId = 'match-replay-orphan';
+      await repository.save(createTestTournament(tournamentId));
+      await fs.writeFile(path.join(testBaseDir, tournamentId, 'replay-orphan.json'), '{}', 'utf-8');
+
+      await expect(repository.listMatchResults(tournamentId)).rejects.toThrow('Incomplete persisted match orphan');
+      await expect(repository.loadReplay(tournamentId, 'orphan')).rejects.toThrow('Incomplete persisted match orphan');
+    });
+
+    it('should reject mismatched or malformed committed pairs', async () => {
+      const tournamentId = 'match-mismatch';
+      await repository.save(createTestTournament(tournamentId));
+      const result = {
+        matchId: 'one', pairingId: 'p', participantA: 'P1', participantB: 'P2', winner: 'A',
+        terminationReason: 'goal_reached', turnCount: 1, durationMs: 1, replayRef: 'one',
+        completedAt: new Date().toISOString(),
+      };
+      const replay = { matchId: 'two' };
+      await fs.writeFile(path.join(testBaseDir, tournamentId, 'match-one.json'), JSON.stringify(result), 'utf-8');
+      await fs.writeFile(path.join(testBaseDir, tournamentId, 'replay-one.json'), JSON.stringify(replay), 'utf-8');
+      await fs.writeFile(path.join(testBaseDir, tournamentId, 'match-one.commit.json'), JSON.stringify({
+        matchId: 'one', resultHash: 'bad', replayHash: 'bad',
+      }), 'utf-8');
+
+      await expect(repository.listMatchResults(tournamentId)).rejects.toThrow('Inconsistent persisted match one');
+    });
+
+    it('should explicitly accept a valid markerless legacy pair', async () => {
+      const tournamentId = 'match-legacy';
+      await repository.save(createTestTournament(tournamentId));
+      const result = {
+        matchId: 'legacy', pairingId: 'p', participantA: 'P1', participantB: 'P2', winner: 'A',
+        terminationReason: 'goal_reached', turnCount: 1, durationMs: 1, replayRef: 'legacy',
+        completedAt: new Date().toISOString(),
+      };
+      const replay = { matchId: 'legacy' };
+      const dir = path.join(testBaseDir, tournamentId);
+      await fs.writeFile(path.join(dir, 'match-legacy.json'), JSON.stringify(result), 'utf-8');
+      await fs.writeFile(path.join(dir, 'replay-legacy.json'), JSON.stringify(replay), 'utf-8');
+
+      const results = await repository.listMatchResults(tournamentId);
+      expect(results).toHaveLength(1);
+      expect(results[0]?.matchId).toBe('legacy');
     });
   });
 

@@ -28,6 +28,7 @@ describe('Tournament Manager - Integration', () => {
 
   afterEach(async () => {
     clearExecutorCache();
+    manager.close();
     try {
       await fs.rm(testDir, { recursive: true, force: true });
     } catch {}
