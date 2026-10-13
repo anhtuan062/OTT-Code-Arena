@@ -21,6 +21,7 @@ import type {
   TournamentFormat,
   TournamentStatus,
   PairingStatus,
+  PairingFailureCode,
   TournamentMatchConfig,
   TournamentScoringConfig,
   TerminationReason,
@@ -37,16 +38,22 @@ describe('Tournament Types', () => {
 
   describe('TournamentStatus', () => {
     it('should support all status values', () => {
-      const statuses: TournamentStatus[] = ['draft', 'registration_open', 'running', 'completed', 'cancelled'];
-      expect(statuses).toHaveLength(5);
+      const statuses: TournamentStatus[] = ['draft', 'registration_open', 'registration_closed', 'running', 'completed', 'cancelled'];
+      expect(statuses).toHaveLength(6);
     });
   });
 
   describe('PairingStatus', () => {
     it('should support all pairing status values', () => {
-      const statuses: PairingStatus[] = ['scheduled', 'in_progress', 'completed', 'cancelled', 'skipped'];
-      expect(statuses).toHaveLength(5);
+      const statuses: PairingStatus[] = ['scheduled', 'in_progress', 'completed', 'failed', 'cancelled', 'skipped'];
+      expect(statuses).toHaveLength(6);
     });
+  });
+
+  it('keeps pairing failure diagnostics bounded and non-sensitive', () => {
+    const codes: PairingFailureCode[] = ['DOCKER_INFRASTRUCTURE', 'SOURCE_REVISION', 'PERSISTENCE', 'EXECUTION'];
+    expect(codes).toHaveLength(4);
+    expect(codes).not.toContain(expect.stringContaining('Error'));
   });
 
   describe('VALID_STATUS_TRANSITIONS', () => {

@@ -4,6 +4,7 @@ import * as fs from 'fs/promises';
 import * as os from 'os';
 import * as path from 'path';
 import { appExport, closeServer, initServer } from '../../server/index.js';
+import { createControlledAccount } from '../../server/admin/role-bootstrap.js';
 
 describe('authentication and ownership API', () => {
   let dir: string;
@@ -33,6 +34,24 @@ describe('authentication and ownership API', () => {
     expect((await b.agent.put(`/api/bots/${bot.body.id}`).set('x-csrf-token', b.csrf).send({ name: 'stolen', command: 'node', args: ['bot.js'] })).status).toBe(404);
   });
 
+  it('deletes a Bot and its unused immutable source revisions', async () => {
+    const a = await account('revisionowner');
+    const bot = await a.agent.post('/api/bots')
+      .set('x-csrf-token', a.csrf)
+      .send({ name: 'source-bot', command: 'node', args: ['bot.js'] });
+    expect(bot.status).toBe(201);
+
+    const revision = await a.agent.post(`/api/bots/${bot.body.id}/revisions`)
+      .set('x-csrf-token', a.csrf)
+      .send({ runtimeId: 'cpp', executionMode: 'raw', source: 'int main() { return 0; }' });
+    expect(revision.status).toBe(201);
+
+    const deletion = await a.agent.delete(`/api/bots/${bot.body.id}`).set('x-csrf-token', a.csrf);
+    expect(deletion.status).toBe(204);
+    expect((await a.agent.get(`/api/bots/${bot.body.id}`)).status).toBe(404);
+    expect((await a.agent.get(`/api/bots/${bot.body.id}/revisions`)).status).toBe(404);
+  });
+
   it('persists users and bots across server reinitialization', async () => {
     const a = await account('alice'); await a.agent.post('/api/bots').set('x-csrf-token', a.csrf).send({ name: 'persisted', command: 'node', args: ['bot.js'] });
     await initServer(dir);
@@ -54,27 +73,26 @@ describe('authentication and ownership API', () => {
   });
 
   it('keeps tournaments and replays private across users', async () => {
-    const owner = await account('owner');
+    const organizer = await createControlledAccount(path.join(dir, 'arena.sqlite'), 'ownerorganizer', 'correct horse battery staple', 'organizer');
+    const ownerAgent = request.agent(appExport);
+    const ownerLogin = await ownerAgent.post('/api/auth/login').send({ username: organizer.username, password: 'correct horse battery staple' });
+    const owner = { agent: ownerAgent, csrf: ownerLogin.body.csrfToken };
     const other = await account('other');
-    const bot = await owner.agent
-      .post('/api/bots')
-      .set('x-csrf-token', owner.csrf)
-      .send({ name: 'owner-bot', command: 'node', args: ['bot.js'] });
     const tournament = await owner.agent
       .post('/api/tournaments')
       .set('x-csrf-token', owner.csrf)
       .send({ name: 'private tournament' });
     const tournamentId = tournament.body.tournamentId;
 
-    expect((await other.agent.get(`/api/tournaments/${tournamentId}`)).status).toBe(404);
+    expect((await other.agent.get(`/api/tournaments/${tournamentId}`)).status).toBe(403);
     expect((await other.agent.post(`/api/tournaments/${tournamentId}/register`)
       .set('x-csrf-token', other.csrf)
-      .send({ botId: bot.body.id, participantName: 'stolen' })).status).toBe(404);
+      .send({ botId: 'not-owned', participantName: 'stolen' })).status).toBe(403);
     expect((await other.agent.post(`/api/tournaments/${tournamentId}/action`)
       .set('x-csrf-token', other.csrf)
-      .send({ action: 'open_registration' })).status).toBe(404);
-    expect((await other.agent.get(`/api/tournaments/${tournamentId}/standings`)).status).toBe(404);
-    expect((await other.agent.get(`/api/tournaments/${tournamentId}/stats`)).status).toBe(404);
-    expect((await other.agent.get(`/api/tournaments/${tournamentId}/replays/not-owned`)).status).toBe(404);
+      .send({ action: 'open_registration' })).status).toBe(403);
+    expect((await other.agent.get(`/api/tournaments/${tournamentId}/standings`)).status).toBe(403);
+    expect((await other.agent.get(`/api/tournaments/${tournamentId}/stats`)).status).toBe(403);
+    expect((await other.agent.get(`/api/tournaments/${tournamentId}/replays/not-owned`)).status).toBe(403);
   });
 });

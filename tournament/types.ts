@@ -2,7 +2,9 @@
  * Tournament Manager - Type Definitions
  */
 
-import { BotDefinition, MatchResult, MatchReplay, TerminationReason, Player } from '@match-runner/types.js';
+import { BotDefinition, MatchResult, MatchReplay, TerminationReason, Player, SourceRevisionExecution, LegacyCommandExecution, ExecutionDiagnostic } from '@match-runner/types.js';
+
+export type { SourceRevisionExecution, LegacyCommandExecution } from '@match-runner/types.js';
 
 export type { TerminationReason, Player };
 
@@ -17,6 +19,7 @@ export type TournamentFormat = 'single_round_robin';
 export type TournamentStatus =
   | 'draft'
   | 'registration_open'
+  | 'registration_closed'
   | 'running'
   | 'completed'
   | 'cancelled';
@@ -28,8 +31,16 @@ export type PairingStatus =
   | 'scheduled'
   | 'in_progress'
   | 'completed'
+  | 'failed'
   | 'cancelled'
   | 'skipped';
+
+/** Bounded, non-sensitive classification for an execution attempt failure. */
+export type PairingFailureCode =
+  | 'DOCKER_INFRASTRUCTURE'
+  | 'SOURCE_REVISION'
+  | 'PERSISTENCE'
+  | 'EXECUTION';
 
 /**
  * A participant in the tournament with their bot definition
@@ -47,9 +58,33 @@ export interface TournamentParticipant {
 export interface TournamentBot {
   botId: string;
   version?: string;
+  /** Legacy fields remain readable for historical tournaments. */
   command: string;
   args: string[];
   env?: Record<string, string>;
+  execution?: SourceRevisionExecution | LegacyCommandExecution;
+}
+
+export type ParticipationRequestStatus = 'pending' | 'approved' | 'rejected' | 'withdrawn';
+
+export interface ParticipationRequest {
+  requestId: string;
+  competitorId: string;
+  botId: string;
+  participantName: string;
+  status: ParticipationRequestStatus;
+  requestedAt: string;
+  reviewedAt: string | null;
+  reviewedBy: string | null;
+  rejectionReason: string | null;
+  /** Immutable request snapshot. Legacy requests may omit source fields. */
+  botSnapshot: TournamentBot;
+  revisionId?: string;
+  runtimeId?: 'cpp' | 'python3';
+  sourceDigest?: string;
+  executionMode?: 'raw' | 'strategy';
+  sdkVersion?: string;
+  sdkDigest?: string;
 }
 
 /**
@@ -73,6 +108,10 @@ export interface TournamentPairing {
   matchResult: TournamentMatchRecord | null;
   startedAt: string | null;
   completedAt: string | null;
+  /** Safe-to-display classification for an execution attempt that needs retry. */
+  failureReason?: string | null;
+  /** Stable diagnostic category; never contains internal exception text. */
+  failureCode?: PairingFailureCode | null;
 }
 
 /**
@@ -89,6 +128,8 @@ export interface TournamentMatchRecord {
   durationMs: number;
   replayRef: string; // Reference to stored replay
   completedAt: string;
+  executionProvenance?: import('@match-runner/types.js').ExecutionProvenance[];
+  executionDiagnostics?: ExecutionDiagnostic[];
 }
 
 /**
@@ -150,6 +191,9 @@ export interface Tournament {
   registrationClosedAt: string | null;
   startedAt: string | null;
   completedAt: string | null;
+  /** Null means results have not been explicitly published. */
+  resultsPublishedAt?: string | null;
+  participationRequests?: ParticipationRequest[];
   metadata?: Record<string, unknown>;
 }
 
@@ -184,7 +228,8 @@ export const DEFAULT_SCORING_CONFIG: TournamentScoringConfig = {
  */
 export const VALID_STATUS_TRANSITIONS: Record<TournamentStatus, TournamentStatus[]> = {
   draft: ['registration_open', 'cancelled'],
-  registration_open: ['running', 'cancelled', 'draft'],
+  registration_open: ['registration_closed', 'running', 'cancelled', 'draft'],
+  registration_closed: ['running', 'cancelled', 'draft'],
   running: ['completed', 'cancelled'],
   completed: [],
   cancelled: ['draft'],

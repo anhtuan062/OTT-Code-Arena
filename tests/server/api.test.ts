@@ -4,12 +4,15 @@ import * as fs from 'fs/promises';
 import * as path from 'path';
 import * as os from 'os';
 import { appExport, closeServer, initServer } from '../../server/index.js';
+import { createControlledAccount } from '../../server/admin/role-bootstrap.js';
 import { clearExecutorCache } from '@bot-executor/index.js';
 
 describe('Server API Security', () => {
   let testDir: string;
   let agent: ReturnType<typeof request.agent>;
   let csrf: string;
+  let organizerAgent: ReturnType<typeof request.agent>;
+  let organizerCsrf: string;
 
   beforeEach(async () => {
     clearExecutorCache();
@@ -19,6 +22,10 @@ describe('Server API Security', () => {
     agent = request.agent(appExport);
     const auth = await agent.post('/api/auth/register').send({ username: `user${Date.now()}`, password: 'correct horse battery staple' });
     csrf = auth.body.csrfToken;
+    const organizer = await createControlledAccount(path.join(testDir, 'arena.sqlite'), `organizer${Date.now()}`, 'correct horse battery staple', 'organizer');
+    organizerAgent = request.agent(appExport);
+    const organizerLogin = await organizerAgent.post('/api/auth/login').send({ username: organizer.username, password: 'correct horse battery staple' });
+    organizerCsrf = organizerLogin.body.csrfToken;
   });
 
   afterEach(async () => {
@@ -103,9 +110,9 @@ describe('Server API Security', () => {
 
   describe('Payload Limits and Error Handling', () => {
     it('should reject malformed JSON', async () => {
-      const res = await agent
+      const res = await organizerAgent
         .post('/api/tournaments')
-        .set('x-csrf-token', csrf)
+        .set('x-csrf-token', organizerCsrf)
         .set('Content-Type', 'application/json')
         .send('{ "name": "Test", '); // Invalid JSON
 
@@ -115,9 +122,9 @@ describe('Server API Security', () => {
 
     it('should reject excessively large payloads', async () => {
       const largeString = 'a'.repeat(200 * 1024); // 200kb, over 100kb limit
-      const res = await agent
+      const res = await organizerAgent
         .post('/api/tournaments')
-        .set('x-csrf-token', csrf)
+        .set('x-csrf-token', organizerCsrf)
         .send({ name: largeString });
 
       expect(res.status).toBe(413); // Payload Too Large
@@ -125,40 +132,55 @@ describe('Server API Security', () => {
   });
 
   describe('Tournament Action Validation', () => {
-    it('should reject close_registration without a schedule without changing state', async () => {
-      const created = await agent.post('/api/tournaments').set('x-csrf-token', csrf).send({ name: 'Close validation' });
+    it('returns aggregate queue status without a task id and scopes task status to owned tournaments', async () => {
+      const aggregate = await organizerAgent.get('/api/system/queue');
+      expect(aggregate.status).toBe(200);
+      expect(aggregate.body.taskId).toBeNull();
+      expect(aggregate.body.status).toBeNull();
+
+      const created = await organizerAgent.post('/api/tournaments')
+        .set('x-csrf-token', organizerCsrf)
+        .send({ name: 'Queue status validation' });
+      const scoped = await organizerAgent.get(`/api/system/queue?id=run_all_${created.body.tournamentId}`);
+      expect(scoped.status).toBe(200);
+      expect(scoped.body.taskId).toBe(`run_all_${created.body.tournamentId}`);
+      expect(scoped.body.status).toBeNull();
+    });
+
+    it('should close registration without starting execution or changing the schedule', async () => {
+      const created = await organizerAgent.post('/api/tournaments').set('x-csrf-token', organizerCsrf).send({ name: 'Close validation' });
       const tournamentId = created.body.tournamentId;
-      expect((await agent.post(`/api/tournaments/${tournamentId}/action`).set('x-csrf-token', csrf).send({ action: 'open_registration' })).status).toBe(200);
+      expect((await organizerAgent.post(`/api/tournaments/${tournamentId}/action`).set('x-csrf-token', organizerCsrf).send({ action: 'open_registration' })).status).toBe(200);
 
-      const close = await agent.post(`/api/tournaments/${tournamentId}/action`).set('x-csrf-token', csrf).send({ action: 'close_registration' });
-      const tournament = await agent.get(`/api/tournaments/${tournamentId}`);
+      const close = await organizerAgent.post(`/api/tournaments/${tournamentId}/action`).set('x-csrf-token', organizerCsrf).send({ action: 'close_registration' });
+      const tournament = await organizerAgent.get(`/api/tournaments/${tournamentId}`);
 
-      expect(close.status).toBe(400);
-      expect(close.body.error).toContain('No schedule generated');
-      expect(tournament.body.status).toBe('registration_open');
+      expect(close.status).toBe(200);
+      expect(close.body.status).toBe('registration_closed');
+      expect(tournament.body.status).toBe('registration_closed');
       expect(tournament.body.startedAt).toBeNull();
       expect(tournament.body.rounds).toHaveLength(0);
     });
 
     it('should prevent duplicate run_all tasks', async () => {
       // Create a tournament
-      const createRes = await agent
+      const createRes = await organizerAgent
         .post('/api/tournaments')
-        .set('x-csrf-token', csrf)
+        .set('x-csrf-token', organizerCsrf)
         .send({ name: 'Duplicate Run Test' });
       const tId = createRes.body.tournamentId;
 
       // It is in 'draft' state. runAllMatches will fail immediately,
       // but the queue submission logic shouldn't allow simultaneous submissions anyway.
 
-      const p1 = agent
+      const p1 = organizerAgent
         .post(`/api/tournaments/${tId}/action`)
-        .set('x-csrf-token', csrf)
+        .set('x-csrf-token', organizerCsrf)
         .send({ action: 'run_all' });
 
-      const p2 = agent
+      const p2 = organizerAgent
         .post(`/api/tournaments/${tId}/action`)
-        .set('x-csrf-token', csrf)
+        .set('x-csrf-token', organizerCsrf)
         .send({ action: 'run_all' });
 
       const [res1, res2] = await Promise.all([p1, p2]);
@@ -169,18 +191,35 @@ describe('Server API Security', () => {
       expect(statuses).toContain(409);
     });
 
+    it('restricts result publication to the owning organizer and completed tournaments', async () => {
+      const created = await organizerAgent.post('/api/tournaments')
+        .set('x-csrf-token', organizerCsrf)
+        .send({ name: 'Publication authorization' });
+      const tournamentId = created.body.tournamentId as string;
+
+      expect((await request(appExport).post(`/api/tournaments/${tournamentId}/publish`)).status).toBe(401);
+      expect((await agent.post(`/api/tournaments/${tournamentId}/publish`)
+        .set('x-csrf-token', csrf)).status).toBe(403);
+      expect((await organizerAgent.post(`/api/tournaments/${tournamentId}/publish`)).status).toBe(403);
+      const rejected = await organizerAgent.post(`/api/tournaments/${tournamentId}/publish`)
+        .set('x-csrf-token', organizerCsrf);
+      expect(rejected.status).toBe(409);
+      expect(rejected.body.error).toContain('status');
+      expect((await organizerAgent.get(`/api/tournaments/${tournamentId}`)).body.resultsPublishedAt).toBeNull();
+    });
+
     it('propagates a background run_all failure to the execution queue', async () => {
-      const createRes = await agent
+      const createRes = await organizerAgent
         .post('/api/tournaments')
-        .set('x-csrf-token', csrf)
+        .set('x-csrf-token', organizerCsrf)
         .send({ name: 'Background Failure Test' });
       const tId = createRes.body.tournamentId;
       const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
       try {
-        const response = await agent
+        const response = await organizerAgent
           .post(`/api/tournaments/${tId}/action`)
-          .set('x-csrf-token', csrf)
+          .set('x-csrf-token', organizerCsrf)
           .send({ action: 'run_all' });
 
         expect(response.status).toBe(200);
@@ -201,13 +240,13 @@ describe('Server API Security', () => {
 
   describe('Replay API Validation', () => {
     it('should return 404 for a match that does not belong to the tournament', async () => {
-      const createRes = await agent
+      const createRes = await organizerAgent
         .post('/api/tournaments')
-        .set('x-csrf-token', csrf)
+        .set('x-csrf-token', organizerCsrf)
         .send({ name: 'Replay Validation Test' });
       const tId = createRes.body.tournamentId;
 
-      const res = await agent
+      const res = await organizerAgent
         .get(`/api/tournaments/${tId}/replays/random-match-id`);
 
       expect(res.status).toBe(404);

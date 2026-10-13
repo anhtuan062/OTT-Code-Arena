@@ -13,15 +13,18 @@ import {
   MatchResult,
   MatchReplay,
   MatchRunnerCallbacks,
+  LiveMatchSnapshot,
   TerminationReason,
   Player,
+  ExecutionProvenance,
   DEFAULT_MATCH_CONFIG,
 } from './types.js';
 import type { GameState, MoveOption, ApplyResult, GameConfig } from '@engine/types.js';
 import type { BotError } from '@bot-protocol/types.js';
 import type { BotRequestMessage } from '@bot-runner/types.js';
 import { ExecutionCancelledError } from '@bot-executor/types.js';
-import type { BotProcessConfig, BotExecutionResult } from '@bot-executor/types.js';
+import type { BotProcessConfig, BotExecutionResult, SourceRevisionExecutor } from '@bot-executor/types.js';
+import type { SourceRevisionExecution, ExecutionDiagnostic } from './types.js';
 
 export class MatchRunner {
   private config: MatchConfig;
@@ -34,18 +37,25 @@ export class MatchRunner {
   private endTime: Date | null = null;
   private callbacks: MatchRunnerCallbacks;
   private initialState: GameState;
+  private snapshotSequence = 0;
+  private revisionExecutor?: SourceRevisionExecutor;
+  private resolveRevision?: (execution: SourceRevisionExecution) => Promise<Buffer | null>;
 
   constructor(
     config: Partial<MatchConfig>,
     playerA: BotDefinition,
     playerB: BotDefinition,
     callbacks: MatchRunnerCallbacks = {},
-    botExecutor?: BotExecutor
+    botExecutor?: BotExecutor,
+    revisionExecutor?: SourceRevisionExecutor,
+    resolveRevision?: (execution: SourceRevisionExecution) => Promise<Buffer | null>
   ) {
     this.config = { ...DEFAULT_MATCH_CONFIG, ...config };
     this.playerA = playerA;
     this.playerB = playerB;
     this.callbacks = callbacks;
+    this.revisionExecutor = revisionExecutor;
+    this.resolveRevision = resolveRevision;
 
     // Initialize engine with config
     const engineConfig: Partial<GameConfig> = {
@@ -73,6 +83,7 @@ export class MatchRunner {
 
   async run(signal?: AbortSignal): Promise<MatchResult> {
     let currentState = this.engine.getState();
+    this.emitSnapshot('in_progress', currentState);
 
     while (currentState.status !== 'finished') {
       if (signal?.aborted) throw new ExecutionCancelledError();
@@ -124,11 +135,22 @@ export class MatchRunner {
         signal,
       };
 
-      const botResult: BotExecutionResult = await this.botExecutor.execute(
-        executionContext,
-        botProcessConfig,
-        request
-      );
+      let botResult: BotExecutionResult;
+      if (botDef.execution?.kind === 'source-revision') {
+        if (!this.revisionExecutor || !this.resolveRevision) {
+          throw new Error('Source-revision Docker capability is disabled');
+        }
+        const source = await this.resolveRevision(botDef.execution);
+        if (!source) throw new Error('Pinned source revision could not be resolved');
+        botResult = await this.revisionExecutor.executeRevision(executionContext, { execution: botDef.execution, source }, request);
+        if (botResult.error?.code === 'EXECUTOR_UNAVAILABLE' || botResult.error?.code === 'EXECUTOR_ERROR' || botResult.error?.code === 'SANDBOX_REQUIRED') {
+          throw new Error(botResult.error.message);
+        }
+      } else if (!botDef.execution || botDef.execution.kind === 'legacy-command') {
+        botResult = await this.botExecutor.execute(executionContext, botProcessConfig, request);
+      } else {
+        throw new Error('Unknown bot execution kind');
+      }
       if (signal?.aborted) throw new ExecutionCancelledError();
 
       // Build turn log
@@ -138,6 +160,22 @@ export class MatchRunner {
         timestamp: new Date().toISOString(),
         request: this.config.logRequests ? request : undefined,
         response: this.config.logResponses ? botResult : undefined,
+        executionDiagnostic: {
+          player: currentPlayer,
+          runtimeId: botDef.execution?.kind === 'source-revision' ? botDef.execution.runtimeId : 'legacy',
+          executionMode: botDef.execution?.kind === 'source-revision' ? (botDef.execution.executionMode ?? 'raw') : 'legacy',
+          ...(botDef.execution?.kind === 'source-revision' && botDef.execution.sdkVersion ? { sdkVersion: botDef.execution.sdkVersion } : {}),
+          ...(botDef.execution?.kind === 'source-revision' && botDef.execution.sdkDigest ? { sdkDigest: botDef.execution.sdkDigest } : {}),
+          ...(botResult.provenance?.compilationBackend ? { compilationBackend: botResult.provenance.compilationBackend } : {}),
+          ...(botResult.provenance?.compilerImageDigest ? { compilerImageDigest: botResult.provenance.compilerImageDigest } : {}),
+          ...(botResult.provenance?.compilerConfigDigest ? { compilerConfigDigest: botResult.provenance.compilerConfigDigest } : {}),
+          ...(botResult.provenance?.artifactDigest ? { artifactDigest: botResult.provenance.artifactDigest } : {}),
+          ...(botResult.error?.stage ? { failureStage: botResult.error.stage } : {}),
+          ...(botResult.error?.code ? { errorCode: botResult.error.code } : {}),
+          exitCode: botResult.exitCode,
+          outputProduced: botResult.stdout.length > 0 || botResult.stderr.length > 0,
+          engineAcceptedMove: false,
+        },
       };
 
       if (!botResult.success) {
@@ -174,6 +212,7 @@ export class MatchRunner {
       // Apply move
       const applyResult = this.engine.makeMove(coords.pieceId, coords.toRow, coords.toCol);
       currentState = applyResult.state;
+      turnLog.executionDiagnostic!.engineAcceptedMove = true;
 
       turnLog.appliedMove = {
         pieceId: coords.pieceId,
@@ -185,6 +224,7 @@ export class MatchRunner {
       turnLog.resultingState = this.config.logStates ? { ...currentState } : undefined;
 
       this.turnLog.push(turnLog);
+      this.emitSnapshot('in_progress', currentState, turnLog.appliedMove ?? null);
       this.callbacks.onTurnEnd?.(turnLog);
 
       // Check game over
@@ -201,6 +241,8 @@ export class MatchRunner {
   private mapBotErrorToTerminationReason(errorCode?: string): TerminationReason {
     switch (errorCode) {
       case 'TIMEOUT':
+      case 'COMPILATION_TIMEOUT':
+      case 'RUNTIME_TIMEOUT':
         return 'bot_timeout';
       case 'PROCESS_CRASHED':
         return 'bot_crash';
@@ -258,10 +300,36 @@ export class MatchRunner {
       finalState,
       initialState: this.initialState,
       turnLog: this.turnLog,
+      metadata: this.getExecutionMetadata(),
     };
+
+    this.emitSnapshot('finished', finalState, lastTurnLog?.appliedMove ?? this.turnLog.at(-1)?.appliedMove ?? null);
 
     this.callbacks.onMatchEnd?.(result);
     return result;
+  }
+
+  private getExecutionMetadata(): Record<string, unknown> | undefined {
+    const sourceRevisions: ExecutionProvenance[] = [
+      { player: 'A' as Player, execution: this.playerA.execution },
+      { player: 'B' as Player, execution: this.playerB.execution },
+    ].flatMap(({ player, execution }) => execution?.kind === 'source-revision' ? [{
+      player,
+      competitorId: execution.competitorId,
+      botId: execution.botId,
+      revisionId: execution.revisionId,
+      runtimeId: execution.runtimeId,
+      sourceDigest: execution.sourceDigest,
+      executionMode: execution.executionMode,
+      sdkVersion: execution.sdkVersion,
+      sdkDigest: execution.sdkDigest,
+    }] : []);
+    const executionDiagnostics = this.turnLog
+      .map(turn => turn.executionDiagnostic)
+      .filter((diagnostic): diagnostic is ExecutionDiagnostic => Boolean(diagnostic));
+    return sourceRevisions.length > 0 || executionDiagnostics.length > 0
+      ? { sourceRevisions, executionDiagnostics }
+      : undefined;
   }
 
   getTurnLog(): TurnLog[] {
@@ -274,6 +342,31 @@ export class MatchRunner {
 
   getConfig(): MatchConfig {
     return { ...this.config };
+  }
+
+  private emitSnapshot(
+    status: LiveMatchSnapshot['status'],
+    state: GameState,
+    latestMove: TurnLog['appliedMove'] | null = null,
+    error?: string,
+  ): void {
+    if (!this.callbacks.onSnapshot) return;
+    const snapshot: LiveMatchSnapshot = {
+      matchId: this.config.matchId,
+      status,
+      sequence: ++this.snapshotSequence,
+      turn: state.turn,
+      currentPlayer: state.currentPlayer,
+      state: {
+        ...state,
+        pieces: state.pieces.map(piece => ({ ...piece })),
+        lastMove: state.lastMove ? { ...state.lastMove, from: { ...state.lastMove.from }, to: { ...state.lastMove.to } } : null,
+      },
+      latestMove: latestMove ? { ...latestMove, from: { ...latestMove.from }, to: { ...latestMove.to } } : null,
+      updatedAt: new Date().toISOString(),
+      ...(error ? { error } : {}),
+    };
+    try { this.callbacks.onSnapshot(snapshot); } catch { /* observers cannot affect match execution */ }
   }
 
   // Create replay from match result
@@ -296,6 +389,7 @@ export class MatchRunner {
       finalState: result.finalState,
       winner: result.winner,
       terminationReason: result.terminationReason,
+      metadata: result.metadata as MatchReplay['metadata'],
     };
   }
 }
@@ -305,9 +399,11 @@ export function createMatchRunner(
   playerA: BotDefinition,
   playerB: BotDefinition,
   callbacks?: MatchRunnerCallbacks,
-  botExecutor?: BotExecutor
+  botExecutor?: BotExecutor,
+  revisionExecutor?: SourceRevisionExecutor,
+  resolveRevision?: (execution: SourceRevisionExecution) => Promise<Buffer | null>
 ): MatchRunner {
-  return new MatchRunner(config, playerA, playerB, callbacks, botExecutor);
+  return new MatchRunner(config, playerA, playerB, callbacks, botExecutor, revisionExecutor, resolveRevision);
 }
 
 export { DEFAULT_MATCH_CONFIG };

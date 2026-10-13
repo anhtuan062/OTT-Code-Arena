@@ -251,7 +251,8 @@ export function areStandingsFinal(
  */
 export function getTournamentStats(
   participants: TournamentParticipant[],
-  matchRecords: TournamentMatchRecord[]
+  matchRecords: TournamentMatchRecord[],
+  pairings: TournamentPairing[] = []
 ): {
   totalParticipants: number;
   totalMatches: number;
@@ -259,19 +260,29 @@ export function getTournamentStats(
   forfeitMatches: number;
   drawMatches: number;
   averageTurns: number;
+  failedMatches: number;
+  pendingMatches: number;
+  runningMatches: number;
 } {
   const completedMatches = matchRecords.length;
   const forfeitMatches = matchRecords.filter(m => isForfeitTermination(m.terminationReason)).length;
   const drawMatches = matchRecords.filter(m => m.winner === 'draw').length;
   const totalTurns = matchRecords.reduce((sum, m) => sum + m.turnCount, 0);
   const averageTurns = completedMatches > 0 ? totalTurns / completedMatches : 0;
+  const scheduledPairings = pairings.filter(pairing => pairing.participantB !== null);
+  const failedMatches = scheduledPairings.filter(pairing => pairing.status === 'failed').length;
+  const pendingMatches = scheduledPairings.filter(pairing => pairing.status === 'scheduled').length;
+  const runningMatches = scheduledPairings.filter(pairing => pairing.status === 'in_progress').length;
 
   return {
     totalParticipants: participants.length,
-    totalMatches: participants.length * (participants.length - 1) / 2,
+    totalMatches: scheduledPairings.length || participants.length * (participants.length - 1) / 2,
     completedMatches,
     forfeitMatches,
     drawMatches,
     averageTurns: Math.round(averageTurns * 100) / 100,
+    failedMatches,
+    pendingMatches,
+    runningMatches,
   };
 }

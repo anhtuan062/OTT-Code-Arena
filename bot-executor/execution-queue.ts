@@ -146,6 +146,31 @@ export class ExecutionQueue extends EventEmitter {
     };
   }
 
+  /**
+   * Return queue occupancy for a caller-owned subset of task IDs.
+   * Capacity limits remain queue-wide, while workload counts are scoped.
+   */
+  getStatsFor(taskIds: Iterable<string>): {
+    activeCount: number;
+    queueLength: number;
+    maxConcurrent: number;
+    maxQueueLength: number;
+  } {
+    const ownedIds = new Set(taskIds);
+    let activeCount = 0;
+    let queueLength = 0;
+    for (const id of ownedIds) {
+      if (this.active.has(id)) activeCount += 1;
+      else if (this.queue.some(task => task.id === id)) queueLength += 1;
+    }
+    return {
+      activeCount,
+      queueLength,
+      maxConcurrent: this.config.maxConcurrent,
+      maxQueueLength: this.config.maxQueueLength,
+    };
+  }
+
   getStatus(id: string): QueueTaskStatus | null {
     const active = this.active.get(id);
     if (active) return active.status;

@@ -2,98 +2,109 @@ import { describe, expect, it } from 'vitest';
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 
-const readProjectFile = (name: string) => readFile(resolve(process.cwd(), name), 'utf8');
+const read = (name: string) => readFile(resolve(process.cwd(), name), 'utf8');
 
 describe('SPA rendering and request foundations', () => {
-  it('does not use HTML insertion sinks for browser-rendered API data', async () => {
-    const app = await readProjectFile('app.js');
-
+  it('renders API data through safe DOM APIs and authorized requests', async () => {
+    const app = await read('app.js');
     expect(app).not.toMatch(/\.(?:innerHTML|outerHTML|insertAdjacentHTML)\s*[=(]/);
     expect(app).toContain('textContent');
-    expect(app).toContain("use.setAttribute('href', `#${id}`)");
-    expect(app).toContain('function safeStatusClass');
     expect(app).toContain("credentials: 'same-origin'");
     expect(app).toContain("headers['x-csrf-token']");
   });
 
-  it('uses bound controls instead of inline event handlers', async () => {
-    const page = await readProjectFile('index.html');
-
-    expect(page).not.toMatch(/\son[a-z]+\s*=/i);
-    expect(page).toContain('aria-live="polite"');
+  it('keeps authentication views exclusive and keyboard reachable', async () => {
+    const [app, page] = await Promise.all([read('app.js'), read('index.html')]);
+    expect(app).toContain('function setAuthMode');
+    expect(app).toContain('loginForm.hidden = !loginMode');
+    expect(app).toContain('registerForm.hidden = loginMode');
+    expect(app).toContain('function togglePassword');
+    expect(page).toContain('id="login-password-toggle"');
+    expect(page).toContain('id="register-password-toggle"');
+    expect(page).toContain('id="login-form-message"');
   });
 
-  it('guards asynchronous view updates against session and navigation changes', async () => {
-    const app = await readProjectFile('app.js');
+  it('keeps shared notifications dismissible with extended error visibility', async () => {
+    const [app, css] = await Promise.all([read('app.js'), read('style.css')]);
+    expect(app).toContain("type === 'error' ? 8000 : 3000");
+    expect(app).toContain("actionButton('Đóng'");
+    expect(css).toContain('.toast-close');
+    expect(css).toContain('.toast-error { background: var(--error-color); }');
+  });
 
+  it('guards async updates and responsive navigation by current view/session', async () => {
+    const [app, page] = await Promise.all([read('app.js'), read('index.html')]);
     expect(app).toContain('authRevision');
     expect(app).toContain('viewRevision');
     expect(app).toContain('isCurrentView');
-    expect(app).toContain("isCurrentView('tournament-detail'");
-    expect(app).toContain('function trapModalFocus');
-  });
-
-  it('keeps the responsive shell controls bound through JavaScript', async () => {
-    const [app, page] = await Promise.all([readProjectFile('app.js'), readProjectFile('index.html')]);
-
     expect(app).toContain('function toggleMobileNavigation');
-    expect(app).toContain("$('#mobile-menu-toggle').addEventListener('click', toggleMobileNavigation)");
-    expect(app).toContain('closeMobileNavigation();');
-    expect(page).toContain('id="app-topbar"');
+    expect(app).toContain("state.tournamentScope = button.dataset.target === 'my-tournaments' ? 'mine' : 'discoverable'");
     expect(page).toContain('id="sidebar-backdrop"');
-    expect(page).toContain('id="dash-queue-value"');
+    expect(page).toContain('id="my-tournaments"');
   });
 
-  it('keeps bot management actions and validation in the safe DOM-based workspace', async () => {
-    const [app, page] = await Promise.all([readProjectFile('app.js'), readProjectFile('index.html')]);
+  it('keeps dashboard queue data organizer-only and role-specific', async () => {
+    const [app, page] = await Promise.all([read('app.js'), read('index.html')]);
+    expect(app).toContain('if (queueCard) queueCard.hidden = competitor');
+    expect(app).toContain("competitor ? '/tournaments/discoverable' : '/tournaments'");
+    expect(app).toContain("id: 'dashboard-username'");
+    expect(page).toContain('id="dash-queue-card"');
+    expect(page).toContain('data-role="competitor"');
+  });
 
+  it('keeps Bot editing safe, bounded, searchable, and revision-aware', async () => {
+    const [app, page] = await Promise.all([read('app.js'), read('index.html')]);
     expect(app).toContain('function renderBotList');
-    expect(app).toContain('function botInput');
-    expect(app).toContain("method: editingBot ? 'PUT' : 'POST'");
-    expect(app).toContain("method: 'DELETE'");
-    expect(app).toContain("$('#bot-search').addEventListener('input'");
-    expect(app).toContain("rawArguments === '' ? [] : rawArguments.split(',').map(value => value.trim())");
-    expect(app).toContain('state.botDialogRevision !== dialogRevision');
-    expect(app).toContain('state.deleteDialogRevision !== dialogRevision');
-    expect(app).toContain("isCurrentView('bots', authRevision, viewRevision)");
-    expect(page).toContain('id="bots-list"');
-    expect(page).toContain('id="delete-bot-modal"');
-    expect(page).toContain('quotation marks are not parsed');
+    expect(app).toContain('function botSourceInput');
+    expect(app).toContain("new TextEncoder().encode(source).byteLength > 64 * 1024");
+    expect(app).toContain('state.botWorkspaceReadOnly');
+    expect(app).toContain('function updateEditorMetrics');
+    expect(page).toContain('id="bot-source-lines"');
+    expect(page).toContain('id="bot-source-runtime"');
+    expect(page).toContain('id="bot-sdk-reference"');
   });
 
-  it('keeps tournament lifecycle actions guarded by the current view and safe DOM rendering', async () => {
-    const [app, page] = await Promise.all([readProjectFile('app.js'), readProjectFile('index.html')]);
-
-    expect(app).toContain('function renderTournamentList');
+  it('keeps tournament actions and detail rendering guarded', async () => {
+    const [app, page] = await Promise.all([read('app.js'), read('index.html')]);
     expect(app).toContain("/tournaments/${tournamentId}/action");
-    expect(app).toContain("isCurrentView('tournament-detail', authRevision, viewRevision, tournamentId)");
-    expect(app).toContain("action === 'cancel'");
-    expect(app).toContain("state.tournamentSearch");
-    expect(app).toContain('state.tournamentListError');
-    expect(app).toContain('state.tournamentDialogRevision === dialogRevision');
-    expect(app).toContain('state.registrationDialogRevision === dialogRevision');
-    expect(app).toContain("$('#td-status').className = 'status-badge status-unknown'");
-    expect(app).toContain("isCurrentView('dashboard', authRevision, viewRevision)");
-    expect(page).toContain('id="tournaments-list"');
+    expect(app).toContain("isCurrentView('tournament-detail'");
+    expect(app).toContain('function renderTournamentLifecycle');
+    expect(app).toContain("action === 'publish'");
     expect(page).toContain('id="tournament-action-modal"');
+    expect(page).toContain('id="td-lifecycle"');
+    expect(page).toContain('id="td-requests"');
   });
 
-  it('keeps replay stepping, playback cleanup, and contract rendering guarded', async () => {
-    const [app, page] = await Promise.all([readProjectFile('app.js'), readProjectFile('index.html')]);
-
+  it('keeps replay stepping, playback cleanup, and participant projections safe', async () => {
+    const [app, page] = await Promise.all([read('app.js'), read('index.html')]);
     expect(app).toContain('function buildStateAt');
-    expect(app).toContain('state.replayMoveIndex = Math.max(-1');
     expect(app).toContain('clearTimeout(state.replayTimer)');
     expect(app).toContain('state.replayPlaybackToken');
-    expect(app).toContain('state.replayRevision');
-    expect(app).toContain('state.authRevision !== authRevision');
-    expect(app).toContain('state.viewRevision !== replayViewRevision');
-    expect(app).toContain('state.replayContext?.tournamentId !== state.tournamentId');
-    expect(app).toContain('state.replayContext?.tournamentId === tournamentId');
-    expect(app).toContain('textContent = label');
-    expect(app).toContain('no applied move');
-    expect(page).toContain('id="replay-retry"');
-    expect(page).toContain('aria-label="9 by 9 replay board"');
-    expect(page).toContain('id="r-current-move"');
+    expect(app).toContain('function applyReplayParticipantIdentities(replay)');
+    expect(app).toContain('identity.participantName || fallback');
+    expect(app).toContain('identity.botName');
+    expect(app).not.toContain('innerHTML = participation');
+    expect(page).toContain('id="replay-scrubber"');
+    expect(page).toContain('id="r-turn-display"');
+    expect(page).toContain('id="r-selected-move"');
+  });
+
+  it('keeps runtime drafts and immutable revision retry state explicit', async () => {
+    const app = await read('app.js');
+    expect(app).toContain('const STRATEGY_TEMPLATES = {');
+    expect(app).toContain('state.sourceRuntimeDrafts.set(currentRuntime');
+    expect(app).toContain('state.pendingSourceRevision = { revision, source }');
+    expect(app).toContain('if (state.sourceDirty && !(await saveBotSource()))');
+    expect(app).toContain('return result === true');
+  });
+
+  it('keeps registration, cancellation, and authorized POST mutation flows actionable', async () => {
+    const [app, page] = await Promise.all([read('app.js'), read('index.html')]);
+    expect(app).toContain('showRegistrationErrorState');
+    expect(app).toContain('body: JSON.stringify({ participantName, botId, revisionId })');
+    expect(app).toContain("await api(endpoint, { method: 'POST'");
+    expect(app).not.toContain('window.location = endpoint');
+    expect(page).toContain('id="registration-bots-error"');
+    expect(page).toContain('id="confirm-tournament-action"');
   });
 });

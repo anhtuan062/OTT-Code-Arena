@@ -8,6 +8,7 @@ import { MatchRunner, createMatchRunner, DEFAULT_MATCH_CONFIG } from '@match-run
 import type { MatchConfig, BotDefinition, TurnLog, MatchResult } from '@match-runner/types.js';
 import type { GameState } from '@engine/types.js';
 import type { BotExecutor } from '@bot-executor/types.js';
+import type { SourceRevisionExecutor } from '@bot-executor/types.js';
 import { ExecutionCancelledError } from '@bot-executor/types.js';
 
 describe('Match Runner', () => {
@@ -62,6 +63,110 @@ describe('Match Runner', () => {
   });
 
   describe('MatchRunner.run', () => {
+    it('emits monotonic validated live snapshots without changing the official result', async () => {
+      const snapshots: Array<{ sequence: number; status: string; state: GameState; latestMove: unknown }> = [];
+      const runner = createMatchRunner(
+        createTestConfig({ maxTurns: 1 }),
+        playerA,
+        playerB,
+        { onSnapshot: snapshot => snapshots.push(snapshot) },
+      );
+
+      const result = await runner.run();
+
+      expect(result.status).toBe('finished');
+      expect(snapshots.length).toBeGreaterThanOrEqual(3);
+      expect(snapshots.map(snapshot => snapshot.sequence)).toEqual(
+        [...snapshots].sort((a, b) => a.sequence - b.sequence).map(snapshot => snapshot.sequence),
+      );
+      expect(snapshots[0].status).toBe('in_progress');
+      expect(snapshots[0].state.pieces).toHaveLength(18);
+      expect(snapshots.some(snapshot => snapshot.latestMove !== null)).toBe(true);
+      expect(snapshots.at(-1)?.status).toBe('finished');
+    });
+
+    it('routes pinned source revisions only through the dedicated revision executor', async () => {
+      const execution = {
+        kind: 'source-revision' as const,
+        competitorId: 'competitor-a',
+        botId: 'bot-a',
+        revisionId: 'revision-a',
+        runtimeId: 'python3' as const,
+        sourceDigest: 'a'.repeat(64),
+      };
+      const calls: Array<{ revisionId: string; source: Buffer }> = [];
+      const revisionExecutor: SourceRevisionExecutor = {
+        async executeRevision(_context, revision, request) {
+          calls.push(revision);
+          const move = request.legal_moves[0]!;
+          return {
+            success: true,
+            response: { move: { piece_id: move.piece_id, from: move.from, to: move.to } },
+            exitCode: 0,
+            timedOut: false,
+            stdout: '',
+            stderr: '',
+            durationMs: 1,
+          };
+        },
+      };
+      const legacyExecutor: BotExecutor = {
+        async execute() { throw new Error('legacy executor must not receive source revisions'); },
+        async terminate() {},
+        async isAvailable() { return true; },
+        getName() { return 'legacy'; },
+        getSupportedLimits() { return {}; },
+      };
+      const sourceBot: BotDefinition = {
+        botId: 'bot-a', player: 'A', command: '', args: [], execution,
+      };
+      const runner = createMatchRunner(createTestConfig({ maxTurns: 1 }), sourceBot, playerB, {}, legacyExecutor, revisionExecutor, async pinned => {
+        expect(pinned).toEqual(execution);
+        return Buffer.from('print("ok")');
+      });
+      const result = await runner.run();
+      expect(result.status).toBe('finished');
+      expect(calls.length).toBe(1);
+      expect(calls[0]!.execution.revisionId).toBe('revision-a');
+      expect(result.metadata?.sourceRevisions).toEqual([expect.objectContaining({ revisionId: 'revision-a', runtimeId: 'python3' })]);
+      expect(result.metadata?.executionDiagnostics).toEqual(expect.arrayContaining([
+        expect.objectContaining({ player: 'A', runtimeId: 'python3', executionMode: 'raw', engineAcceptedMove: true }),
+      ]));
+      expect(MatchRunner.createReplay(result).metadata?.sourceRevisions).toEqual(result.metadata?.sourceRevisions);
+    });
+
+    it.each([
+      ['COMPILATION_TIMEOUT', 'compilation_timeout'],
+      ['RUNTIME_TIMEOUT', 'runtime_timeout'],
+    ] as const)('preserves %s diagnostics without applying a move', async (code, stage) => {
+      const execution = {
+        kind: 'source-revision' as const, competitorId: 'competitor-a', botId: 'bot-a',
+        revisionId: 'revision-a', runtimeId: 'cpp' as const, sourceDigest: 'a'.repeat(64),
+      };
+      const sourceBot: BotDefinition = { botId: 'bot-a', player: 'A', command: '', args: [], execution };
+      const revisionExecutor: SourceRevisionExecutor = {
+        async executeRevision() {
+          return {
+            success: false, error: { code, message: 'Compilation or runtime timed out', stage },
+            exitCode: null, timedOut: true, stdout: '', stderr: '', durationMs: 30_000,
+          };
+        },
+      };
+      const legacyExecutor: BotExecutor = {
+        async execute() { throw new Error('legacy executor must not run source revisions'); },
+        async terminate() {}, async isAvailable() { return true; },
+        getName() { return 'legacy'; }, getSupportedLimits() { return {}; },
+      };
+      const runner = createMatchRunner(createTestConfig(), sourceBot, playerB, {}, legacyExecutor,
+        revisionExecutor, async () => Buffer.from('source'));
+      const result = await runner.run();
+      expect(result.terminationReason).toBe('bot_timeout');
+      expect(result.turnLog[0]?.appliedMove).toBeUndefined();
+      expect(result.metadata?.executionDiagnostics).toEqual(expect.arrayContaining([
+        expect.objectContaining({ errorCode: code, failureStage: stage, engineAcceptedMove: false }),
+      ]));
+    });
+
     it('propagates cancellation instead of producing a bot loss', async () => {
       const controller = new AbortController();
       const executor: BotExecutor = {

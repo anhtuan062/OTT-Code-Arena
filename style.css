@@ -2,34 +2,96 @@
 * { margin: 0; padding: 0; box-sizing: border-box; }
 
 :root {
-  --bg-primary: #f5f8fc;
-  --bg-secondary: #ffffff;
-  --bg-card: #ffffff;
-  --bg-soft: #eef2f8;
-  --text-primary: #172033;
-  --text-secondary: #64748b;
-  --text-faint: #94a3b8;
-  --accent-blue: #2563eb;
-  --accent-cyan: #0891b2;
-  --p1-color: #2563eb;
-  --p2-color: #e11d48;
-  --goal-color: #d97706;
-  --success-color: #16a34a;
-  --warning-color: #d97706;
-  --error-color: #dc2626;
-  --border-light: #e2e8f0;
+  /* Application design tokens. Keep legacy aliases below for existing markup. */
+  --color-page: #f6f8f6;
+  --color-surface: #ffffff;
+  --color-surface-elevated: #ffffff;
+  --color-surface-subtle: #eef5ef;
+  --color-text-primary: #1e2b22;
+  --color-text-secondary: #647168;
+  --color-text-muted: #849087;
+  --color-border: #dfe7e0;
+  --color-brand: #16803c;
+  --color-brand-hover: #11652f;
+  --color-success: #15803d;
+  --color-warning: #b45309;
+  --color-error: #b91c1c;
+  --color-info: #2563a6;
+  --color-player-a: #1d4ed8;
+  --color-player-b: #c2410c;
+  --color-goal: #d97706;
+  --color-board-highlight: #dbeafe;
+  --color-capture-highlight: #dc2626;
+
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --space-7: 40px;
+
+  --control-height: 42px;
+  --input-height: 46px;
+  --card-padding: 20px;
+  --modal-padding: 28px;
+  --nav-item-gap: 5px;
+  --transition-fast: 150ms;
+  --transition-standard: 200ms;
+
+  /* Compatibility aliases retained for legacy game and dashboard selectors. */
+  --bg-primary: var(--color-page);
+  --bg-secondary: var(--color-surface);
+  --bg-card: var(--color-surface);
+  --bg-soft: var(--color-surface-subtle);
+  --text-primary: var(--color-text-primary);
+  --text-secondary: var(--color-text-secondary);
+  --text-faint: var(--color-text-muted);
+  --accent-blue: var(--color-brand);
+  --accent-cyan: #0f9f58;
+  --p1-color: var(--color-player-a);
+  --p2-color: var(--color-player-b);
+  --goal-color: var(--color-goal);
+  --success-color: var(--color-success);
+  --warning-color: var(--color-warning);
+  --error-color: var(--color-error);
+  --border-light: var(--color-border);
   --shadow-sm: 0 1px 2px rgba(23,32,51,.05);
   --shadow-md: 0 6px 16px rgba(23,32,51,.07);
   --shadow-lg: 0 16px 40px rgba(23,32,51,.10);
   --radius-sm: 8px;
   --radius-md: 14px;
   --radius-lg: 22px;
+
+  /* Auth-specific aliases share the authoritative application token block. */
+  --auth-bg: var(--color-surface);
+  --auth-bg-darker: #f8faf9;
+  --auth-text-primary: var(--color-text-primary);
+  --auth-text-secondary: var(--color-text-secondary);
+  --auth-text-muted: var(--color-text-muted);
+  --auth-border: var(--color-border);
+  --auth-border-focus: var(--color-brand);
+  --auth-brand: var(--color-brand);
+  --auth-brand-hover: var(--color-brand-hover);
+  --auth-brand-dark: #0f553c;
+  --auth-error: var(--color-error);
+  --auth-error-bg: #fef2f2;
+  --auth-error-border: #fecaca;
+  --auth-success: var(--color-success);
+  --auth-shadow-sm: 0 1px 2px rgba(23, 32, 51, .05);
+  --auth-shadow-md: 0 4px 12px rgba(23, 32, 51, .08);
+  --auth-shadow-lg: 0 12px 40px rgba(23, 32, 51, .12);
+  --auth-shadow-xl: 0 20px 60px rgba(23, 32, 51, .16);
+  --auth-radius-sm: 8px;
+  --auth-radius-md: 14px;
+  --auth-radius-lg: 22px;
+  --auth-radius-xl: 32px;
 }
 
 html { scroll-behavior: smooth; }
 
 body {
-  font-family: 'Inter', 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  font-family: 'Be Vietnam Pro', 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
   background: var(--bg-primary);
   color: var(--text-primary);
   min-height: 100vh;
@@ -41,7 +103,7 @@ button { cursor: pointer; }
 a { color: inherit; }
 
 :focus-visible {
-  outline: 2px solid var(--accent-blue);
+  outline: 2px solid var(--color-brand);
   outline-offset: 2px;
   border-radius: 4px;
 }
@@ -340,7 +402,8 @@ kbd { padding: 2px 6px; border-radius: 6px; border: 1px solid var(--border-light
 }
 .toast.show { transform: translateX(0); }
 .toast svg { flex-shrink: 0; font-size: 18px; }
-.toast-error { background: linear-gradient(100deg, #f87171, var(--error-color)); }
+.toast-error { background: var(--error-color); }
+.toast-close { width: auto; margin-left: auto; padding: 4px 7px; border: 0; background: transparent; color: inherit; font-size: .75rem; }
 .toast-capture { background: linear-gradient(100deg, #4ade80, var(--success-color)); }
 .toast-info { background: linear-gradient(100deg, #60a5fa, var(--accent-blue)); }
 .toast-success { background: linear-gradient(100deg, #2dd4bf, var(--accent-cyan)); }

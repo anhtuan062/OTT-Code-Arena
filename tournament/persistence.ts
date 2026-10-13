@@ -500,6 +500,8 @@ export function createTournament(
     registrationClosedAt: null,
     startedAt: null,
     completedAt: null,
+    resultsPublishedAt: null,
+    participationRequests: [],
   };
 }
 

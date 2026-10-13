@@ -81,7 +81,7 @@ describe('Tournament Manager', () => {
       turn: 10,
       currentPlayer: 'A',
       status: 'finished',
-      winner,
+      winner: terminationReason.startsWith('bot_') ? null : winner,
       winReason: terminationReason,
       pieces: [],
       lastMove: null,
@@ -233,7 +233,7 @@ describe('Tournament Manager', () => {
       expect(result.error).toContain('No schedule generated');
     });
 
-    it('should not let close registration bypass schedule and start invariants', async () => {
+    it('should close registration without generating a schedule or starting execution', async () => {
       const manager = new TournamentManager({ repository, executor: mockExecutor });
       await createTestTournament(manager, 'tourney-1', 'Test');
       await registerParticipants(manager, 'tourney-1', 2);
@@ -242,14 +242,13 @@ describe('Tournament Manager', () => {
       const result = await manager.closeRegistration('tourney-1');
       const tournament = (await manager.loadTournament('tourney-1')).data!;
 
-      expect(result.success).toBe(false);
-      expect(result.error).toContain('No schedule generated');
-      expect(tournament.status).toBe('registration_open');
+      expect(result.success).toBe(true);
+      expect(tournament.status).toBe('registration_closed');
       expect(tournament.rounds).toHaveLength(0);
       expect(tournament.startedAt).toBeNull();
     });
 
-    it('should let close registration start a scheduled tournament with startedAt', async () => {
+    it('should leave a scheduled tournament closed until start is requested', async () => {
       const manager = new TournamentManager({ repository, executor: mockExecutor });
       await createTestTournament(manager, 'tourney-1', 'Test');
       await registerParticipants(manager, 'tourney-1', 2);
@@ -259,12 +258,96 @@ describe('Tournament Manager', () => {
       const result = await manager.closeRegistration('tourney-1');
 
       expect(result.success).toBe(true);
-      expect(result.data?.status).toBe('running');
-      expect(result.data?.startedAt).not.toBeNull();
+      expect(result.data?.status).toBe('registration_closed');
+      expect(result.data?.startedAt).toBeNull();
     });
   });
 
   describe('Match Execution', () => {
+    it('serializes concurrent participation requests without losing either mutation', async () => {
+      const manager = new TournamentManager({ repository, executor: mockExecutor });
+      await createTestTournament(manager, 'request-serialization', 'Request serialization');
+      await manager.openRegistration('request-serialization');
+
+      const makeRequest = (competitorId: string, botId: string) => manager.submitParticipationRequest('request-serialization', {
+        competitorId,
+        botId,
+        participantName: competitorId,
+        botSnapshot: { botId, command: 'node', args: ['bot.js'] },
+      });
+      const results = await Promise.all([
+        makeRequest('competitor-a', 'bot-a'),
+        makeRequest('competitor-b', 'bot-b'),
+      ]);
+
+      expect(results.every(result => result.success)).toBe(true);
+      const persisted = (await manager.loadTournament('request-serialization')).data!;
+      expect(persisted.participationRequests).toHaveLength(2);
+      expect(persisted.participationRequests?.map(request => request.botId)).toEqual(expect.arrayContaining(['bot-a', 'bot-b']));
+    });
+
+    it('allows only one concurrent active request for the same competitor Bot', async () => {
+      const manager = new TournamentManager({ repository, executor: mockExecutor });
+      await createTestTournament(manager, 'request-deduplication', 'Request deduplication');
+      await manager.openRegistration('request-deduplication');
+      const request = {
+        competitorId: 'competitor-a',
+        botId: 'bot-a',
+        participantName: 'Competitor A',
+        botSnapshot: { botId: 'bot-a', command: 'node', args: ['bot.js'] },
+      };
+
+      const results = await Promise.all([
+        manager.submitParticipationRequest('request-deduplication', request),
+        manager.submitParticipationRequest('request-deduplication', request),
+      ]);
+      expect(results.filter(result => result.success)).toHaveLength(1);
+      expect(results.filter(result => !result.success)[0]?.error).toContain('active participation request');
+      expect((await manager.loadTournament('request-deduplication')).data?.participationRequests).toHaveLength(1);
+    });
+
+    it('serializes concurrent approvals and preserves each participant projection', async () => {
+      const manager = new TournamentManager({ repository, executor: mockExecutor });
+      await createTestTournament(manager, 'approval-serialization', 'Approval serialization');
+      await manager.openRegistration('approval-serialization');
+      const requests = await Promise.all(['a', 'b'].map(suffix => manager.submitParticipationRequest('approval-serialization', {
+        competitorId: `competitor-${suffix}`,
+        botId: `bot-${suffix}`,
+        participantName: `Competitor ${suffix}`,
+        botSnapshot: { botId: `bot-${suffix}`, command: 'node', args: ['bot.js'] },
+      })));
+      const approvalResults = await Promise.all(requests.map(result => manager.reviewParticipationRequest(
+        'approval-serialization', result.data!.requestId, 'organizer', 'approve'
+      )));
+
+      expect(approvalResults.every(result => result.success)).toBe(true);
+      const persisted = (await manager.loadTournament('approval-serialization')).data!;
+      expect(persisted.participants).toHaveLength(2);
+      expect(persisted.participationRequests?.every(request => request.status === 'approved')).toBe(true);
+      expect(persisted.participationRequests?.every(request => persisted.participants.some(participant => participant.bot.botId === request.botId))).toBe(true);
+    });
+
+    it('does not mark approval or add a participant when approval persistence fails', async () => {
+      const manager = new TournamentManager({ repository, executor: mockExecutor });
+      await createTestTournament(manager, 'approval-failure', 'Approval failure');
+      await manager.openRegistration('approval-failure');
+      const submitted = await manager.submitParticipationRequest('approval-failure', {
+        competitorId: 'competitor-a',
+        botId: 'bot-a',
+        participantName: 'Competitor A',
+        botSnapshot: { botId: 'bot-a', command: 'node', args: ['bot.js'] },
+      });
+      const originalSave = repository.save.bind(repository);
+      repository.save = async () => { throw new Error('injected approval persistence failure'); };
+      await expect(manager.reviewParticipationRequest('approval-failure', submitted.data!.requestId, 'organizer', 'approve'))
+        .rejects.toThrow('injected approval persistence failure');
+      repository.save = originalSave;
+
+      const persisted = (await manager.loadTournament('approval-failure')).data!;
+      expect(persisted.participants).toHaveLength(0);
+      expect(persisted.participationRequests?.[0]).toMatchObject({ status: 'pending', reviewedAt: null, reviewedBy: null });
+    });
+
     it('should run next match', async () => {
       const manager = new TournamentManager({
         repository,
@@ -311,6 +394,40 @@ describe('Tournament Manager', () => {
       const result = await manager.runAllMatches('tourney-1');
       expect(result.success).toBe(true);
       expect(result.data?.length).toBe(3); // 3 participants, 3 rounds, 1 match per round = 3 matches
+    });
+
+    it('persists an explicit failed pairing and retries it only on a later run request', async () => {
+      let attempts = 0;
+      const executor: MatchExecutor = {
+        async executeMatch(matchId) {
+          attempts += 1;
+          if (attempts === 1) throw new Error('Docker source runtime is unavailable');
+          return createMockMatchResult(matchId);
+        },
+        async isAvailable() { return true; },
+      };
+      const manager = new TournamentManager({ repository, executor });
+      await createTestTournament(manager, 'retry-failed-pairing', 'Retry failed pairing');
+      await registerParticipants(manager, 'retry-failed-pairing', 2);
+      await manager.openRegistration('retry-failed-pairing');
+      await manager.generateSchedule('retry-failed-pairing');
+      await manager.startTournament('retry-failed-pairing');
+
+      const firstRun = await manager.runAllMatches('retry-failed-pairing');
+      expect(firstRun.success).toBe(false);
+      const failed = (await manager.loadTournament('retry-failed-pairing')).data!;
+      expect(failed.status).toBe('running');
+      expect(failed.rounds[0]?.pairings[0]).toMatchObject({
+        status: 'failed',
+        failureCode: 'DOCKER_INFRASTRUCTURE',
+        failureReason: 'Docker execution infrastructure failed',
+      });
+
+      const retryRun = await manager.runAllMatches('retry-failed-pairing');
+      expect(retryRun.success).toBe(true);
+      const completed = (await manager.loadTournament('retry-failed-pairing')).data!;
+      expect(completed.status).toBe('completed');
+      expect(completed.rounds[0]?.pairings[0]?.status).toBe('completed');
     });
 
     it('should complete tournament after all matches', async () => {
@@ -546,15 +663,14 @@ describe('Tournament Manager', () => {
 
       const timedOut = await manager.cancelTournament('cancel-restart-write');
       expect(timedOut.success).toBe(false);
-      await expect(
-        manager.updateMetadata('cancel-restart-write', { recovery: 'must-not-overtake' })
-      ).rejects.toThrow('persistence is still in progress');
+      const recoveryWrite = manager.updateMetadata('cancel-restart-write', { recovery: 'must-not-overtake' });
 
       // A restarted process cannot bypass the live writer's ownership.
       const restartedRepository = new FileTournamentRepository({ baseDir: testDir });
       await expect(restartedRepository.initialize()).rejects.toThrow('already owned');
       release();
       await lateSaveDone;
+      await recoveryWrite;
 
       repository.save = originalSave;
       repository.close();
@@ -648,8 +764,90 @@ describe('Tournament Manager', () => {
 
       const tournament = (await manager.loadTournament('persist-failure')).data!;
       const pairing = tournament.rounds[0]?.pairings[0];
-      expect(pairing?.status).toBe('scheduled');
+      expect(pairing?.status).toBe('failed');
+      expect(pairing).toMatchObject({
+        failureCode: 'PERSISTENCE',
+        failureReason: 'Match result persistence failed',
+      });
       repository.saveMatchResult = originalSaveMatchResult;
+    });
+  });
+
+  describe('Result Publication', () => {
+    it('publishes a completed tournament idempotently after validating results and replays', async () => {
+      const manager = new TournamentManager({ repository, executor: mockExecutor });
+      await createTestTournament(manager, 'publication-success', 'Publication success');
+      await registerParticipants(manager, 'publication-success', 2);
+      await manager.openRegistration('publication-success');
+      await manager.generateSchedule('publication-success');
+      await manager.startTournament('publication-success');
+      const matchId = 'publication-success-P1-v-P2-r1';
+      mockExecutor.setMatchResult(matchId, createMockMatchResult(matchId));
+      const execution = await manager.runAllMatches('publication-success');
+      expect(execution.success).toBe(true);
+
+      const [published, repeated] = await Promise.all([
+        manager.publishResults('publication-success'),
+        manager.publishResults('publication-success'),
+      ]);
+      expect(published.success).toBe(true);
+      const firstTimestamp = published.data?.resultsPublishedAt;
+      expect(firstTimestamp).toBeTruthy();
+      expect(repeated.success).toBe(true);
+      expect(repeated.data?.resultsPublishedAt).toBe(firstTimestamp);
+      expect((await manager.loadTournament('publication-success')).data?.rounds[0].pairings[0].matchId).toBe(matchId);
+    });
+
+    it('publishes a valid Bot-forfeit result when the engine final state has no winner', async () => {
+      const manager = new TournamentManager({ repository, executor: mockExecutor });
+      await createTestTournament(manager, 'publication-bot-forfeit', 'Publication Bot forfeit');
+      await registerParticipants(manager, 'publication-bot-forfeit', 2);
+      await manager.openRegistration('publication-bot-forfeit');
+      await manager.generateSchedule('publication-bot-forfeit');
+      await manager.startTournament('publication-bot-forfeit');
+      const matchId = 'publication-bot-forfeit-P1-v-P2-r1';
+      mockExecutor.setMatchResult(matchId, createMockMatchResult(matchId, 'B', 'bot_crash'));
+
+      const execution = await manager.runAllMatches('publication-bot-forfeit');
+      expect(execution.success).toBe(true);
+      const published = await manager.publishResults('publication-bot-forfeit');
+      expect(published.success).toBe(true);
+      expect(published.data?.resultsPublishedAt).toBeTruthy();
+    });
+
+    it('rejects publication when a committed replay is missing', async () => {
+      const manager = new TournamentManager({ repository, executor: mockExecutor });
+      await createTestTournament(manager, 'publication-incomplete', 'Publication incomplete');
+      await registerParticipants(manager, 'publication-incomplete', 2);
+      await manager.openRegistration('publication-incomplete');
+      await manager.generateSchedule('publication-incomplete');
+      await manager.startTournament('publication-incomplete');
+      const matchId = 'publication-incomplete-P1-v-P2-r1';
+      mockExecutor.setMatchResult(matchId, createMockMatchResult(matchId));
+      await manager.runAllMatches('publication-incomplete');
+      await fs.rm(path.join(testDir, 'publication-incomplete', `replay-${matchId}.json`));
+
+      const result = await manager.publishResults('publication-incomplete');
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('integrity');
+      expect((await manager.loadTournament('publication-incomplete')).data?.resultsPublishedAt).toBeNull();
+    });
+
+    it('leaves publication state unchanged when the final save fails', async () => {
+      const manager = new TournamentManager({ repository, executor: mockExecutor });
+      await createTestTournament(manager, 'publication-save-failure', 'Publication save failure');
+      await registerParticipants(manager, 'publication-save-failure', 2);
+      await manager.openRegistration('publication-save-failure');
+      await manager.generateSchedule('publication-save-failure');
+      await manager.startTournament('publication-save-failure');
+      const matchId = 'publication-save-failure-P1-v-P2-r1';
+      mockExecutor.setMatchResult(matchId, createMockMatchResult(matchId));
+      await manager.runAllMatches('publication-save-failure');
+      const originalSave = repository.save.bind(repository);
+      repository.save = async () => { throw new Error('injected publication save failure'); };
+      await expect(manager.publishResults('publication-save-failure')).rejects.toThrow('injected publication save failure');
+      repository.save = originalSave;
+      expect((await manager.loadTournament('publication-save-failure')).data?.resultsPublishedAt).toBeNull();
     });
   });
 

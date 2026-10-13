@@ -12,7 +12,8 @@ import type {
   MatchReplay,
   MatchRunnerCallbacks,
 } from '@match-runner/types.js';
-import type { BotExecutor } from '@bot-executor/types.js';
+import type { BotExecutor, SourceRevisionExecutor } from '@bot-executor/types.js';
+import type { SourceRevisionExecution } from '@match-runner/types.js';
 
 export interface MatchExecutor {
   /**
@@ -116,10 +117,14 @@ export class MockMatchExecutor implements MatchExecutor {
 export class MatchRunnerExecutor implements MatchExecutor {
   private config: MatchConfig;
   private botExecutor?: BotExecutor;
+  private revisionExecutor?: SourceRevisionExecutor;
+  private resolveRevision?: (execution: SourceRevisionExecution) => Promise<Buffer | null>;
 
-  constructor(defaultConfig: MatchConfig, botExecutor?: BotExecutor) {
+  constructor(defaultConfig: MatchConfig, botExecutor?: BotExecutor, revisionExecutor?: SourceRevisionExecutor, resolveRevision?: (execution: SourceRevisionExecution) => Promise<Buffer | null>) {
     this.config = defaultConfig;
     this.botExecutor = botExecutor;
+    this.revisionExecutor = revisionExecutor;
+    this.resolveRevision = resolveRevision;
   }
 
   async executeMatch(
@@ -134,7 +139,7 @@ export class MatchRunnerExecutor implements MatchExecutor {
     const { createMatchRunner } = await import('@match-runner/index.js');
 
     const mergedConfig = { ...this.config, ...config, matchId };
-    const runner = createMatchRunner(mergedConfig, playerA, playerB, callbacks, this.botExecutor);
+    const runner = createMatchRunner(mergedConfig, playerA, playerB, callbacks, this.botExecutor, this.revisionExecutor, this.resolveRevision);
     return runner.run(signal);
   }
 
@@ -148,9 +153,11 @@ export class MatchRunnerExecutor implements MatchExecutor {
  */
 export async function createMatchRunnerExecutor(
   defaultConfig: Partial<MatchConfig> = {},
-  botExecutor?: BotExecutor
+  botExecutor?: BotExecutor,
+  revisionExecutor?: SourceRevisionExecutor,
+  resolveRevision?: (execution: SourceRevisionExecution) => Promise<Buffer | null>
 ): Promise<MatchRunnerExecutor> {
   const { DEFAULT_MATCH_CONFIG } = await import('@match-runner/types.js');
   const config = { ...DEFAULT_MATCH_CONFIG, ...defaultConfig };
-  return new MatchRunnerExecutor(config, botExecutor);
+  return new MatchRunnerExecutor(config, botExecutor, revisionExecutor, resolveRevision);
 }

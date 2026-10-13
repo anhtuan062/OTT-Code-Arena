@@ -5,9 +5,42 @@
  */
 
 import type { BotDefinition, MatchConfig } from '@match-runner/types.js';
+import type { SourceRevisionExecution } from '@match-runner/types.js';
 import type { BotRequestMessage } from '@bot-runner/types.js';
 
 export type { BotRequestMessage };
+
+/** Host-observed phase timings; docker run includes container startup. */
+export interface RevisionExecutionTimings {
+  imageReadinessMs: number;
+  workspacePreparationMs: number | null;
+  compilationContainerMs: number | null;
+  artifactValidationMs: number | null;
+  runtimeContainerMs: number | null;
+  // Attached docker run cannot distinguish these two intervals reliably.
+  runtimeStartupMs: null;
+  botExecutionMs: null;
+  cleanupMs: number;
+  cleanupSucceeded: boolean;
+  totalMs: number;
+  preparationBudgetMs: number;
+  compileBudgetMs: number;
+  runtimeBudgetMs: number;
+  timeoutPhase: 'preparation' | 'compilation' | 'runtime' | null;
+}
+
+export type CppCompilationBackend = 'bind' | 'ephemeral-volume';
+
+/** Bounded provenance safe for authorized diagnostics and persisted replays. */
+export interface RevisionExecutionProvenance {
+  compilationBackend: CppCompilationBackend;
+  sourceDigest: string;
+  sdkVersion?: string;
+  sdkDigest?: string;
+  compilerImageDigest?: string;
+  compilerConfigDigest?: string;
+  artifactDigest?: string;
+}
 
 /**
  * Result of a bot execution
@@ -27,6 +60,8 @@ export interface BotExecutionResult {
   stdout: string;
   stderr: string;
   durationMs: number;
+  timings?: RevisionExecutionTimings;
+  provenance?: RevisionExecutionProvenance;
 }
 
 /**
@@ -36,13 +71,33 @@ export interface BotExecutionError {
   code: BotErrorCode;
   message: string;
   details?: unknown;
+  /** Bounded, non-sensitive stage for authorized diagnostics. */
+  stage?: BotFailureStage;
 }
+
+export type BotFailureStage =
+  | 'sdk_resolution'
+  | 'source_integrity'
+  | 'workspace_preparation'
+  | 'workspace_preparation_timeout'
+  | 'artifact_validation'
+  | 'compilation'
+  | 'docker_infrastructure'
+  | 'runtime_startup'
+  | 'timeout'
+  | 'compilation_timeout'
+  | 'runtime_timeout'
+  | 'resource_limit'
+  | 'protocol_parsing'
+  | 'move_validation';
 
 /**
  * Error codes for bot execution
  */
 export type BotErrorCode =
   | 'TIMEOUT'
+  | 'COMPILATION_TIMEOUT'
+  | 'RUNTIME_TIMEOUT'
   | 'PROCESS_CRASHED'
   | 'INVALID_JSON'
   | 'INVALID_RESPONSE'
@@ -140,6 +195,15 @@ export interface BotExecutor {
    * Get supported resource limits
    */
   getSupportedLimits(): ResourceLimits;
+}
+
+/** Optional capability implemented only by the dedicated source adapter. */
+export interface SourceRevisionExecutor {
+  executeRevision(
+    context: ExecutionContext,
+    revision: { execution: SourceRevisionExecution; source: Buffer },
+    request: BotRequestMessage
+  ): Promise<BotExecutionResult>;
 }
 
 /**

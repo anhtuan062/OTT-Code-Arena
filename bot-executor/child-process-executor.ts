@@ -320,8 +320,16 @@ export class ChildProcessExecutor implements BotExecutor {
     if (proc.pid) {
       try {
         if (process.platform === 'win32') {
-          // On Windows, use taskkill to kill process tree
-          spawn('taskkill', ['/pid', String(proc.pid), '/t', '/f'], { stdio: 'ignore' });
+          // On Windows, use taskkill to kill the complete process tree. The
+          // agent/locked-down environments can deny taskkill; in that case
+          // still terminate only this verified parent so the executor cannot
+          // remain pending indefinitely. Normal Windows runs retain tree kill.
+          const taskkill = spawn('taskkill', ['/pid', String(proc.pid), '/t', '/f'], { stdio: 'ignore', windowsHide: true });
+          const fallback = () => {
+            try { if (!proc.killed) proc.kill('SIGKILL'); } catch { /* process may already be gone */ }
+          };
+          taskkill.once('error', fallback);
+          taskkill.once('close', code => { if (code !== 0) fallback(); });
         } else {
           // On Unix, kill the process group
           process.kill(-proc.pid, 'SIGKILL');

@@ -244,6 +244,24 @@ describe('ExecutionQueue', () => {
       expect(stats.activeCount).toBe(0);
       expect(stats.queueLength).toBe(0);
     });
+
+    it('scopes occupancy counts to the requested task IDs', async () => {
+      queue = createExecutionQueue({ maxConcurrent: 1, maxQueueLength: 8 });
+      const first = queue.submit('owner-a-active', signal => new Promise<void>(resolve => {
+        signal.addEventListener('abort', () => resolve(), { once: true });
+      }));
+      await new Promise(resolve => setTimeout(resolve, 5));
+      const second = queue.submit('owner-b-queued', async () => undefined);
+      await new Promise(resolve => setTimeout(resolve, 5));
+
+      expect(queue.getStatsFor(['owner-a-active'])).toMatchObject({ activeCount: 1, queueLength: 0 });
+      expect(queue.getStatsFor(['owner-b-queued'])).toMatchObject({ activeCount: 0, queueLength: 1 });
+      expect(queue.getStatsFor(['unrelated'])).toMatchObject({ activeCount: 0, queueLength: 0 });
+
+      queue.cancel('owner-a-active');
+      await first.catch(() => {});
+      await second;
+    });
   });
 
   describe('dispose', () => {

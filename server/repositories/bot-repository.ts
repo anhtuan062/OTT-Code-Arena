@@ -18,6 +18,7 @@ export interface BotRecord {
   owner_id: string | null;
   is_public: number;
   registered_at: string;
+  current_revision_id: string | null;
 }
 
 export interface CreateBotInput {
@@ -70,6 +71,7 @@ export class SqlBotRepository implements BotRepository {
       owner_id: input.ownerId,
       is_public: input.isPublic ? 1 : 0,
       registered_at: now,
+      current_revision_id: null,
     };
   }
 
@@ -77,6 +79,7 @@ export class SqlBotRepository implements BotRepository {
     const row = this.db
       .prepare(
         `SELECT id, name, command, args, env, owner_id, is_public, registered_at
+                , current_revision_id
          FROM bots WHERE id = ?`
       )
       .get(id) as BotRow | undefined;
@@ -86,7 +89,7 @@ export class SqlBotRepository implements BotRepository {
   listByOwner(ownerId: string): BotRecord[] {
     const rows = this.db
       .prepare(
-        `SELECT id, name, command, args, env, owner_id, is_public, registered_at
+        `SELECT id, name, command, args, env, owner_id, is_public, registered_at, current_revision_id
          FROM bots WHERE owner_id = ? ORDER BY registered_at DESC`
       )
       .all(ownerId) as BotRow[];
@@ -96,7 +99,7 @@ export class SqlBotRepository implements BotRepository {
   listPublic(): BotRecord[] {
     const rows = this.db
       .prepare(
-        `SELECT id, name, command, args, env, owner_id, is_public, registered_at
+        `SELECT id, name, command, args, env, owner_id, is_public, registered_at, current_revision_id
          FROM bots WHERE is_public = 1 ORDER BY registered_at DESC`
       )
       .all() as BotRow[];
@@ -106,7 +109,7 @@ export class SqlBotRepository implements BotRepository {
   listAll(): BotRecord[] {
     const rows = this.db
       .prepare(
-        `SELECT id, name, command, args, env, owner_id, is_public, registered_at
+        `SELECT id, name, command, args, env, owner_id, is_public, registered_at, current_revision_id
          FROM bots ORDER BY registered_at DESC`
       )
       .all() as BotRow[];
@@ -158,6 +161,7 @@ export class SqlBotRepository implements BotRepository {
       owner_id: row.owner_id,
       is_public: row.is_public,
       registered_at: row.registered_at,
+      current_revision_id: row.current_revision_id ?? null,
     };
   }
 }
@@ -171,4 +175,5 @@ interface BotRow {
   owner_id: string | null;
   is_public: number;
   registered_at: string;
+  current_revision_id: string | null;
 }

@@ -106,4 +106,26 @@ export { BotRunnerAdapter, createBotRunnerAdapter } from './bot-runner-adapter.j
 export { ExecutionQueue, createExecutionQueue } from './execution-queue.js';
 export { ExecutionAuditLogger, createAuditLogger } from './audit-logger.js';
 export { configuredDockerImage, validateDockerImage, isProductionImagePolicy } from './image-config.js';
+export {
+  RevisionDockerExecutor,
+  createRevisionDockerExecutor,
+  createConfiguredRevisionDockerExecutor,
+  buildCppCompileDockerArgs,
+  buildCppRuntimeDockerArgs,
+  buildPythonRuntimeDockerArgs,
+  buildStrategyCppCompileDockerArgs,
+  buildStrategyCppVolumeCompileDockerArgs,
+  buildCppVolumeRuntimeDockerArgs,
+  buildStrategyPythonRuntimeDockerArgs,
+  resolveCppCompilationBackend,
+  WorkspacePreparationError,
+  parseRevisionBotResult,
+} from './revision-docker-executor.js';
+export { STRATEGY_SDK_VERSION, getStrategySdkIdentity, materializeStrategySdk, strategySdkRoot } from './strategy-sdk.js';
+export {
+  createRuntimeImageRegistry,
+  configuredRuntimeImageRegistry,
+  validateRuntimeImage,
+  getImageRegistry,
+} from './runtime-image-registry.js';
 export * from './types.js';
