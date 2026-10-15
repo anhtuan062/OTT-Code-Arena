@@ -1068,6 +1068,9 @@ async function loadDashboard() {
     $('#dash-tourney-count').textContent = competitor ? participatingCount : tournaments.length;
     if (competitor) {
       $('#dash-bot-count').textContent = bots.length;
+      const cppBotCount = bots.filter(bot => bot.selectedRevision?.runtimeId === 'cpp').length;
+      const pythonBotCount = bots.filter(bot => bot.selectedRevision?.runtimeId === 'python3').length;
+      if (botDetail) botDetail.textContent = `C++17: ${cppBotCount} · Python 3: ${pythonBotCount}`;
       const navBotsBadge = $('#nav-badge-bots');
       if (navBotsBadge) { navBotsBadge.textContent = bots.length; navBotsBadge.hidden = !bots.length; }
       const navTourneysBadge = $('#nav-badge-tourneys');
@@ -1076,6 +1079,8 @@ async function loadDashboard() {
       const recordMatches = $('#dash-record-matches');
       const totalMatches = Number(botStats?.totalMatches) || 0;
       const wins = Number(botStats?.wins) || 0;
+      const top3Finishes = Number(botStats?.top3Finishes) || 0;
+      if (tournamentDetail) tournamentDetail.textContent = `${top3Finishes} lần lọt Top 3`;
       const winRate = totalMatches > 0 ? (wins / totalMatches) * 100 : 0;
       if (recordRate) recordRate.textContent = totalMatches > 0 ? `${winRate.toFixed(1).replace('.0', '')}%` : '—';
       if (recordMatches) recordMatches.textContent = totalMatches > 0

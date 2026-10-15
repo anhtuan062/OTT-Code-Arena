@@ -935,18 +935,21 @@ app.get('/api/my/bot-stats', requireAuth, requireRole('competitor'), async (req,
       wins: 0,
       draws: 0,
       losses: 0,
+      top3Finishes: 0,
     }]));
     const tournaments = await manager.listTournaments();
     for (const tournament of tournaments) {
       for (const participant of tournament.participants) {
         const botStats = stats.get(participant.bot.botId);
         if (!botStats) continue;
-        const standing = tournament.standings.find(item => item.participantId === participant.participantId);
+        const standingIndex = tournament.standings.findIndex(item => item.participantId === participant.participantId);
+        const standing = standingIndex >= 0 ? tournament.standings[standingIndex] : undefined;
         if (!standing) continue;
         botStats.matches += Number(standing.matchesPlayed) || 0;
         botStats.wins += Number(standing.wins) || 0;
         botStats.draws += Number(standing.draws) || 0;
         botStats.losses += Number(standing.losses) || 0;
+        if (tournament.status === 'completed' && standingIndex < 3) botStats.top3Finishes += 1;
       }
     }
     const values = [...stats.values()];
@@ -955,6 +958,7 @@ app.get('/api/my/bot-stats', requireAuth, requireRole('competitor'), async (req,
       wins: values.reduce((sum, item) => sum + item.wins, 0),
       draws: values.reduce((sum, item) => sum + item.draws, 0),
       losses: values.reduce((sum, item) => sum + item.losses, 0),
+      top3Finishes: values.reduce((sum, item) => sum + item.top3Finishes, 0),
       bots: values,
     });
   } catch (error) {
