@@ -92,10 +92,10 @@ describe('published tournament result access', () => {
       A: { participantId: 'P1', participantName: 'Player One', botId: 'bot-one' },
       B: { participantId: 'P2', participantName: 'Player Two', botId: 'bot-two' },
     });
-    expect((await competitor.get('/api/tournaments/public-unpublished')).status).toBe(403);
+    expect((await competitor.get('/api/tournaments/public-unpublished')).status).toBe(200);
     expect((await competitor.get('/api/tournaments/public-unpublished/standings')).status).toBe(403);
-    expect((await competitor.get('/api/tournaments/private-published')).status).toBe(403);
-    expect((await competitor.get('/api/tournaments/private-published/replays/m-public-results')).status).toBe(403);
+    expect((await competitor.get('/api/tournaments/private-published')).status).toBe(200);
+    expect((await competitor.get('/api/tournaments/private-published/replays/m-public-results')).status).toBe(200);
   });
 
   it('keeps unpublished results available to the owning organizer only', async () => {

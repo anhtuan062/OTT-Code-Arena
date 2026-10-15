@@ -26,9 +26,9 @@ describe('Docker image selection', () => {
   it('allows an explicitly configured local development tag', () => {
     expect(configuredDockerImage('ott-code-arena-bot:dev', 'development')).toBe('ott-code-arena-bot:dev');
   });
-  it('does not select Docker implicitly in development when no image is configured', async () => {
+  it('requires explicit child-process selection for local development when no image is configured', async () => {
     delete process.env.BOT_DOCKER_IMAGE;
-    const executor = await createExecutor({ childProcessConfig: { executionPolicy: 'development' } });
+    const executor = await createExecutor({ type: 'child-process', childProcessConfig: { executionPolicy: 'development' } });
     expect(executor.getName()).toBe('child-process');
   });
   it('fails closed rather than falling back to host execution in sandbox-required mode', async () => {

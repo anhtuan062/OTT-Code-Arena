@@ -126,7 +126,7 @@ describe('Tournament Types', () => {
       expect(DEFAULT_SCORING_CONFIG.winPoints).toBe(3);
       expect(DEFAULT_SCORING_CONFIG.drawPoints).toBe(1);
       expect(DEFAULT_SCORING_CONFIG.lossPoints).toBe(0);
-      expect(DEFAULT_SCORING_CONFIG.byePoints).toBe(3);
+      expect(DEFAULT_SCORING_CONFIG.byePoints).toBe(0);
     });
   });
 });

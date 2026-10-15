@@ -1,112 +1,62 @@
-# Security Model
+# Mô hình bảo mật
 
-## Threat Model
+## Tài sản cần bảo vệ
 
-### Assets to Protect
-- Host system integrity
-- Other contestants' bot code
-- Tournament data integrity
-- Match result authenticity
+- hệ điều hành và Docker host;
+- mã nguồn bot của từng tài khoản;
+- session, CSRF token và thông tin đăng nhập;
+- dữ liệu giải, kết quả và replay;
+- tính toàn vẹn của source revision và Docker image.
 
-### Attackers
-- Malicious contestants submitting harmful bots
-- Compromised bot dependencies
-- Network attackers (if bots have network access)
+## Authentication và authorization
 
-### Attack Vectors
-1. **Code execution**: Bot exploits OS vulnerabilities
-2. **Resource exhaustion**: Fork bombs, memory leaks, infinite loops
-3. **Data exfiltration**: Reading files, network requests
-4. **Result tampering**: Modifying match state, spoofing wins
-5. **Denial of service**: Hanging processes, filling disk
+- Mật khẩu được băm bằng bcrypt.
+- Session lưu trong SQLite và gửi bằng cookie `HttpOnly`, `SameSite=Lax`; production bật cookie secure.
+- API thay đổi trạng thái yêu cầu CSRF token.
+- API bot chỉ dành cho `competitor` sở hữu bot.
+- API quản lý giải chỉ dành cho `organizer` sở hữu giải.
+- Mọi tài khoản đã đăng nhập có thể xem live khi tournament đang `running`.
+- Replay đã công bố cho phép người dùng đã xác thực xem; replay chưa công bố chỉ owner được truy cập.
 
-## Defense Layers
+## Source integrity
 
-### 1. Process Isolation (MVP)
-- Each bot runs in separate `child_process`
-- No shell interpolation: `spawn(cmd, args, { shell: false })`
-- Working directory: isolated temp directory per match
-- Environment: minimal, no secrets
-- Timeout enforcement: `setTimeout` + `process.kill()`
+- Source revision tối đa 64 KiB và phải là UTF-8 hợp lệ.
+- Source được lưu cùng kích thước và SHA-256.
+- Khi đọc, server kiểm tra lại kích thước và digest.
+- Strategy revision phải khớp runtime, execution mode, SDK version và SDK digest đã ghim.
+- Series BO3 kiểm tra provenance không thay đổi giữa các ván.
 
-### 2. Resource Limits (where supported)
-```typescript
-const limits = {
-  maxTimeMs: 2000,
-  maxMemoryMb: 256,
-  maxCpuPercent: 100,
-  maxOutputBytes: 1_000_000,
-  maxProcesses: 1,
-  allowNetwork: false,
-  allowFileWrite: false,  // except stdout/stderr
-};
-```
-- Node.js: `--max-old-space-size`, `worker_threads` with `resourceLimits`
-- Future: Docker containers, gVisor, Firecracker
+## Sandbox
 
-### 3. Filesystem Restrictions
-- Bot working directory: empty temp dir
-- No access to: source code, other bots, config, keys
-- Read-only access to standard library only
+Production yêu cầu `EXECUTION_POLICY=sandbox-required`. Nếu Docker hoặc image đã ghim không sẵn sàng, server không mở listener hoặc execution thất bại đóng; không fallback sang host.
 
-### 4. Network Restrictions
-- No outbound connections (blocked at OS/firewall level)
-- No inbound listeners
-- Localhost access blocked
+Docker execution dùng:
 
-### 5. Protocol Enforcement
-- Engine validates every move against rules
-- Bot cannot report winner, score, or state
-- Engine is sole authority on match outcome
+- network disabled;
+- root filesystem read-only;
+- tmpfs nhỏ với `noexec,nosuid`;
+- non-root user;
+- drop capabilities và `no-new-privileges`;
+- giới hạn memory, CPU và PID;
+- source/SDK/artifact mount theo quyền tối thiểu;
+- không mount Docker socket.
 
-## Bot Execution Flow
+`ChildProcessExecutor` chỉ dành cho development với bot tin cậy. Nó không cô lập filesystem, network, CPU hoặc memory như Docker.
 
-```
-Match Runner
-    │
-    ▼
-Bot Runner (spawns process)
-    │
-    ├──► stdin: JSON request (validated schema)
-    │
-    ├──► stdout: JSON response (parsed, validated)
-    │
-    ├──► stderr: captured to log (not parsed)
-    │
-    ├──► timeout: kill(SIGTERM) → kill(SIGKILL)
-    │
-    └──► exit code: 0 = ok, else = forfeit
-```
+## API và dữ liệu
 
-## What Bots CANNOT Do
-- Access filesystem outside working directory
-- Make network requests
-- Spawn child processes
-- Modify match state directly
-- Read other bots' code
-- Access environment variables with secrets
-- Run longer than timeout
-- Produce unlimited output
+- JSON body giới hạn 100 KiB.
+- Identifier và storage path được kiểm tra để ngăn path traversal và symlink escape.
+- Static server chỉ phục vụ các file frontend được khai báo.
+- Rate limit áp dụng cho đăng ký, đăng nhập, chạy thử và spectator polling.
+- Spectator projection loại bỏ source, revision nội bộ, runtime diagnostics và raw output.
+- Live SSE đặt `Cache-Control: no-cache, no-store, private`.
 
-## What Bots CAN Do
-- Read stdin (game state)
-- Write stdout (one move)
-- Write stderr (debug logs)
-- Use CPU/memory within limits
-- Use standard library (math, collections, etc.)
+## Checklist vận hành
 
-## Deployment Checklist (Production)
-- [ ] Run bot executor in dedicated VM/container
-- [ ] Network namespace isolation
-- [ ] User namespace mapping (non-root)
-- [ ] Seccomp/firecracker profile
-- [ ] Audit logs for all executions
-- [ ] Rate limiting on match creation
-- [ ] Signed bot binaries / reproducible builds
-
-## MVP Limitations (Known)
-- Node.js `child_process` timeout is NOT a security sandbox
-- No memory/CPU enforcement without OS support
-- Filesystem access limited only by OS permissions
-- Suitable for trusted bots only (sample bots, internal testing)
-- **Do not run untrusted code in production without proper sandbox**
+- Dùng image theo immutable digest và registry tin cậy.
+- Không chạy production với `EXECUTION_POLICY=development`.
+- Không sửa trực tiếp SQLite hoặc tournament files khi server đang chạy.
+- Sao lưu khi server đã dừng và kiểm tra integrity trước khi restore.
+- Không chia sẻ thư mục `data/tournaments` hoặc log runtime ra public.
+- Theo dõi lỗi `SECURITY_VIOLATION`, `SOURCE_REVISION` và `DOCKER_INFRASTRUCTURE`.

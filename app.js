@@ -9,6 +9,8 @@ const state = {
   activeView: 'auth-screen',
   tournamentId: null,
   replay: null,
+  replaySeries: null,
+  replayGameIndex: 0,
   replayMoveIndex: -1,
   modalReturnFocus: null,
   authRevision: 0,
@@ -20,6 +22,8 @@ const state = {
   botSearch: '',
   deletingBot: null,
   deleteDialogRevision: 0,
+  deletingRevision: null,
+  revisionDeleteDialogRevision: 0,
   sourceWorkspaceBot: null,
   sourceRevisions: [],
   sourceDirty: false,
@@ -39,6 +43,7 @@ const state = {
   practiceReplayTimer: null,
   practiceReplayToken: 0,
   practiceRequestToken: 0,
+  practiceAbortController: null,
   tournaments: [],
   tournamentSearch: '',
   tournamentScope: 'discoverable',
@@ -46,8 +51,11 @@ const state = {
   dashboardTournamentSearch: '',
   dashboardTournamentStatus: 'all',
   tournamentRegistrationContext: null,
+  viewerParticipantId: null,
+  viewerParticipantIds: [],
   pendingTournamentAction: null,
   tournamentActionRevision: 0,
+  retryingPairings: new Set(),
   tournamentListError: null,
   tournamentDialogRevision: 0,
   editingTournament: null,
@@ -64,7 +72,21 @@ const state = {
   replayPlaybackToken: 0,
   liveMatchContext: null,
   liveMatchSnapshot: null,
+  liveMatchStartedGames: new Set(),
+  liveLatestSnapshot: null,
+  liveHistoryGame: null,
+  liveHistory: [],
+  liveHistoryIndex: 0,
+  liveHistoryQueue: [],
+  liveLastSequence: 0,
+  liveTransitionTimer: null,
+  livePendingSnapshot: null,
+  liveHistoryTimer: null,
   liveMatchPollingTimer: null,
+  liveEventSource: null,
+  liveStreamMode: false,
+  livePollBackoffMs: 0,
+  spectatorMode: false,
   detailStatus: null,
   detailRefreshInFlight: false,
   queueRefreshInFlight: false,
@@ -148,10 +170,11 @@ const STATUS_LABELS = {
   cancelled_match: 'Đã hủy',
 };
 STATUS_LABELS.registration_closed = '\u0110\u00e3 \u0111\u00f3ng \u0111\u0103ng k\u00fd';
+STATUS_LABELS.bye = 'Mi\u1ec5n \u0111\u1ea5u';
 
 const REASON_LABELS = {
   goal_reached: 'Đến ô đích',
-  type_elimination: 'Loại hết một loại quân',
+  all_pieces_captured: 'Ăn hết quân đối thủ',
   bot_timeout: 'Bot quá thời gian',
   bot_crash: 'Bot gặp lỗi',
   bot_invalid_json: 'Phản hồi Bot không hợp lệ',
@@ -198,6 +221,8 @@ function localizeErrorMessage(message) {
   const exact = {
     'Bot cannot be deleted while it has immutable source revisions': 'Không thể xóa Bot vì Bot đã có phiên bản mã nguồn bất biến. Hãy giữ Bot để bảo toàn lịch sử phiên bản và kết quả thi đấu.',
     'Bot cannot be deleted while its revision is referenced by a tournament': 'Không thể xóa Bot vì phiên bản của Bot đang được giải đấu tham chiếu.',
+    'Cannot delete the only revision': 'Không thể xóa phiên bản duy nhất của Bot. Hãy lưu một phiên bản khác trước.',
+    'Cannot delete a revision referenced by a tournament': 'Không thể xóa phiên bản đang được giải đấu tham chiếu.',
     'Authentication required': 'Vui lòng đăng nhập để tiếp tục.',
     'Invalid username or password': 'Tài khoản hoặc mật khẩu không đúng.',
     'Invalid CSRF token': 'Phiên bảo mật không hợp lệ. Vui lòng thử lại.',
@@ -301,22 +326,46 @@ function actionButton(label, action, key, className = 'secondary-btn') {
 async function runPending(key, button, action) {
   if (state.pending.has(key)) return;
   state.pending.add(key);
-  if (button) { button.disabled = true; button.setAttribute('aria-busy', 'true'); button.classList.add('is-loading'); }
+  const buttonText = button?.querySelector('.btn-text');
+  const buttonLoading = button?.querySelector('.btn-loading');
+  if (button) {
+    button.disabled = true;
+    button.setAttribute('aria-busy', 'true');
+    button.classList.add('is-loading');
+    buttonText?.classList.add('hidden');
+    buttonLoading?.classList.remove('hidden');
+  }
   try { return await action(); }
   catch (error) {
     if (!error?.notified) showToast(error?.message || 'Thao tác thất bại. Vui lòng thử lại.', 'error');
     return undefined;
   } finally {
     state.pending.delete(key);
-    if (button) { button.disabled = false; button.removeAttribute('aria-busy'); button.classList.remove('is-loading'); }
+    if (button) {
+      button.disabled = false;
+      button.removeAttribute('aria-busy');
+      button.classList.remove('is-loading');
+      buttonText?.classList.remove('hidden');
+      buttonLoading?.classList.add('hidden');
+    }
   }
 }
 
 function showToast(message, type = 'info') {
   const container = $('#toast-container');
   if (!container) return;
+  const toastMeta = {
+    success: { icon: 'td-icon-check', label: '\u0110\u00E3 xong' },
+    error: { icon: 'td-icon-circle-x', label: 'C\u00F3 l\u1ED7i' },
+    info: { icon: 'td-icon-ellipsis', label: 'Th\u00F4ng b\u00E1o' },
+    capture: { icon: 'td-icon-check', label: 'C\u1EADp nh\u1EADt' },
+  }[type] || { icon: 'td-icon-ellipsis', label: 'Th\u00F4ng b\u00E1o' };
   const toast = create('div', { className: `toast toast-${type}`, attrs: { role: type === 'error' ? 'alert' : 'status' } });
-  toast.appendChild(create('span', { text: message }));
+  const marker = create('span', { className: 'toast-marker', attrs: { 'aria-hidden': 'true' } });
+  marker.appendChild(icon(toastMeta.icon));
+  const content = create('div', { className: 'toast-content' });
+  content.append(create('strong', { className: 'toast-label', text: toastMeta.label }), create('span', { className: 'toast-message', text: message }));
+  toast.append(marker, content);
   toast.appendChild(actionButton('Đóng', () => toast.remove(), `dismiss-toast:${Date.now()}`, 'toast-close'));
   container.appendChild(toast);
   requestAnimationFrame(() => toast.classList.add('show'));
@@ -341,6 +390,43 @@ function renderTableMessage(tbody, message, columns, retry) {
   if (retry) cell.appendChild(actionButton('Thử lại', retry, `retry:${tbody.parentElement?.id || 'table'}`));
   row.appendChild(cell);
   tbody.appendChild(row);
+}
+
+function renderLoadingSkeleton(container, type = 'card', count = 4) {
+  if (!container) return;
+  clear(container);
+  container.classList.add('is-loading-skeleton');
+  container.setAttribute('aria-busy', 'true');
+  const fragment = document.createDocumentFragment();
+  if (container.tagName === 'TBODY') {
+    for (let index = 0; index < count; index += 1) {
+      const row = create('tr', { className: 'loading-skeleton-row' });
+      for (let column = 0; column < type; column += 1) {
+        const cell = create('td');
+        cell.appendChild(create('span', { className: 'loading-skeleton-line' }));
+        row.appendChild(cell);
+      }
+      fragment.appendChild(row);
+    }
+  } else {
+    for (let index = 0; index < count; index += 1) {
+      const card = create('div', { className: `loading-skeleton-card ${type}` });
+      card.append(
+        create('span', { className: 'loading-skeleton-avatar' }),
+        create('span', { className: 'loading-skeleton-line loading-skeleton-line-title' }),
+        create('span', { className: 'loading-skeleton-line loading-skeleton-line-wide' }),
+        create('span', { className: 'loading-skeleton-line loading-skeleton-line-short' }),
+      );
+      fragment.appendChild(card);
+    }
+  }
+  container.appendChild(fragment);
+}
+
+function clearLoadingSkeleton(container) {
+  if (!container) return;
+  container.classList.remove('is-loading-skeleton');
+  container.removeAttribute('aria-busy');
 }
 
 function openModal(id) {
@@ -368,10 +454,13 @@ function closeModal(id) {
   state.modalReturnFocus = null;
   if (!document.querySelector('.modal-overlay.open')) document.body.classList.remove('modal-open');
   if (id === 'delete-bot-modal') { state.deleteDialogRevision += 1; state.deletingBot = null; }
+  if (id === 'delete-revision-modal') { state.revisionDeleteDialogRevision += 1; state.deletingRevision = null; $('#delete-revision-error').textContent = ''; $('#delete-revision-error').hidden = true; }
   if (id === 'add-tourney-modal') { state.tournamentDialogRevision += 1; $('#tournament-form-error').textContent = ''; $('#tournament-form-error').hidden = true; }
   if (id === 'register-bot-tourney-modal') { state.registrationDialogRevision += 1; $('#registration-form-error').textContent = ''; $('#registration-form-error').hidden = true; }
   if (id === 'tournament-action-modal') { state.tournamentActionRevision += 1; state.pendingTournamentAction = null; }
   if (id === 'practice-modal') {
+    state.practiceAbortController?.abort();
+    state.practiceAbortController = null;
     state.practiceRequestToken += 1;
     state.practiceRevision = null;
     state.practiceDraft = null;
@@ -496,7 +585,6 @@ function openEditTournamentDialog(tournament) {
   state.tournamentDialogRevision += 1;
   state.editingTournament = tournament;
   $('#new-tourney-name').value = tournament.name || '';
-  $('#new-tourney-visibility').value = tournament.metadata?.access === 'public' ? 'public' : 'private';
   $('#add-tourney-title').textContent = 'Chỉnh sửa giải đấu';
   $('#tourney-dialog-description').textContent = 'Cập nhật tên và quyền hiển thị của giải đấu.';
   $('.tournament-submit-label').textContent = 'Lưu thay đổi';
@@ -545,7 +633,7 @@ function openRegistrationDialog() {
     clear(closeButton);
     const closeIcon = icon('td-icon-x'); closeIcon.classList.add('modal-close-icon'); closeButton.appendChild(closeIcon);
   }
-  $('#registration-revision-summary').textContent = 'Chưa chọn Bot và revision';
+  $('#registration-revision-summary').textContent = 'Chưa chọn Bot và phiên bản';
   setRegistrationLoadingState();
   openModal('register-bot-tourney-modal');
 }
@@ -896,6 +984,21 @@ async function restoreSession() {
   }
 }
 
+// A deep-link or a browser tab opened during an auth transition can have a
+// valid session cookie before the application state has been hydrated. Replay
+// navigation must not silently discard an otherwise valid API response in
+// that short window.
+async function ensureReplaySession() {
+  if (state.user) return true;
+  try {
+    const result = await request('/auth/me');
+    setAuthenticated(result.user, result.csrfToken);
+    return Boolean(state.user);
+  } catch {
+    return false;
+  }
+}
+
 async function refreshQueueStats() {
   if (!state.user || state.user.role !== 'organizer') return;
   if (state.queueRefreshInFlight) return;
@@ -910,7 +1013,7 @@ async function refreshQueueStats() {
     if (!isCurrentView(state.activeView, authRevision, viewRevision, detailTournamentId || undefined)) return;
     const queueStats = $('#queue-stats');
     if (queueStats) queueStats.textContent = `Hàng đợi: ${stats.activeCount}/${stats.maxConcurrent} đang chạy, ${stats.queueLength} đang chờ`;
-    $('#dash-queue-value').textContent = `${stats.activeCount} / ${stats.maxConcurrent}`;
+    $('#dash-queue-value').textContent = String(Number(stats.activeCount) || 0);
   } catch {
     if (isCurrentView(state.activeView, authRevision, viewRevision, detailTournamentId || undefined)) {
       const queueStats = $('#queue-stats');
@@ -939,6 +1042,7 @@ async function loadDashboard() {
   tableCard.hidden = false;
   activityHeader.hidden = false;
   renderTableMessage(table, 'Đang tải các giải đấu…', 5);
+  renderLoadingSkeleton(table, 5, 5);
   void refreshQueueStats();
   try {
     const competitor = state.user?.role === 'competitor';
@@ -949,16 +1053,18 @@ async function loadDashboard() {
     const dashboardTitle = $('#dashboard-welcome-title');
     const dashboardCopy = $('#dashboard-welcome-copy');
     const activityTitle = $('#recent-tournaments-title');
+    const activityCopy = $('#dashboard-activity-copy');
     const botLabel = $('#dash-bot-label');
     const tournamentLabel = $('#dash-tourney-label');
     const queueLabel = $('#dash-queue-label');
     const queueCard = $('#dash-queue-card');
+    const recordCard = $('#dash-record-card');
     const dashboardIcons = {
-      bot: competitor ? 'icon-bot' : 'icon-user-round-plus',
-      tournament: competitor ? 'icon-trophy' : 'icon-shield-check',
+      bot: competitor ? 'icon-bot' : 'icon-users',
+      tournament: competitor ? 'icon-users' : 'icon-trophy',
       queue: competitor ? 'icon-user-round-plus' : 'icon-activity',
     };
-    [['dash-bot-icon', dashboardIcons.bot], ['dash-tourney-icon', dashboardIcons.tournament], ['dash-queue-icon', dashboardIcons.queue]].forEach(([id, iconId]) => {
+    [['dash-bot-icon', dashboardIcons.bot], ['dash-bot-icon-main', dashboardIcons.bot], ['dash-tourney-icon-main', dashboardIcons.tournament], ['dash-queue-icon', dashboardIcons.queue], ['dash-queue-icon-main', dashboardIcons.queue]].forEach(([id, iconId]) => {
       const use = $(`#${id}`); if (use) use.setAttribute('href', `#${iconId}`);
     });
     if (dashboardTitle) dashboardTitle.textContent = competitor ? 'Tổng quan của tôi' : 'Tổng quan giải đấu';
@@ -970,15 +1076,24 @@ async function loadDashboard() {
       );
     }
     if (activityTitle) activityTitle.textContent = competitor ? 'Giải đấu dành cho bạn' : 'Giải đấu gần đây';
+    if (activityCopy) activityCopy.textContent = competitor
+      ? 'Các giải đấu bạn có thể gửi yêu cầu tham gia.'
+      : 'Theo dõi các giải đấu gần đây và quản lý hoạt động thi đấu.';
     if (secondaryColumn) secondaryColumn.textContent = competitor ? 'Trạng thái tham gia' : 'Thể thức';
     if (botLabel) botLabel.textContent = competitor ? 'Bot của tôi' : 'Mở đăng ký';
     if (tournamentLabel) tournamentLabel.textContent = competitor ? 'Đang tham gia' : 'Giải đấu quản lý';
+    const botDetail = $('#dash-bot-detail');
+    const tournamentDetail = $('#dash-tourney-detail');
+    if (botDetail) botDetail.textContent = competitor ? 'Đã có phiên bản mã nguồn' : 'Đang nhận đăng ký';
+    if (tournamentDetail) tournamentDetail.textContent = competitor ? 'Giải đấu hiện tại' : 'Tổng số giải đấu';
     if (queueLabel) queueLabel.textContent = competitor ? 'Đang diễn ra' : 'Đang diễn ra';
     if (queueCard) queueCard.hidden = competitor;
-    const [tournamentResponse, bots, myTournamentResponse] = await Promise.all([
+    if (recordCard) recordCard.hidden = !competitor;
+    const [tournamentResponse, bots, myTournamentResponse, botStats] = await Promise.all([
       request(competitor ? '/tournaments/discoverable' : '/tournaments'),
       competitor ? request('/bots') : Promise.resolve([]),
       competitor ? request('/my/tournaments') : Promise.resolve([]),
+      competitor ? request('/my/bot-stats') : Promise.resolve(null),
     ]);
     if (!isCurrentView('dashboard', authRevision, viewRevision)) return;
     const tournaments = competitor
@@ -993,10 +1108,20 @@ async function loadDashboard() {
     $('#dash-tourney-count').textContent = competitor ? participatingCount : tournaments.length;
     if (competitor) {
       $('#dash-bot-count').textContent = bots.length;
+      const recordRate = $('#dash-record-rate');
+      const recordMatches = $('#dash-record-matches');
+      const totalMatches = Number(botStats?.totalMatches) || 0;
+      const wins = Number(botStats?.wins) || 0;
+      const winRate = totalMatches > 0 ? (wins / totalMatches) * 100 : 0;
+      if (recordRate) recordRate.textContent = totalMatches > 0 ? `${winRate.toFixed(1).replace('.0', '')}%` : '—';
+      if (recordMatches) recordMatches.textContent = totalMatches > 0
+        ? `${totalMatches} trận tham gia · ${wins} thắng`
+        : 'Chưa có trận tham gia';
       $('#dash-queue-value').textContent = openCount;
       const queueLabelText = $('#dash-queue-label'); if (queueLabelText) queueLabelText.textContent = 'Giải đang mở đăng ký';
       if (botSection) { botSection.hidden = false; renderDashboardBotList(bots); }
     } else {
+      if (recordCard) recordCard.hidden = true;
       const requestResults = await Promise.allSettled(tournaments.map(tournament => request(`/tournaments/${tournament.tournamentId}/requests`)));
       if (!isCurrentView('dashboard', authRevision, viewRevision)) return;
       const pendingCount = requestResults.reduce((total, result) => total + (result.status === 'fulfilled'
@@ -1007,14 +1132,16 @@ async function loadDashboard() {
     }
     const hasRevision = bots.some(bot => Boolean(bot.currentRevisionId));
     const createBotAction = $('#dashboard-create-bot');
+    const createBotActionLabel = $('#dashboard-create-bot-label');
     if (competitor && createBotAction) {
-      createBotAction.textContent = hasRevision ? 'Mã nguồn Bot' : 'Lưu phiên bản mã nguồn';
+      if (createBotActionLabel) createBotActionLabel.textContent = hasRevision ? 'Mã nguồn Bot' : 'Lưu phiên bản mã nguồn';
       createBotAction.title = hasRevision ? 'Mở không gian Bot' : 'Tạo Bot và lưu phiên bản C++17 hoặc Python 3 trước khi tham gia';
     }
     if (competitor && createBotAction) {
-      createBotAction.textContent = bots.length ? 'Mã nguồn Bot' : 'Tạo Bot';
+      if (createBotActionLabel) createBotActionLabel.textContent = bots.length ? 'Mã nguồn Bot' : 'Tạo Bot';
       createBotAction.title = bots.length ? 'Mở không gian Bot' : 'Tạo Bot mới';
     }
+    clearLoadingSkeleton(table);
     clear(table);
     const searchTerm = state.dashboardTournamentSearch.trim().toLowerCase();
     const filteredTournaments = tournaments.filter(tournament => {
@@ -1085,7 +1212,7 @@ async function loadDashboard() {
     });
   } catch (error) {
     if (isCurrentView('dashboard', authRevision, viewRevision)) {
-      state.error = error.message || 'Unable to load dashboard.';
+      state.error = error.message || 'Không thể tải trang tổng quan.';
       $('#dash-tourney-count').textContent = '—';
       $('#dash-bot-count').textContent = '—';
       emptyState.hidden = true;
@@ -1114,7 +1241,7 @@ function renderDashboardBotList(bots) {
     const botIcon = icon('icon-bot'); botIcon.classList.add('dashboard-bot-item-icon');
     const copy = create('span', { className: 'dashboard-bot-copy' });
     copy.append(create('strong', { text: bot.name }), create('small', { text: bot.currentRevisionId ? 'ÄÃ£ cÃ³ phiÃªn báº£n mÃ£ nguá»“n' : 'ChÆ°a cÃ³ phiÃªn báº£n mÃ£ nguá»“n' }));
-    const arrow = icon('icon-arrow-up-right'); arrow.classList.add('dashboard-bot-arrow');
+    const arrow = icon('icon-chevron-down'); arrow.classList.add('dashboard-bot-arrow');
     item.append(botIcon, copy, arrow);
     item.addEventListener('click', () => openBotWorkspace(bot));
     list.appendChild(item);
@@ -1131,6 +1258,7 @@ async function loadBots() {
   list.classList.add('bot-grid-empty');
   $('#bots-toolbar').hidden = true;
   $('#open-bot-modal').hidden = true;
+  renderLoadingSkeleton(table, 'bot-skeleton', 4);
   renderTableMessage(table, 'Đang tải danh sách Bot…', 5);
   try {
     const bots = await request('/bots');
@@ -1143,6 +1271,7 @@ async function loadBots() {
 
 function renderBotList() {
   const list = $('#bots-list');
+  clearLoadingSkeleton(list);
   const toolbar = $('#bots-toolbar');
   const createButton = $('#open-bot-modal');
   const headerDescription = $('.bots-workspace-header p');
@@ -1174,8 +1303,8 @@ function renderBotList() {
     header.append(identity, badges); card.appendChild(header);
     const config = create('div', { className: 'bot-config' });
     const selectedRevision = bot.selectedRevision;
-    const runtimeLabel = selectedRevision?.runtimeId === 'cpp' ? 'C++17' : selectedRevision?.runtimeId === 'python3' ? 'Python 3' : selectedRevision ? 'Legacy' : null;
-    const modeLabel = selectedRevision?.executionMode === 'strategy' ? 'Strategy SDK' : selectedRevision?.executionMode === 'raw' ? 'Raw' : null;
+    const runtimeLabel = selectedRevision?.runtimeId === 'cpp' ? 'C++17' : selectedRevision?.runtimeId === 'python3' ? 'Python 3' : selectedRevision ? 'Phiên bản cũ' : null;
+    const modeLabel = selectedRevision?.executionMode === 'strategy' ? 'Strategy SDK' : selectedRevision?.executionMode === 'raw' ? 'Mã nguồn trực tiếp' : null;
     if (runtimeLabel) badges.appendChild(create('span', { className: 'bot-card-badge', text: runtimeLabel }));
     if (modeLabel) badges.appendChild(create('span', { className: 'bot-card-badge bot-card-badge-muted', text: modeLabel }));
     const revisionLabel = selectedRevision?.label || (selectedRevision?.revisionId ? `Đã lưu · ${selectedRevision.revisionId.slice(0, 8)}` : null);
@@ -1222,7 +1351,7 @@ function setSourceError(message = '') {
 function updateSourceRuntimeMeta(runtimeId) {
   const isPython = runtimeId === 'python3';
   const isLegacy = runtimeId === 'nodejs' || runtimeId === '';
-  const runtimeLabel = isLegacy ? 'Legacy JavaScript' : isPython ? 'Python 3' : 'C++17';
+  const runtimeLabel = isLegacy ? 'JavaScript phiên bản cũ' : isPython ? 'Python 3' : 'C++17';
   const filename = $('#bot-source-filename');
   const help = $('#bot-source-help');
   if (filename) filename.textContent = isLegacy ? 'main.js' : isPython ? 'main.py' : 'main.cpp';
@@ -1253,7 +1382,7 @@ function updateSourceModeMeta(executionMode = '', sdkVersion = '') {
   const mode = $('#bot-source-mode');
   if (!mode) return;
   if (executionMode === 'strategy') mode.textContent = sdkVersion ? `Strategy SDK ${sdkVersion}` : 'Strategy SDK';
-  else if (executionMode === 'raw') mode.textContent = 'Raw';
+  else if (executionMode === 'raw') mode.textContent = 'Mã nguồn trực tiếp';
   else mode.textContent = 'Chưa có phiên bản';
 }
 
@@ -1265,6 +1394,112 @@ function updateEditorMetrics() {
   gutter.textContent = Array.from({ length: lineCount }, (_, index) => index + 1).join('\n');
   gutter.scrollTop = editor.scrollTop;
   gutter.style.height = `${editor.clientHeight}px`;
+  syncSourceEditorTools();
+}
+
+function escapeSourceHtml(value) {
+  return String(value).replace(/[&<>]/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[character]));
+}
+
+function highlightSourceCode(source) {
+  const escaped = escapeSourceHtml(source);
+  const tokenPattern = /(\/\/[^\n]*|#[^\n]*|\#[a-zA-Z_][\w]*|"[^"\n]*"|'[^'\n]*'|\b\d+(?:\.\d+)?\b|\b(?:class|def|return|if|else|elif|for|while|in|import|from|as|True|False|None|and|or|not|using|namespace|const|auto|int|string|bool|void|struct|vector|return|include|public|private|new)\b)/g;
+  return escaped.replace(tokenPattern, token => {
+    if (token.startsWith('//') || token.startsWith('#')) return `<span class="code-comment">${token}</span>`;
+    if (token.startsWith('"') || token.startsWith("'")) return `<span class="code-string">${token}</span>`;
+    if (/^\d/.test(token)) return `<span class="code-number">${token}</span>`;
+    return `<span class="code-keyword">${token}</span>`;
+  }) || ' ';
+}
+
+function sourceSyntaxCheck(source, runtimeId) {
+  const stack = [];
+  const pairs = { ')': '(', ']': '[', '}': '{' };
+  let quote = null;
+  let escaped = false;
+  const lines = source.split('\n');
+  for (let lineIndex = 0; lineIndex < lines.length; lineIndex += 1) {
+    const line = lines[lineIndex];
+    let comment = false;
+    for (let index = 0; index < line.length; index += 1) {
+      const character = line[index];
+      if (comment) continue;
+      if (quote) {
+        if (escaped) escaped = false;
+        else if (character === '\\') escaped = true;
+        else if (character === quote) quote = null;
+        continue;
+      }
+      if (character === '"' || character === "'") quote = character;
+      else if (character === '/' && line[index + 1] === '/') { comment = true; index += 1; }
+      else if (character === '#') comment = true;
+      else if (['(', '[', '{'].includes(character)) stack.push({ character, line: lineIndex + 1 });
+      else if (pairs[character]) {
+        const last = stack.pop();
+        if (!last || last.character !== pairs[character]) return `Dấu ngoặc không khớp ở dòng ${lineIndex + 1}`;
+      }
+    }
+  }
+  if (quote) return 'Chuỗi ký tự chưa được đóng';
+  if (stack.length) return `Dấu ngoặc chưa đóng ở dòng ${stack[stack.length - 1].line}`;
+  if (runtimeId === 'python3' && lines.some(line => /:\s*[^#]/.test(line) && line.trim().endsWith(':') === false && /^\s+(if|for|while|def|class)\b/.test(line))) return '';
+  return '';
+}
+
+function syncSourceEditorTools() {
+  const editor = $('#bot-source-editor');
+  if (!editor) return;
+  const highlight = $('#bot-source-highlight');
+  if (highlight) {
+    highlight.innerHTML = highlightSourceCode(editor.value);
+    highlight.style.transform = `translate(${-editor.scrollLeft}px, ${-editor.scrollTop}px)`;
+  }
+  const before = editor.value.slice(0, editor.selectionStart);
+  const line = before.split('\n').length;
+  const column = before.length - before.lastIndexOf('\n');
+  const position = $('#source-cursor-position'); if (position) position.textContent = `Dòng ${line}, cột ${column}`;
+  const bytes = new TextEncoder().encode(editor.value).byteLength;
+  const byteCount = $('#source-byte-count'); if (byteCount) { byteCount.textContent = `${Math.ceil(bytes / 1024 * 10) / 10} / 64 KiB`; byteCount.classList.toggle('is-invalid', bytes > 64 * 1024); }
+  const syntax = $('#source-syntax-status');
+  if (syntax) { const message = sourceSyntaxCheck(editor.value, $('#bot-source-runtime')?.value); syntax.textContent = message || 'Cú pháp cơ bản hợp lệ'; syntax.title = message || ''; syntax.classList.toggle('is-invalid', Boolean(message)); syntax.classList.toggle('is-valid', !message); }
+}
+
+function sourceIndentOnEnter(editor) {
+  const start = editor.selectionStart;
+  const lineStart = editor.value.lastIndexOf('\n', start - 1) + 1;
+  const currentLine = editor.value.slice(lineStart, start);
+  const indent = currentLine.match(/^\s*/)?.[0] || '';
+  const extra = /(?:\{|:\s*)$/.test(currentLine.trim()) ? '  ' : '';
+  const next = editor.value[start] === '}' || editor.value[start] === ']' || editor.value[start] === ')' ? indent.slice(0, -2) : indent;
+  editor.setRangeText(`\n${next}${extra}`, start, editor.selectionEnd, 'end');
+}
+
+function sourceInsertPair(editor, open, close) {
+  const start = editor.selectionStart;
+  const end = editor.selectionEnd;
+  editor.setRangeText(open + editor.value.slice(start, end) + close, start, end, 'end');
+  editor.selectionStart = start + 1;
+  editor.selectionEnd = end + 1;
+}
+
+function formatSourceCode() {
+  const editor = $('#bot-source-editor'); if (!editor || editor.readOnly) return;
+  const runtimeId = $('#bot-source-runtime')?.value;
+  const lines = editor.value.split('\n');
+  let level = 0;
+  const formatted = lines.map(line => {
+    const trimmed = line.trim();
+    if (!trimmed) return '';
+    if (runtimeId === 'cpp') {
+      if (trimmed.startsWith('}')) level = Math.max(0, level - 1);
+      const output = `${'  '.repeat(level)}${trimmed}`;
+      if (trimmed.endsWith('{')) level += 1;
+      return output;
+    }
+    return `${line.match(/^\s*/)?.[0] || ''}${trimmed}`;
+  });
+  editor.value = formatted.join('\n');
+  updateEditorMetrics(); setSourceDirty(true);
 }
 
 function setWorkspaceStatus(text) {
@@ -1285,7 +1520,8 @@ function setSourceDirty(dirty) {
   if (marker) marker.hidden = !dirty;
   if (saveButton) {
     const nameChanged = ($('#bot-workspace-name')?.value.trim() || '') !== state.botWorkspaceInitialName;
-    saveButton.disabled = state.botWorkspaceMode === 'create' ? !dirty : !(dirty || nameChanged);
+    const hasSource = Boolean($('#bot-source-editor')?.value.trim());
+    saveButton.disabled = state.botWorkspaceMode === 'create' ? !hasSource : !(dirty || nameChanged);
   }
   updatePracticeButton();
   syncWorkspaceStatus();
@@ -1307,34 +1543,82 @@ function updatePracticeButton() {
 function renderRevisionList() {
   const list = $('#bot-revision-list');
   clear(list);
-  $('#bot-revision-count').textContent = `${state.sourceRevisions.length} phiên bản`;
+  $('#bot-revision-count').textContent = state.sourceRevisions.length ? `${state.sourceRevisions.length} phiên bản` : '0';
   if (!state.sourceRevisions.length) {
-    list.appendChild(create('p', { className: 'dialog-copy', text: 'Chưa có phiên bản mã nguồn.' }));
+    const empty = create('div', { className: 'bot-revision-empty' });
+    const emptyIcon = icon('icon-git-commit-horizontal');
+    emptyIcon.classList.add('bot-revision-empty-icon');
+    empty.append(emptyIcon, create('strong', { text: 'Chưa có phiên bản' }), create('span', { text: 'Tạo Bot để bắt đầu lưu các phiên bản mã nguồn.' }));
+    list.appendChild(empty);
     return;
   }
   state.sourceRevisions.forEach(revision => {
     const item = create('article', { className: `bot-revision-item${revision.selected ? ' selected' : ''}` });
+    item.setAttribute('role', 'button');
+    item.setAttribute('tabindex', '0');
+    const activateRevision = () => revision.selected ? loadRevisionSource(revision, 'draft') : selectRevision(revision);
+    const selectFromCard = event => {
+      if (event.target.closest('button, details, a, input, select, textarea')) return;
+      void activateRevision();
+    };
+    item.addEventListener('click', selectFromCard);
+    item.addEventListener('keydown', event => {
+      if ((event.key === 'Enter' || event.key === ' ') && !event.target.closest('button, details, a, input, select, textarea')) {
+        event.preventDefault();
+        void activateRevision();
+      }
+    });
     const date = new Date(revision.createdAt);
     const meta = create('div', { className: 'bot-revision-meta' });
-    const runtimeLabel = revision.runtimeId === 'cpp' ? 'C++17' : revision.runtimeId === 'python3' ? 'Python 3' : 'Legacy Node.js';
+    const runtimeLabel = revision.runtimeId === 'cpp' ? 'C++17' : revision.runtimeId === 'python3' ? 'Python 3' : 'Node.js phiên bản cũ';
     meta.append(create('strong', { text: `${runtimeLabel} · ${revision.label || `Phiên bản ${revision.revisionId.slice(0, 8)}`}` }), create('span', { text: Number.isNaN(date.getTime()) ? '' : date.toLocaleString('vi-VN') }));
     item.appendChild(meta);
     const technical = create('details', { className: 'bot-revision-technical' });
     technical.appendChild(create('summary', { text: 'Chi tiết kỹ thuật' }));
     if (revision.sourceDigest) technical.appendChild(create('div', { className: 'bot-revision-digest', text: `Mã nguồn · ${String(revision.sourceDigest).slice(0, 12)}…` }));
-    if (revision.executionMode) technical.appendChild(create('div', { className: 'bot-revision-digest', text: `Chế độ: ${revision.executionMode === 'strategy' ? 'Strategy SDK' : 'Raw'}` }));
+    if (revision.executionMode) technical.appendChild(create('div', { className: 'bot-revision-digest', text: `Chế độ: ${revision.executionMode === 'strategy' ? 'Strategy SDK' : 'Mã nguồn trực tiếp'}` }));
     if (revision.sdkVersion) technical.appendChild(create('div', { className: 'bot-revision-digest', text: `SDK ${revision.sdkVersion}${revision.sdkDigest ? ` · ${revision.sdkDigest}` : ''}` }));
     item.appendChild(technical);
     const actions = create('div', { className: 'bot-revision-actions' });
-    actions.appendChild(actionButton('Xem phiên bản', () => void loadRevisionSource(revision, 'view'), `view-revision:${revision.revisionId}`, 'secondary-btn bot-action'));
-    if (['cpp', 'python3'].includes(revision.runtimeId)) actions.appendChild(actionButton('Chạy thử', () => openPracticeRunner(revision), `practice-revision:${revision.revisionId}`, 'secondary-btn bot-action'));
     if (['cpp', 'python3'].includes(revision.runtimeId)) actions.appendChild(actionButton('Tạo bản nháp', () => void loadRevisionSource(revision, 'draft'), `draft-revision:${revision.revisionId}`, 'secondary-btn bot-action'));
-    if (!revision.selected) actions.appendChild(actionButton('Chọn phiên bản', () => void selectRevision(revision), `select-revision:${revision.revisionId}`, 'secondary-btn bot-action'));
-    else actions.appendChild(create('span', { className: 'source-runtime', text: 'Đang chọn' }));
+    actions.appendChild(actionButton('Xóa', () => openDeleteRevisionDialog(revision), `delete-revision:${revision.revisionId}`, 'secondary-btn bot-action bot-delete'));
     item.appendChild(actions);
     list.appendChild(item);
   });
   updatePracticeButton();
+}
+
+function openDeleteRevisionDialog(revision) {
+  state.deletingRevision = revision;
+  state.revisionDeleteDialogRevision += 1;
+  $('#delete-revision-name').textContent = revision.label || revision.revisionId.slice(0, 8);
+  $('#delete-revision-error').textContent = '';
+  $('#delete-revision-error').hidden = true;
+  openModal('delete-revision-modal');
+}
+
+async function deleteRevision() {
+  const revision = state.deletingRevision;
+  const bot = state.sourceWorkspaceBot;
+  if (!bot || !revision) return;
+  const dialogRevision = state.revisionDeleteDialogRevision;
+  let failure = null;
+  try {
+    await runPending(`confirm-delete-revision:${revision.revisionId}`, $('#confirm-delete-revision'), async () => {
+      try { await api(`/bots/${bot.id}/revisions/${revision.revisionId}`, { method: 'DELETE' }); }
+      catch (error) { failure = error; throw error; }
+    });
+    if (failure) throw failure;
+    if (state.revisionDeleteDialogRevision !== dialogRevision) return;
+    closeModal('delete-revision-modal');
+    await loadBotRevisions(bot);
+    showToast('Đã xóa phiên bản.', 'success');
+  } catch (error) {
+    if (state.revisionDeleteDialogRevision === dialogRevision) {
+      $('#delete-revision-error').textContent = localizeErrorMessage(error.message || 'Không thể xóa phiên bản.');
+      $('#delete-revision-error').hidden = false;
+    }
+  }
 }
 
 async function loadRevisionSource(revision, mode = 'view') {
@@ -1353,7 +1637,9 @@ async function loadRevisionSource(revision, mode = 'view') {
     state.botWorkspaceDraftBase = mode === 'draft' ? revision.revisionId : null;
     $('#bot-source-editor').readOnly = state.botWorkspaceReadOnly;
     setWorkspaceStatus(state.botWorkspaceReadOnly ? 'Chỉ đọc · Phiên bản bất biến' : 'Bản nháp từ phiên bản đã lưu');
-    setSourceDirty(mode === 'draft');
+    // Opening a revision as an editable draft does not itself change the
+    // source. Mark it dirty only after the editor emits an input event.
+    setSourceDirty(false);
   } catch (error) { setSourceError(error.message || 'Không thể đọc phiên bản mã nguồn.'); }
 }
 
@@ -1408,8 +1694,7 @@ async function openBotWorkspace(bot = null) {
   $('#bot-workspace-name').value = bot?.name || '';
   state.botWorkspaceInitialName = bot?.name || '';
   $('#bot-source-title').textContent = 'Không gian mã nguồn';
-  $('#bot-workspace-breadcrumb-current').textContent = bot?.name || 'Tạo Bot mới';
-  $('#bot-source-description').textContent = 'Viết và quản lý mã nguồn Bot';
+  $('#bot-source-description').textContent = `${bot?.name || 'Bot của tôi'} / ${bot ? 'Chỉnh sửa Bot' : 'Tạo Bot mới'}`;
   $('#save-bot-source').textContent = bot ? 'Lưu phiên bản' : 'Tạo Bot';
   $('#bot-source-runtime').value = 'cpp';
   state.sourceRuntime = 'cpp';
@@ -1419,14 +1704,15 @@ async function openBotWorkspace(bot = null) {
   updateEditorMetrics();
   $('#bot-source-editor').readOnly = false;
   setWorkspaceStatus(bot ? 'Đang chuẩn bị bản nháp' : 'Bản nháp mới');
-  setSourceDirty(!bot);
+  // A new workspace starts with a built-in template. Loading that template is
+  // not a user change, so leaving immediately must not show an unsaved warning.
+  setSourceDirty(false);
   if (pendingInitial) {
     $('#bot-workspace-name').value = pendingInitial.bot.name;
     $('#bot-source-runtime').value = pendingInitial.runtimeId;
     $('#bot-source-editor').value = pendingInitial.source;
     updateEditorMetrics();
-    $('#bot-workspace-breadcrumb-current').textContent = 'Tạo Bot mới';
-    $('#bot-source-description').textContent = 'Bot đã được tạo nhưng phiên bản đầu tiên chưa lưu. Kiểm tra lỗi rồi thử lại.';
+    $('#bot-source-description').textContent = `${pendingInitial.bot.name} / Tạo Bot mới`;
     $('#save-bot-source').textContent = 'Thử lưu mã nguồn';
     setSourceDirty(true);
   }
@@ -1477,6 +1763,7 @@ async function selectRevision(revision) {
     await api(`/bots/${bot.id}/revisions/${revision.revisionId}/select`, { method: 'POST', body: JSON.stringify({}) });
     bot.currentRevisionId = revision.revisionId;
     await loadBotRevisions(bot);
+    await loadRevisionSource(revision, 'draft');
     showToast('Đã chọn phiên bản mã nguồn.', 'success');
   } catch (error) { setSourceError(error.message || 'Không thể chọn phiên bản mã nguồn.'); }
 }
@@ -1517,7 +1804,7 @@ function renderPracticeError(error) {
   const technicalParts = [
     diagnostic.stage && `Giai đoạn: ${diagnostic.stage}`,
     diagnostic.runtimeId && `Ngôn ngữ: ${diagnostic.runtimeId === 'cpp' ? 'C++17' : diagnostic.runtimeId === 'python3' ? 'Python 3' : diagnostic.runtimeId}`,
-    diagnostic.executionMode && `Chế độ: ${diagnostic.executionMode === 'strategy' ? 'Strategy SDK' : 'Raw'}`,
+    diagnostic.executionMode && `Chế độ: ${diagnostic.executionMode === 'strategy' ? 'Strategy SDK' : 'Mã nguồn trực tiếp'}`,
     diagnostic.exitCode !== undefined && diagnostic.exitCode !== null && `Mã kết thúc: ${diagnostic.exitCode}`,
   ].filter(Boolean);
   if (details && technical) {
@@ -1617,7 +1904,7 @@ function renderPracticeResult(result) {
     ['Từ', result.move?.from || '—'], ['Đến', result.move?.to || '—'],
     ['Kết quả ăn quân', capturedPiece ? `${PIECE_LABELS[capturedPiece.type] || capturedPiece.type} · ${capturedPiece.id}` : 'Không ăn quân'],
     ['Ngôn ngữ', result.runtimeId === 'cpp' ? 'C++17' : 'Python 3'],
-    ['Revision', revision?.revisionId ? revision.revisionId.slice(0, 12) : 'Đã chọn từ Workspace'],
+    ['Phiên bản', revision?.revisionId ? revision.revisionId.slice(0, 12) : 'Đã chọn từ không gian mã nguồn'],
     ['Tình huống', scenario.label],
   ];
   if (result.executionMode === 'strategy' && result.sdkVersion) entries.push(['SDK chiến thuật', result.sdkVersion]);
@@ -1632,11 +1919,11 @@ function renderPracticeMatchResult(result) {
   state.practiceReplayMoveIndex = -1;
   const details = $('#practice-result-details'); clear(details);
   const winnerLabel = result.winner === 'A' ? 'Bot của bạn' : result.winner === 'B' ? result.opponentName || 'Bot hệ thống' : 'Hòa';
-  const reasonLabel = result.terminationReason === 'goal_reached' ? 'Đạt ô đích' : result.terminationReason === 'type_elimination' ? 'Loại toàn bộ hệ quân' : result.terminationReason === 'max_turns' ? 'Đạt giới hạn lượt' : 'Không còn nước đi';
+  const reasonLabel = result.terminationReason === 'goal_reached' ? 'Đạt ô đích' : result.terminationReason === 'all_pieces_captured' ? 'Ăn hết quân đối thủ' : result.terminationReason === 'max_turns' ? 'Đạt giới hạn lượt' : 'Không còn nước đi';
   $('#practice-result-title').textContent = result.winner === 'draw' ? 'Trận thử hòa' : `${winnerLabel} thắng`;
   $('#practice-result-move').textContent = `${result.moves?.length || 0} lượt · ${reasonLabel}`;
   const revision = state.practiceRevision;
-  [['Kết quả', winnerLabel], ['Đối thủ', result.opponentName || 'Bot hệ thống'], ['Số lượt', String(result.moves?.length || 0)], ['Lý do kết thúc', reasonLabel], ['Ngôn ngữ', result.runtimeId === 'cpp' ? 'C++17' : 'Python 3'], ['Revision', revision?.revisionId ? revision.revisionId.slice(0, 12) : '—']]
+  [['Kết quả', winnerLabel], ['Đối thủ', result.opponentName || 'Bot hệ thống'], ['Số lượt', String(result.moves?.length || 0)], ['Lý do kết thúc', reasonLabel], ['Ngôn ngữ', result.runtimeId === 'cpp' ? 'C++17' : 'Python 3'], ['Phiên bản', revision?.revisionId ? revision.revisionId.slice(0, 12) : '—']]
     .forEach(([label, value]) => details.append(create('dt', { text: label }), create('dd', { text: value })));
   $('#practice-result').hidden = false;
   $('#practice-output').hidden = false;
@@ -1772,6 +2059,7 @@ function openPracticeReplayPage(result, revision) {
 }
 
 function openPracticeRunner(revision) {
+  const autoRun = arguments[1] === true;
   state.practiceRevision = revision;
   state.practiceRequestToken += 1;
   const scenarioSelect = $('#practice-scenario');
@@ -1779,9 +2067,13 @@ function openPracticeRunner(revision) {
   if (typeof updatePracticeScenarioMeta === 'function') updatePracticeScenarioMeta('initial');
   $('#practice-title').textContent = 'Trận đấu thử';
   const runtimeLabel = revision.runtimeId === 'cpp' ? 'C++17' : revision.runtimeId === 'python3' ? 'Python 3' : revision.runtimeId;
-  const modeLabel = revision.executionMode === 'strategy' ? 'Strategy SDK' : revision.executionMode === 'raw' ? 'Raw' : '';
+  const modeLabel = revision.executionMode === 'strategy' ? 'Strategy SDK' : revision.executionMode === 'raw' ? 'Mã nguồn trực tiếp' : '';
   const revisionMeta = $('#practice-revision-meta');
-  if (revisionMeta) revisionMeta.textContent = `${state.sourceWorkspaceBot?.name || 'Bot của bạn'} · ${runtimeLabel}${modeLabel ? ` · ${modeLabel}` : ''} · ${revision.revisionId.startsWith('draft-') ? 'Bản nháp hiện tại' : `Revision ${revision.revisionId.slice(0, 12)}`}`;
+  if (revisionMeta) {
+    const revisionLabel = revision.label || revision.name || revision.title || (revision.revisionId.startsWith('draft-') ? 'Bản nháp hiện tại' : `Phiên bản ${revision.revisionId.slice(0, 12)}`);
+    const revisionId = revision.revisionId.startsWith('draft-') ? '' : ` · Phiên bản ${revision.revisionId.slice(0, 12)}`;
+    revisionMeta.textContent = `Đang chạy: ${revisionLabel} · ${runtimeLabel}${modeLabel ? ` · ${modeLabel}` : ''} · ${state.sourceWorkspaceBot?.name || 'Bot của bạn'}${revisionId}`;
+  }
   $('#practice-status').textContent = 'Sẵn sàng chạy thử.';
   if (typeof clearPracticeResult === 'function') clearPracticeResult();
   else {
@@ -1792,7 +2084,8 @@ function openPracticeRunner(revision) {
   }
   const board = $('#practice-board'); if (board) clear(board);
   openModal('practice-modal');
-  $('#practice-run').focus();
+  if (autoRun) setTimeout(() => void testBotMatch(), 0);
+  else $('#practice-run').focus();
 }
 
 function openCurrentPracticeRunner() {
@@ -1811,6 +2104,9 @@ function openCurrentPracticeRunner() {
 async function testBotMatch() {
   const revision = state.practiceRevision;
   if (!revision) return;
+  state.practiceAbortController?.abort();
+  const controller = new AbortController();
+  state.practiceAbortController = controller;
   const token = ++state.practiceRequestToken;
   const runButton = $('#practice-run');
   clearPracticeResult();
@@ -1823,6 +2119,7 @@ async function testBotMatch() {
     const result = await request(isDraft ? '/bots/draft/test-match' : `/bots/${revision.botId}/revisions/${revision.revisionId}/test-match`, {
       method: 'POST',
       body: JSON.stringify(isDraft ? state.practiceDraft : {}),
+      signal: controller.signal,
     });
     if (token !== state.practiceRequestToken || state.practiceRevision?.revisionId !== revision.revisionId) return;
     openPracticeReplayPage(result, revision);
@@ -1920,6 +2217,8 @@ function botSourceInput() {
   if (!['cpp', 'python3'].includes(runtimeId)) return { error: 'Hãy chọn C++17 hoặc Python 3.', field: 'bot-source-runtime' };
   if (!source.trim()) return { error: 'Mã nguồn không được để trống.', field: 'bot-source-editor' };
   if (new TextEncoder().encode(source).byteLength > 64 * 1024) return { error: 'Mã nguồn không được vượt quá 64 KiB.', field: 'bot-source-editor' };
+  const syntaxError = sourceSyntaxCheck(source, runtimeId);
+  if (syntaxError) return { error: syntaxError, field: 'bot-source-editor' };
   return { runtimeId, source };
 }
 
@@ -2051,21 +2350,31 @@ async function loadTournaments() {
     : isCompetitor ? 'Theo dõi các giải đấu bạn đã gửi yêu cầu hoặc đang tham gia.' : 'Tạo và quản lý các giải đấu giữa những Bot đã đăng ký.';
   $('#tournaments-toolbar').hidden = true;
   $('#open-tournament-modal').hidden = true;
+  renderLoadingSkeleton(list, 'tournament-skeleton', 4);
   renderMessage(list, 'Đang tải danh sách giải đấu…');
   try {
-    const path = state.user?.role === 'competitor'
-      ? (state.tournamentScope === 'mine' ? '/my/tournaments' : '/tournaments/discoverable')
-      : '/tournaments';
-    const response = await request(path);
+    let response;
+    // Only competitors use the public discovery projection. Organizers must
+    // load their owner-scoped list; the discovery projection intentionally
+    // omits ownership fields and must never render management actions.
+    if (state.user?.role === 'competitor' && state.tournamentScope === 'discoverable') {
+      response = await request('/tournaments/discoverable');
+    } else {
+      const path = state.user?.role === 'competitor' ? '/my/tournaments' : '/tournaments';
+      response = await request(path);
+    }
     const scopedResponse = state.user?.role === 'competitor' && state.tournamentScope === 'discoverable'
-      ? response.filter(tournament => tournament.status === 'registration_open')
+      // The discovery endpoint also supports finding a running tournament
+      // for live spectating, but terminal/draft tournaments do not belong in
+      // the "open tournaments" view.
+      ? response.filter(tournament => tournament.status === 'registration_open' || tournament.status === 'running')
       : response;
     const tournaments = state.user?.role === 'competitor' && state.tournamentScope === 'mine'
       ? response.map(item => ({
         tournamentId: item.tournamentId,
         name: item.name,
         status: item.status,
-        participantCount: item.participantId ? 1 : 0,
+        participantCount: item.participantCount ?? 0,
         myRequestStatus: item.request?.status || null,
         resultsPublishedAt: item.resultsPublishedAt || null,
         registrationOpen: Boolean(item.registrationOpen),
@@ -2080,6 +2389,7 @@ async function loadTournaments() {
 
 function renderTournamentList() {
   const list = $('#tournaments-list');
+  clearLoadingSkeleton(list);
   const toolbar = $('#tournaments-toolbar');
   const createButton = $('#open-tournament-modal');
   if (state.tournamentListError) { toolbar.hidden = true; createButton.hidden = false; $('#tournaments-count').textContent = 'Không thể tải giải đấu'; return renderMessage(list, state.tournamentListError, loadTournaments); }
@@ -2155,9 +2465,23 @@ function renderDiscoverableTournamentCards(list, tournaments) {
     card.appendChild(participation);
     const footer = create('div', { className: 'tournament-card-footer' });
     const published = tournament.status === 'completed' && Boolean(tournament.resultsPublishedAt);
+    if (tournament.spectatorAccess) {
+      participation.textContent = tournament.status === 'running' ? 'Bạn có quyền xem trực tiếp trận đấu.' : 'Bạn có quyền xem giải đấu này.';
+      footer.appendChild(tournamentViewButton(tournament.status === 'running' ? 'Xem trực tiếp' : 'Xem giải đấu', () => viewTournament(tournament.tournamentId), `view:${tournament.tournamentId}`));
+      card.appendChild(footer);
+      list.appendChild(card);
+      return;
+    }
     if (published) {
       participation.textContent = 'Kết quả đã được công bố.';
       footer.appendChild(tournamentViewButton('Xem k\u1ebft qu\u1ea3', () => viewTournament(tournament.tournamentId), `view:${tournament.tournamentId}`));
+      card.appendChild(footer);
+      list.appendChild(card);
+      return;
+    }
+    if (tournament.status !== 'registration_open') {
+      participation.textContent = tournament.status === 'running' ? 'Đang diễn ra — có thể xem trực tiếp.' : 'Xem thông tin giải đấu.';
+      footer.appendChild(tournamentViewButton('Xem giải đấu', () => viewTournament(tournament.tournamentId), `view:${tournament.tournamentId}`));
       card.appendChild(footer);
       list.appendChild(card);
       return;
@@ -2232,7 +2556,6 @@ async function submitNewTournament() {
   const viewRevision = state.viewRevision;
   const dialogRevision = state.tournamentDialogRevision;
   const name = nameInput.value.trim();
-  const visibility = $('#new-tourney-visibility').value;
   const error = $('#tournament-form-error'); error.textContent = ''; error.hidden = true;
   nameInput.setAttribute('aria-invalid', 'false');
   if (!name || name.length > 100) {
@@ -2253,12 +2576,12 @@ async function submitNewTournament() {
       let result;
       const editingTournament = state.editingTournament;
       try { result = editingTournament
-        ? await api(`/tournaments/${editingTournament.tournamentId}`, { method: 'PATCH', body: JSON.stringify({ name, visibility }) })
-        : await api('/tournaments', { method: 'POST', body: JSON.stringify({ name, visibility }) }); }
+        ? await api(`/tournaments/${editingTournament.tournamentId}`, { method: 'PATCH', body: JSON.stringify({ name }) })
+        : await api('/tournaments', { method: 'POST', body: JSON.stringify({ name }) }); }
       catch (requestError) { if (state.user && state.authRevision === authRevision && state.tournamentDialogRevision === dialogRevision) { error.textContent = requestError.message || 'Unable to create tournament.'; error.hidden = false; } throw requestError; }
       if (!state.user || state.authRevision !== authRevision || state.viewRevision !== viewRevision) return;
       if (state.tournamentDialogRevision !== dialogRevision) return;
-      closeModal('add-tourney-modal'); nameInput.value = ''; $('#new-tourney-visibility').value = 'private';
+      closeModal('add-tourney-modal'); nameInput.value = '';
       state.editingTournament = null;
       showToast(editingTournament ? 'Đã cập nhật giải đấu.' : 'Đã tạo giải đấu.', 'success');
       if (editingTournament) await loadTournaments(); else await viewTournament(result.tournamentId);
@@ -2290,7 +2613,10 @@ function appendTournamentAction(container, tournamentId, authRevision, viewRevis
 }
 
 function getTournamentExecutionSummary(tournament) {
-  const pairings = (tournament.rounds || []).flatMap(round => round.pairings || []);
+  // Bye pairings are automatic advances, not executable matches. Exclude
+  // them from execution progress so the denominator reflects real games.
+  const pairings = (tournament.rounds || []).flatMap(round => round.pairings || [])
+    .filter(pairing => pairing.participantB !== null);
   const completedStatuses = new Set(['completed', 'finished', 'completed_match']);
   const runningStatuses = new Set(['running', 'in_progress', 'active']);
   const failedStatuses = new Set(['failed', 'error']);
@@ -2414,8 +2740,9 @@ function renderTournamentLifecycle(tournament) {
     item.setAttribute('aria-current', index === currentIndex ? 'step' : 'false');
     return item;
   }));
-  const current = list.querySelector('.is-current');
-  if (current?.scrollIntoView) requestAnimationFrame(() => current.scrollIntoView({ inline: 'center', block: 'nearest' }));
+  // The detail page refreshes while a tournament is running. Do not call
+  // scrollIntoView here: rebuilding the lifecycle must never move the user's
+  // document position while they are reading the schedule below.
 }
 
 async function refreshTournamentDetail() {
@@ -2430,7 +2757,10 @@ async function refreshTournamentDetail() {
   try {
     const tournament = await request(`/tournaments/${tournamentId}`);
     if (!isCurrentView('tournament-detail', authRevision, viewRevision, tournamentId)) return;
+    state.viewerParticipantIds = Array.isArray(tournament.viewerParticipantIds) ? tournament.viewerParticipantIds : [];
+    state.viewerParticipantId = state.viewerParticipantIds[0] ?? null;
     state.detailStatus = tournament.status;
+    state.spectatorMode = tournament.spectatorAccess === true;
     state.tournamentRegistrationContext = { name: tournament.name, status: tournament.status };
     $('#td-name').textContent = tournament.name;
     const breadcrumbName = $('#td-breadcrumb-name'); if (breadcrumbName) breadcrumbName.textContent = tournament.name;
@@ -2450,42 +2780,65 @@ async function refreshTournamentDetail() {
       bot: participant.bot || { botId: '', player: 'A', command: '', args: [] },
     }));
     participantList.forEach(participant => {
-      const item = create('li', { attrs: { 'data-bot-id': participant.bot.botId } });
+      const isViewerParticipant = state.viewerParticipantIds.includes(participant.participantId);
+      const item = create('li', { className: isViewerParticipant ? 'is-viewer-participant' : '', attrs: { 'data-bot-id': participant.bot.botId } });
       const copy = create('div', { className: 'participant-copy' });
       const name = create('strong', { text: participant.name });
       const botId = participant.bot.botId ? `Bot ${participant.bot.botId.slice(0, 8)}...` : '';
       const execution = participant.bot.execution;
       const runtime = execution?.kind === 'source-revision' ? (execution.runtimeId === 'cpp' ? 'C++17' : execution.runtimeId === 'python3' ? 'Python 3' : '') : '';
-      const revision = execution?.kind === 'source-revision' && execution.revisionId ? `Revision ${execution.revisionId.slice(0, 8)}` : '';
+      const revision = execution?.kind === 'source-revision' && execution.revisionId ? `Phiên bản ${execution.revisionId.slice(0, 8)}` : '';
       const metadata = [participant.bot.botId ? `ID ${shortId(participant.bot.botId)}` : '', runtime, revision].filter(Boolean).join(' · ');
       const meta = create('span', { className: 'participant-meta', text: metadata });
       meta.textContent = [runtime, revision, botId].filter(Boolean).join(' \u00b7 ');
       const botLine = create('div', { className: 'participant-bot-line' });
       botLine.appendChild(meta);
+      if (isViewerParticipant) {
+        const marker = create('span', { className: 'viewer-marker', text: 'Bạn' });
+        item.appendChild(marker);
+      }
       copy.append(name, botLine); item.appendChild(copy); participants.appendChild(item);
     });
 
     const actions = $('#td-actions'); clear(actions);
+    const refreshButton = actionButton('Cập nhật', async () => {
+      await refreshTournamentDetail();
+      showToast('Đã cập nhật dữ liệu giải đấu.', 'success');
+    }, `refresh-tournament-detail:${tournamentId}`, 'secondary-btn tournament-action tournament-refresh-action');
+    const refreshIcon = icon('td-icon-refresh-cw');
+    refreshIcon.classList.add('td-icon', 'td-icon--sm');
+    refreshButton.prepend(refreshIcon);
+    actions.appendChild(refreshButton);
     const register = $('#btn-register-bot'); register.hidden = state.user?.role !== 'competitor' || tournament.status !== 'registration_open';
-    if (tournament.status === 'draft') appendTournamentAction(actions, tournamentId, authRevision, viewRevision, actionLabel('open_registration'), 'open_registration');
-    if (tournament.status === 'registration_open') {
+    const isOrganizer = state.user?.role === 'organizer';
+    if (isOrganizer && tournament.status === 'draft') appendTournamentAction(actions, tournamentId, authRevision, viewRevision, actionLabel('open_registration'), 'open_registration');
+    if (isOrganizer && tournament.status === 'registration_open') {
       appendTournamentAction(actions, tournamentId, authRevision, viewRevision, actionLabel('close_registration'), 'close_registration', true, tournament.name);
     }
-    if (tournament.status === 'registration_closed') {
+    if (isOrganizer && tournament.status === 'registration_closed') {
       if (tournament.rounds.length) appendTournamentAction(actions, tournamentId, authRevision, viewRevision, actionLabel('start'), 'start');
       else appendTournamentAction(actions, tournamentId, authRevision, viewRevision, actionLabel('generate_schedule'), 'generate_schedule');
     }
-    if (tournament.status === 'running') appendTournamentAction(actions, tournamentId, authRevision, viewRevision, actionLabel('run_all'), 'run_all', true);
+    if (isOrganizer && tournament.status === 'running') {
+      const execution = getTournamentExecutionSummary(tournament);
+      const runLabel = execution.failed
+        ? 'Chạy lại giải đấu'
+        : execution.completed > 0 || execution.running > 0
+          ? 'Tiếp tục giải đấu'
+          : actionLabel('run_all');
+      appendTournamentAction(actions, tournamentId, authRevision, viewRevision, runLabel, 'run_all', true);
+    }
     if (state.user?.role === 'organizer' && tournament.status === 'completed' && !tournament.resultsPublishedAt) {
       appendTournamentAction(actions, tournamentId, authRevision, viewRevision, 'Công bố kết quả', 'publish', true, tournament.name);
     }
-    if (tournament.status === 'draft' || tournament.status === 'registration_open' || tournament.status === 'running') appendTournamentAction(actions, tournamentId, authRevision, viewRevision, actionLabel('cancel'), 'cancel', true, tournament.name);
+    if (isOrganizer && (tournament.status === 'draft' || tournament.status === 'registration_open' || tournament.status === 'running')) appendTournamentAction(actions, tournamentId, authRevision, viewRevision, actionLabel('cancel'), 'cancel', true, tournament.name);
 
     await renderParticipationRequestsV2(tournamentId, tournament.status);
 
     const executionSummary = renderExecutionStatus(tournament);
-    renderStandings(tournament.standings, executionSummary);
-    renderSchedule(tournament);
+    renderStandings(tournament.standings, executionSummary, state.viewerParticipantIds);
+    renderTournamentPodium(tournament);
+    renderSchedule(tournament, state.viewerParticipantIds);
     if (tournament.status === 'completed' || tournament.status === 'running') {
       request(`/tournaments/${tournamentId}/stats`).then(stats => {
         if (isCurrentView('tournament-detail', authRevision, viewRevision, tournamentId)) $('#td-stats').textContent = `${stats.completedMatches}/${stats.totalMatches} trận hoàn thành`;
@@ -2498,7 +2851,7 @@ async function refreshTournamentDetail() {
       $('#td-name').textContent = 'Không thể tải giải đấu';
       state.detailStatus = null;
       $('#td-status').className = 'status-badge status-unknown'; $('#td-status').textContent = 'Không khả dụng';
-      $('#td-pcount').textContent = '0'; clear($('#td-participants')); clear($('#td-actions')); clear($('#td-standings tbody')); $('#td-standings').hidden = true; $('#td-standings-empty').hidden = false; $('#td-standings-empty').textContent = 'Không thể tải bảng xếp hạng.'; $('#td-next-step').replaceChildren(); $('#td-stats').textContent = '';
+      $('#td-pcount').textContent = '0'; clear($('#td-participants')); clear($('#td-actions')); clear($('#td-standings tbody')); $('#td-standings').hidden = true; $('#td-standings-empty').hidden = false; $('#td-standings-empty').textContent = 'Không thể tải bảng xếp hạng.'; $('#td-next-step').replaceChildren(); $('#td-stats').textContent = ''; renderTournamentPodium(null);
       $('#btn-register-bot').hidden = true;
       renderMessage($('#td-schedule'), error.message || 'Không thể tải giải đấu.', refreshTournamentDetail);
     }
@@ -2517,22 +2870,23 @@ async function renderParticipationRequestsV2(tournamentId, status) {
   clear(list);
   try {
     const requests = await request(`/tournaments/${tournamentId}/requests`);
+    const pendingRequests = requests.filter(item => item.status === 'pending');
     state.detailRequestBotNames = new Map(requests.filter(item => item.botName).map(item => [item.botId, item.botName]));
     document.querySelectorAll('#td-participants [data-bot-id]').forEach(item => {
       const botId = item.dataset.botId;
       const botLabel = item.querySelector('.participant-bot-id');
       if (botLabel && state.detailRequestBotNames.has(botId)) botLabel.textContent = state.detailRequestBotNames.get(botId);
     });
-    const pendingCount = requests.filter(item => item.status === 'pending').length;
+    const pendingCount = pendingRequests.length;
     const count = $('#td-requests-count'); if (count) { count.textContent = pendingCount ? `${pendingCount} chờ duyệt` : ''; count.hidden = pendingCount === 0; }
-    if (!requests.length) {
+    if (!pendingRequests.length) {
       const empty = create('div', { className: 'requests-empty' });
       empty.append(icon('td-icon-clipboard-list'), create('strong', { text: 'Không có yêu cầu chờ duyệt' }), create('span', { text: 'Các yêu cầu đăng ký Bot mới sẽ xuất hiện tại đây.' }));
       empty.firstChild.classList.add('td-icon', 'td-icon--lg');
       list.appendChild(empty);
       return;
     }
-    requests.forEach(participation => {
+    pendingRequests.forEach(participation => {
       const row = create('article', { className: 'participant-request-row' });
       const identity = create('div', { className: 'request-identity' });
       const botIcon = create('span', { className: 'request-bot-icon' }); botIcon.appendChild(icon('td-icon-bot')); botIcon.firstChild.classList.add('td-icon', 'td-icon--md');
@@ -2645,7 +2999,7 @@ async function renderParticipationRequests(tournamentId, status) {
   }
 }
 
-function renderStandings(standings, executionSummary = { completed: 0 }) {
+function renderStandings(standings, executionSummary = { completed: 0 }, viewerParticipantIds = []) {
   const tbody = $('#td-standings tbody'); clear(tbody);
   const table = $('#td-standings');
   const empty = $('#td-standings-empty');
@@ -2661,12 +3015,51 @@ function renderStandings(standings, executionSummary = { completed: 0 }) {
   const hasRecordedResult = executionSummary.completed > 0 || standings.some(standing => Number(standing.matchesPlayed) > 0 || Number(standing.wins) > 0 || Number(standing.draws) > 0 || Number(standing.losses) > 0 || Number(standing.points) !== 0);
   standings.forEach((standing, index) => {
     const row = create('tr');
-    row.append(textCell(hasRecordedResult ? (standing.rank ?? index + 1) : '—'), textCell(standing.participantName), textCell(standing.matchesPlayed), textCell(standing.wins), textCell(standing.draws), textCell(standing.losses), textCell(standing.points));
+    if (viewerParticipantIds.includes(standing.participantId)) row.classList.add('is-viewer-standing');
+    const rank = hasRecordedResult ? (standing.rank ?? index + 1) : null;
+    if (rank >= 1 && rank <= 3) row.classList.add(`standing-top-${rank}`);
+    const rankCell = textCell(rank ?? '—');
+    rankCell.classList.add('standing-rank-cell');
+    if (rank >= 1 && rank <= 3) rankCell.replaceChildren(create('span', { className: 'standing-rank-badge', text: String(rank) }));
+    row.append(rankCell, textCell(standing.participantName), textCell(standing.matchesPlayed), textCell(standing.wins), textCell(standing.draws), textCell(standing.losses), textCell(standing.points));
     tbody.appendChild(row);
   });
 }
 
-function renderSchedule(tournament) {
+function renderTournamentPodium(tournament) {
+  const panel = $('#td-podium-panel');
+  const list = $('#td-podium-list');
+  if (!panel || !list) return;
+  clear(list);
+  const standings = Array.isArray(tournament?.standings) ? tournament.standings : [];
+  const isPublished = tournament?.status === 'completed' && Boolean(tournament.resultsPublishedAt);
+  const leaders = standings.slice(0, 3).map((standing, index) => ({
+    ...standing,
+    rank: Number(standing.rank) >= 1 ? Number(standing.rank) : index + 1,
+  }));
+  if (!isPublished || !leaders.length) {
+    panel.hidden = true;
+    return;
+  }
+  leaders.forEach((standing, index) => {
+    const rank = Number(standing.rank) || index + 1;
+    const place = rank === 1 ? 'Nhà vô địch' : `Hạng ${rank}`;
+    const matches = Number(standing.matchesPlayed) || 0;
+    const wins = Number(standing.wins) || 0;
+    const points = Number(standing.points) || 0;
+    const card = create('article', { className: `podium-card podium-rank-${rank}` });
+    card.append(
+      create('span', { className: 'podium-medal', text: String(rank), attrs: { 'aria-label': place } }),
+      create('span', { className: 'podium-place', text: place }),
+      create('strong', { className: 'podium-name', text: standing.participantName || 'Chưa xác định' }),
+      create('span', { className: 'podium-meta', text: `${matches} trận · ${wins} thắng · ${points} điểm` }),
+    );
+    list.appendChild(card);
+  });
+  panel.hidden = false;
+}
+
+function renderScheduleLegacy(tournament) {
   const schedule = $('#td-schedule'); clear(schedule);
   if (!tournament.rounds.length) {
     clear(schedule);
@@ -2681,7 +3074,7 @@ function renderSchedule(tournament) {
   // const failedPairings = pairings.filter(pairing => pairing.status === 'failed');
   tournament.rounds.forEach(round => {
     const pairings = round.pairings;
-    const hasMatchActions = pairings.some(pairing => Boolean(pairing.matchId));
+    const hasMatchActions = pairings.some(pairing => Boolean(pairing.matchId) || pairing.status === 'failed');
     const failedPairings = pairings.filter(pairing => pairing.status === 'failed');
     const failedMatches = failedPairings.length;
     const section = create('section', { className: 'schedule-round' });
@@ -2699,11 +3092,15 @@ function renderSchedule(tournament) {
       let winner = '-'; if (pairing.matchResult?.winner === 'A') winner = playerA; else if (pairing.matchResult?.winner === 'B') winner = playerB; else if (pairing.matchResult?.winner === 'draw') winner = 'Hòa';
       const row = create('tr'); row.append(textCell(`Trận ${pairingIndex + 1}`), textCell(playerA), textCell(playerB));
       const status = create('td'); status.appendChild(statusBadge(pairing.status)); row.appendChild(status); row.appendChild(textCell(winner));
-      if (hasMatchActions) {
+       if (pairing.matchResult?.series) winner += ` · BO3 ${pairing.matchResult.series.winsA}-${pairing.matchResult.series.winsB}`;
+       row.lastChild.textContent = winner;
+       if (hasMatchActions) {
         const action = create('td');
-        if (pairing.matchId && pairing.status === 'in_progress' && state.user?.role === 'organizer') {
+        if (pairing.matchId && pairing.status === 'in_progress' && (state.user?.role === 'organizer' || state.spectatorMode)) {
           action.appendChild(actionButton('Xem trực tiếp', () => openLiveMatch(tournament.tournamentId, pairing.matchId), `live:${pairing.matchId}`));
-        } else if (pairing.matchId) {
+        } else if (pairing.status === 'failed' && state.user?.role === 'organizer') {
+          action.appendChild(actionButton('Chạy lại trận', () => retryTournamentPairing(tournament.tournamentId, pairing.pairingId), `retry:${tournament.tournamentId}:${pairing.pairingId}`, 'primary-btn tournament-retry-action'));
+        } else if (pairing.matchId && pairing.status !== 'failed') {
           action.appendChild(actionButton('Xem lại', () => playReplay(tournament.tournamentId, pairing.matchId), `replay:${pairing.matchId}`));
         }
         row.appendChild(action);
@@ -2732,12 +3129,15 @@ function renderSchedule(tournament) {
       const playerB = create('div', { className: 'schedule-card-player' });
       playerB.append(create('small', { text: 'Người chơi B' }), create('strong', { text: playerBName }));
       players.append(playerA, create('span', { className: 'schedule-card-vs', text: 'vs', attrs: { 'aria-hidden': 'true' } }), playerB);
+      if (pairing.matchResult?.series) winnerName += ` · BO3 ${pairing.matchResult.series.winsA}-${pairing.matchResult.series.winsB}`;
       const cardFooter = create('div', { className: 'schedule-card-footer' });
       cardFooter.appendChild(create('span', { className: 'schedule-card-winner', text: `Người thắng: ${winnerName}` }));
       if (pairing.status === 'failed') cardFooter.appendChild(create('small', { className: 'schedule-card-error', text: pairing.failureReason || 'Có thể thử lại; kết quả chưa được ghi nhận.' }));
-      if (pairing.matchId && pairing.status === 'in_progress' && state.user?.role === 'organizer') {
+      if (pairing.matchId && pairing.status === 'in_progress' && (state.user?.role === 'organizer' || state.spectatorMode)) {
         cardFooter.appendChild(actionButton('Xem trực tiếp', () => openLiveMatch(tournament.tournamentId, pairing.matchId), `live:${pairing.matchId}`));
-      } else if (pairing.matchId) {
+      } else if (pairing.status === 'failed' && state.user?.role === 'organizer') {
+        cardFooter.appendChild(actionButton('Chạy lại trận', () => retryTournamentPairing(tournament.tournamentId, pairing.pairingId), `retry:${tournament.tournamentId}:${pairing.pairingId}`, 'primary-btn tournament-retry-action'));
+      } else if (pairing.matchId && pairing.status !== 'failed') {
         cardFooter.appendChild(actionButton('Xem lại', () => playReplay(tournament.tournamentId, pairing.matchId), `replay:${pairing.matchId}`));
       }
       card.append(cardHeader, players, cardFooter);
@@ -2784,7 +3184,7 @@ function confirmTournamentAction(tournamentId, authRevision, viewRevision, actio
   openModal('tournament-action-modal');
 }
 
-async function tournamentAction(tournamentId, authRevision, viewRevision, action) {
+async function tournamentAction(tournamentId, authRevision, viewRevision, action, payload = {}) {
   if (action === 'edit') {
     const tournament = await request(`/tournaments/${tournamentId}`);
     if (isCurrentView('tournament-detail', authRevision, viewRevision, tournamentId)) openEditTournamentDialog(tournament);
@@ -2794,7 +3194,7 @@ async function tournamentAction(tournamentId, authRevision, viewRevision, action
     await api(`/tournaments/${tournamentId}`, { method: 'DELETE' });
   } else {
     const endpoint = action === 'publish' ? `/tournaments/${tournamentId}/publish` : `/tournaments/${tournamentId}/action`;
-    await api(endpoint, { method: 'POST', body: action === 'publish' ? undefined : JSON.stringify({ action }) });
+    await api(endpoint, { method: 'POST', body: action === 'publish' ? undefined : JSON.stringify({ action, ...payload }) });
   }
   if (isCurrentView('tournament-detail', authRevision, viewRevision, tournamentId)) {
     showToast(action === 'delete' ? 'Đã xóa giải đấu.' : ACTION_SUCCESS_MESSAGES[action] || 'Đã cập nhật giải đấu.', 'success');
@@ -2802,6 +3202,50 @@ async function tournamentAction(tournamentId, authRevision, viewRevision, action
   } else if (action === 'delete' && isCurrentView('tournaments', authRevision, viewRevision)) {
     showToast('Đã xóa giải đấu.', 'success');
     await loadTournaments();
+  }
+}
+
+async function retryTournamentPairing(tournamentId, pairingId) {
+  const retryKey = `${tournamentId}:${pairingId}`;
+  if (state.retryingPairings.has(retryKey)) return;
+  state.retryingPairings.add(retryKey);
+  const authRevision = state.authRevision;
+  const viewRevision = state.viewRevision;
+  try {
+    await api(`/tournaments/${tournamentId}/pairings/${pairingId}/retry`, { method: 'POST' });
+  } catch {
+    state.retryingPairings.delete(retryKey);
+    return;
+  }
+  if (isCurrentView('tournament-detail', authRevision, viewRevision, tournamentId)) {
+    showToast('Đã đưa trận đấu vào hàng đợi chạy lại.', 'success');
+    await refreshTournamentDetail();
+  }
+
+  // The endpoint acknowledges queue admission first. Keep this pairing
+  // locked until the persisted status changes, so a stale failed row cannot
+  // enqueue duplicate retries while the first attempt is still running.
+  const deadline = Date.now() + 30_000;
+  let finalStatus = 'failed';
+  while (Date.now() < deadline) {
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    if (state.activeView !== 'tournament-detail' || state.tournamentId !== tournamentId) break;
+    try {
+      const detail = await request(`/tournaments/${tournamentId}`);
+      const currentPairing = detail?.rounds?.flatMap(round => round.pairings || [])
+        .find(pairing => pairing.pairingId === pairingId);
+      finalStatus = currentPairing?.status || 'failed';
+      if (finalStatus !== 'failed') {
+        await refreshTournamentDetail();
+        break;
+      }
+    } catch {
+      break;
+    }
+  }
+  state.retryingPairings.delete(retryKey);
+  if (finalStatus === 'failed' && state.activeView === 'tournament-detail' && state.tournamentId === tournamentId) {
+    await refreshTournamentDetail();
   }
 }
 
@@ -2887,8 +3331,8 @@ function updateRegistrationRevisionSummary(revisionId = $('#reg-revision-select'
   const revision = state.registrationRevisions.find(item => item.revisionId === revisionId);
   if (!revision) { target.textContent = 'Chưa chọn Bot và revision'; return; }
   const language = revision.runtimeId === 'cpp' ? 'C++17' : revision.runtimeId === 'python3' ? 'Python 3' : 'Runtime không hỗ trợ';
-  const mode = revision.executionMode === 'strategy' ? 'Strategy' : revision.executionMode === 'raw' ? 'Raw' : '';
-  target.textContent = `Revision bất biến: ${language}${mode ? ` · ${mode}` : ''} · ${revision.revisionId}`;
+  const mode = revision.executionMode === 'strategy' ? 'Chiến thuật' : revision.executionMode === 'raw' ? 'Mã nguồn trực tiếp' : '';
+  target.textContent = `Phiên bản bất biến: ${language}${mode ? ` · ${mode}` : ''} · ${revision.revisionId}`;
 }
 
 const PIECE_TYPES = { dam: 'icon-piece-dam', la: 'icon-piece-la', keo: 'icon-piece-keo' };
@@ -2910,9 +3354,90 @@ function stopReplayPlayback() {
 function stopLiveMatchPolling() {
   if (state.liveMatchPollingTimer) clearTimeout(state.liveMatchPollingTimer);
   state.liveMatchPollingTimer = null;
+  if (state.liveEventSource) state.liveEventSource.close();
+  state.liveEventSource = null;
+  state.liveStreamMode = false;
+  state.livePollBackoffMs = 0;
   state.liveMatchContext = null;
   state.liveMatchSnapshot = null;
+  state.liveMatchStartedGames.clear();
+  state.liveLatestSnapshot = null;
+  state.liveHistoryGame = null;
+  state.liveHistory = [];
+  state.liveHistoryIndex = 0;
+  state.liveHistoryQueue = [];
+  state.liveLastSequence = 0;
+  if (state.liveTransitionTimer) clearTimeout(state.liveTransitionTimer);
+  state.liveTransitionTimer = null;
+  state.livePendingSnapshot = null;
+  hideLiveGameResultModal();
+  if (state.liveHistoryTimer) clearTimeout(state.liveHistoryTimer);
+  state.liveHistoryTimer = null;
   $('#replay-view')?.classList.remove('live-match-view');
+}
+
+function showLiveGameResultModal(snapshot, completedGame = null) {
+  const series = snapshot.series;
+  if (snapshot.status !== 'finished' && snapshot.status !== 'completed') return;
+  const game = completedGame || series.currentGame || snapshot.gameNumber || 1;
+  // BO3 sides can swap between games. The modal must show the series score
+  // against the fixed competitors, not the temporary A/B sides of the game
+  // that just ended.
+  const participants = snapshot.participants || {};
+  const fixedA = series?.competitorA || series?.competitorX || participants.A;
+  const fixedB = series?.competitorB || series?.competitorY || participants.B;
+  const participantFor = (competitor, fallback) => {
+    if (!competitor?.participantId) return fallback;
+    return Object.values(participants).find(item => item?.participantId === competitor.participantId) || fallback;
+  };
+  const playerA = participantFor(fixedA, participants.A);
+  const playerB = participantFor(fixedB, participants.B);
+  const title = $('#live-game-result-title');
+  const score = $('#live-game-result-score');
+  const next = $('#live-game-result-next');
+  const transition = Boolean(series?.active);
+  if (title) title.textContent = transition ? `Ván ${game} đã kết thúc` : 'Trận đấu đã kết thúc';
+  if (score) score.textContent = series ? `Tỷ số ${series.winsA ?? 0}-${series.winsB ?? 0}` : 'Kết quả đã được ghi nhận';
+  const nextGame = series?.nextGame || (series && Number(game) < Number(series.bestOf || 3) ? Number(game) + 1 : null);
+  const winnerSide = snapshot.winner || series?.winner;
+  const winnerName = winnerSide && snapshot.participants?.[winnerSide]?.participantName
+    ? snapshot.participants[winnerSide].participantName
+    : null;
+  const setText = (selector, value) => { const element = $(selector); if (element) element.textContent = value || '—'; };
+  setText('#live-game-player-a', fixedA?.participantName || fixedA?.name);
+  setText('#live-game-player-b', fixedB?.participantName || fixedB?.name);
+  setText('#live-game-bot-a', playerA?.botName ? `Bot · ${playerA.botName}` : 'Đội A');
+  setText('#live-game-bot-b', playerB?.botName ? `Bot · ${playerB.botName}` : 'Đội B');
+  setText('#live-game-score-a', series ? String(series.winsA ?? 0) : '—');
+  setText('#live-game-score-b', series ? String(series.winsB ?? 0) : '—');
+  const scoreA = $('#live-game-score-a');
+  const scoreB = $('#live-game-score-b');
+  scoreA?.classList.toggle('is-leading', Boolean(series && (series.winsA ?? 0) > (series.winsB ?? 0)));
+  scoreB?.classList.toggle('is-leading', Boolean(series && (series.winsB ?? 0) > (series.winsA ?? 0)));
+  const winnerLabel = $('#live-game-result-winner');
+  if (winnerLabel) winnerLabel.textContent = transition ? 'Kết quả ván đã được ghi nhận' : (winnerName ? `${winnerName} chiến thắng` : 'Kết quả đã được ghi nhận');
+  if (next) next.textContent = transition
+    ? (nextGame ? `Đang chuẩn bị Ván ${nextGame}` : 'Đang chuẩn bị ván tiếp theo')
+    : (winnerName ? `${winnerName} chiến thắng` : 'Kết quả đã được ghi nhận');
+  const close = $('#live-game-result-close');
+  if (close) close.hidden = transition;
+  const modal = $('#live-game-result-modal');
+  if (modal) {
+    modal.classList.add('is-visible');
+    modal.setAttribute('aria-hidden', 'false');
+  }
+}
+
+function hideLiveGameResultModal() {
+  const modal = $('#live-game-result-modal');
+  if (modal) {
+    modal.classList.remove('is-visible');
+    modal.setAttribute('aria-hidden', 'true');
+  }
+}
+
+function closeLiveGameResultModal() {
+  hideLiveGameResultModal();
 }
 
 function replayParticipantName(participants, player) {
@@ -2924,76 +3449,322 @@ function updateReplayTurnHighlight(player) {
   document.querySelector('#replay-view .replay-player-b-label')?.classList.toggle('is-turn', player === 'B');
 }
 
+function updateReplaySeriesScore(winsA = 0, winsB = 0) {
+  const scoreA = $('#r-p1-score');
+  const scoreB = $('#r-p2-score');
+  if (scoreA) scoreA.textContent = String(winsA);
+  if (scoreB) scoreB.textContent = String(winsB);
+  document.querySelector('#replay-view .replay-player-a-label')?.classList.toggle('is-leading', Number(winsA) > Number(winsB));
+  document.querySelector('#replay-view .replay-player-b-label')?.classList.toggle('is-leading', Number(winsB) > Number(winsA));
+}
+
+function updateReplaySeriesSideColors(game, fixedAId, fixedBId) {
+  const playerA = document.querySelector('#replay-view .replay-series-card .replay-player-a-label');
+  const playerB = document.querySelector('#replay-view .replay-series-card .replay-player-b-label');
+  if (!playerA || !playerB || !game) return;
+  const fixedAIsSideA = game.participantA === fixedAId;
+  const fixedBIsSideA = game.participantA === fixedBId;
+  playerA.classList.toggle('is-current-side-a', fixedAIsSideA);
+  playerA.classList.toggle('is-current-side-b', !fixedAIsSideA);
+  playerB.classList.toggle('is-current-side-a', fixedBIsSideA);
+  playerB.classList.toggle('is-current-side-b', !fixedBIsSideA);
+}
+
 function renderLiveMatchSnapshot(snapshot) {
-  state.liveMatchSnapshot = snapshot;
   const statusText = snapshot.status === 'in_progress'
     ? `Đang thực thi · Lượt ${snapshot.turn}`
-    : snapshot.status === 'finished' ? 'Trận đấu đã hoàn tất' : snapshot.status === 'failed' ? 'Trận đấu lỗi' : 'Trận đấu đã hủy';
-  const resultText = $('#r-result-text'); if (resultText) resultText.textContent = statusText;
+    : snapshot.status === 'finished' || snapshot.status === 'completed' ? 'Trận đấu đã hoàn tất' : snapshot.status === 'failed' ? 'Trận đấu lỗi' : 'Trận đấu đã hủy';
+  const series = snapshot.series;
+  if (snapshot.status === 'finished' || snapshot.status === 'completed') showLiveGameResultModal(snapshot);
+  else if (snapshot.status === 'in_progress') hideLiveGameResultModal();
+  const gameText = series ? `Ván ${series.currentGame}/${series.bestOf}` : 'Ván 1';
+  const statusBadge = $('#replay-status-badge');
+  if (statusBadge) statusBadge.textContent = snapshot.status === 'in_progress' ? 'Đang diễn ra' : snapshot.status === 'failed' ? 'Thất bại' : 'Đã hoàn thành';
+  const contextNote = $('#replay-context-note');
+  if (contextNote) contextNote.textContent = series ? `Trận BO${series.bestOf} · ${gameText}` : 'Trận BO1';
+  const boardTitle = $('#replay-board-title');
+  if (boardTitle) boardTitle.textContent = `${gameText} · Diễn biến`;
+  const scoreText = series
+    ? `${series.active ? 'Tỷ số hiện tại' : 'Tỷ số'} ${series.winsA}-${series.winsB}`
+    : 'Tỷ số 0-0';
+  const resultText = $('#r-result-text'); if (resultText) resultText.textContent = `${gameText} · ${scoreText} · ${statusText}${snapshot.error ? ` · ${snapshot.error}` : ''}`;
   const matchId = $('#r-match-id'); if (matchId) matchId.textContent = String(snapshot.matchId || '—');
   const winner = $('#r-winner'); if (winner) winner.textContent = snapshot.status === 'in_progress' ? 'Chưa có' : snapshot.status === 'failed' ? 'Không xác định' : 'Đang cập nhật';
   const termination = $('#r-termination'); if (termination) termination.textContent = snapshot.error || (snapshot.status === 'in_progress' ? 'Đang thực thi' : 'Đã kết thúc');
-  const protocol = $('#r-protocol'); if (protocol) protocol.textContent = 'Live snapshot';
+  const protocol = $('#r-protocol'); if (protocol) protocol.textContent = 'Dữ liệu trực tiếp';
   const participants = snapshot.participants || {};
   const latestMove = snapshot.state?.lastMove || snapshot.latestMove;
   const activePlayer = snapshot.currentPlayer;
   const currentMove = $('#r-current-move'); if (currentMove) currentMove.textContent = latestMove?.pieceId
     ? `Lượt ${latestMove.turn ?? snapshot.turn} · ${replayParticipantName(participants, latestMove.player)}: ${replayCoordinate(latestMove.from)} → ${replayCoordinate(latestMove.to)}`
     : `Lượt ${snapshot.turn} · ${replayParticipantName(participants, snapshot.currentPlayer)} đang thực thi`;
+  currentMove?.classList.toggle('replay-current-move-a', latestMove?.player === 'A' || (!latestMove && snapshot.currentPlayer === 'A'));
+  currentMove?.classList.toggle('replay-current-move-b', latestMove?.player === 'B' || (!latestMove && snapshot.currentPlayer === 'B'));
   const selected = $('#r-selected-move'); if (selected) selected.textContent = currentMove?.textContent || statusText;
   const turnDisplay = $('#r-turn-display'); if (turnDisplay) turnDisplay.textContent = `Lượt ${snapshot.turn}`;
   $('#r-p1-name').textContent = replayParticipantName(participants, 'A');
   $('#r-p2-name').textContent = replayParticipantName(participants, 'B');
   $('#r-p1-bot').textContent = participants.A?.botId ? `Bot ${shortId(participants.A.botId)}` : '';
   $('#r-p2-bot').textContent = participants.B?.botId ? `Bot ${shortId(participants.B.botId)}` : '';
+  updateReplaySeriesScore(series?.winsA ?? 0, series?.winsB ?? 0);
   updateReplayTurnHighlight(activePlayer);
   $('#replay-content').hidden = false;
+  const seriesCard = $('#replay-series-card'); if (seriesCard) seriesCard.hidden = false;
   $('#replay-loading').hidden = true;
   $('#replay-error').hidden = true;
   renderReplayBoard(snapshot.state, latestMove);
   renderReplayPieceCounts(snapshot.state);
+  if (series?.active && snapshot.status === 'finished') {
+    const transition = $('#r-result-text');
+    if (transition) transition.textContent = `Ván ${series.currentGame}/${series.bestOf} · Tỷ số ${series.winsA}-${series.winsB} · Đang chuyển sang Ván ${series.nextGame}`;
+  }
+}
+
+function playLiveHistoryFrame() {
+  const latest = state.liveLatestSnapshot;
+  if (!latest || state.activeView !== 'replay-view') return;
+  const frame = state.liveHistoryQueue.shift();
+  const hasMove = Boolean(frame?.state?.lastMove || frame?.latestMove);
+  if (frame) {
+    renderLiveMatchSnapshot({ ...latest, ...frame, series: latest.series, participants: latest.participants, history: latest.history });
+    state.liveLastSequence = Math.max(state.liveLastSequence, Number(frame.sequence) || 0);
+  }
+  // Give each actual move enough time to be readable instead of flashing
+  // through several turns when the live endpoint returns a burst of snapshots.
+  state.liveHistoryTimer = state.liveHistoryQueue.length
+    ? setTimeout(playLiveHistoryFrame, hasMove ? 900 : 800)
+    : null;
+  if (!state.liveHistoryTimer && state.livePendingSnapshot && !state.liveTransitionTimer) {
+    const pending = state.livePendingSnapshot;
+    const completedGame = state.liveHistoryGame;
+    state.livePendingSnapshot = null;
+    showLiveGameResultModal({ ...pending, status: 'finished' }, completedGame);
+    state.liveTransitionTimer = setTimeout(() => {
+      state.liveTransitionTimer = null;
+      hideLiveGameResultModal();
+      updateLiveHistory(pending);
+    }, 300);
+  }
+}
+
+function updateLiveHistory(snapshot) {
+  // Series progress is authoritative during BO3 transitions. A completed
+  // game snapshot may still be attached to the response while game 2/3 is
+  // already active, so do not let the old frame pin the viewer to game 1.
+  const game = snapshot.series?.currentGame || snapshot.gameNumber || 1;
+  const history = (snapshot.history || [])
+    .filter(frame => (frame.gameNumber || 1) === game)
+    .sort((left, right) => left.sequence - right.sequence);
+  if (state.liveStreamMode) {
+    state.liveHistoryGame = game;
+    state.liveHistory = history;
+    state.liveHistoryIndex = history.length;
+    state.liveHistoryQueue = [];
+    state.liveLastSequence = Number(snapshot.sequence) || Number(history.at(-1)?.sequence) || 0;
+    if (state.liveHistoryTimer) clearTimeout(state.liveHistoryTimer);
+    state.liveHistoryTimer = null;
+    renderLiveMatchSnapshot(snapshot);
+    return;
+  }
+  if (state.liveHistoryGame !== null && game > state.liveHistoryGame
+    && (state.liveHistoryQueue.length || state.liveHistoryTimer)) {
+    state.livePendingSnapshot = snapshot;
+    return;
+  }
+  // Live view must open at the current snapshot. Replaying history from
+  // turn one belongs to the explicit replay view, not to live spectating.
+  if (state.liveHistoryGame !== game) {
+    const previousGame = state.liveHistoryGame;
+    state.liveHistoryGame = game;
+    state.liveHistory = history;
+    state.liveHistoryIndex = history.length;
+    state.liveHistoryQueue = [];
+    state.liveLastSequence = Number(snapshot.sequence) || Number(history.at(-1)?.sequence) || 0;
+    if (state.liveHistoryTimer) clearTimeout(state.liveHistoryTimer);
+    state.liveHistoryTimer = null;
+    if (previousGame !== null && game > previousGame) {
+      if (state.liveTransitionTimer) clearTimeout(state.liveTransitionTimer);
+      state.livePendingSnapshot = snapshot;
+      const resultText = $('#r-result-text');
+      if (resultText) resultText.textContent = `VÃ¡n ${previousGame} hoÃ n táº¥t Â· Tá»· sá»‘ ${snapshot.series?.winsA ?? 0}-${snapshot.series?.winsB ?? 0} Â· Äang chuyá»ƒn sang VÃ¡n ${game}`;
+      state.liveTransitionTimer = setTimeout(() => {
+        state.liveTransitionTimer = null;
+        const pending = state.livePendingSnapshot;
+        state.livePendingSnapshot = null;
+        if (pending && state.activeView === 'replay-view') renderLiveMatchSnapshot(pending);
+        if (!state.liveHistoryTimer && state.liveHistoryQueue.length) playLiveHistoryFrame();
+      }, 0);
+    } else {
+      renderLiveMatchSnapshot(snapshot);
+    }
+  } else {
+    state.liveHistory = history;
+    const queuedSequences = new Set(state.liveHistoryQueue.map(frame => Number(frame.sequence)));
+    for (const frame of history) {
+      const sequence = Number(frame.sequence) || 0;
+      if (sequence > state.liveLastSequence && !queuedSequences.has(sequence)) state.liveHistoryQueue.push(frame);
+    }
+    state.liveHistoryQueue.sort((left, right) => (Number(left.sequence) || 0) - (Number(right.sequence) || 0));
+  }
+  if (!state.liveTransitionTimer && !state.liveHistoryTimer && state.liveHistoryQueue.length) playLiveHistoryFrame();
 }
 
 function scheduleLiveMatchPoll() {
   if (!state.liveMatchContext || state.activeView !== 'replay-view') return;
-  state.liveMatchPollingTimer = setTimeout(() => { void pollLiveMatch(); }, 1200);
+  const transitioning = state.liveLatestSnapshot?.status === 'finished' && state.liveLatestSnapshot?.series?.active;
+  const baseDelay = transitioning ? 500 : 1500;
+  const delay = Math.min(30_000, state.livePollBackoffMs || baseDelay) + Math.floor(Math.random() * 250);
+  state.liveMatchPollingTimer = setTimeout(() => { void pollLiveMatch(); }, delay);
+}
+
+function startLiveMatchStream() {
+  const context = state.liveMatchContext;
+  if (!context || typeof EventSource === 'undefined') return false;
+  const endpoint = `/api/tournaments/${context.tournamentId}/spectator/matches/${context.matchId}/live/stream`;
+  const source = new EventSource(endpoint, { withCredentials: true });
+  state.liveEventSource = source;
+  state.liveStreamMode = true;
+  source.onmessage = event => {
+    if (state.liveEventSource !== source || state.liveMatchContext !== context || state.activeView !== 'replay-view') return;
+    try {
+      const raw = JSON.parse(event.data);
+      if (raw.status === 'unavailable') {
+        $('#replay-content').hidden = true;
+        const seriesCard = $('#replay-series-card'); if (seriesCard) seriesCard.hidden = true;
+        $('#replay-loading').hidden = false;
+        return;
+      }
+      const snapshot = normalizeSpectatorLive(raw);
+      state.livePollBackoffMs = 0;
+      state.liveLatestSnapshot = snapshot;
+      if (snapshot.status === 'finished' || snapshot.status === 'completed') showLiveGameResultModal(snapshot);
+      updateLiveHistory(snapshot);
+      if (snapshot.status === 'completed' || snapshot.status === 'failed' || snapshot.status === 'cancelled') {
+        source.close();
+        state.liveEventSource = null;
+      }
+    } catch {
+      // Ignore malformed individual events; the stream error handler will recover.
+    }
+  };
+  source.onerror = () => {
+    if (state.liveEventSource !== source) return;
+    source.close();
+    state.liveEventSource = null;
+    scheduleLiveMatchPoll();
+  };
+  return true;
 }
 
 async function pollLiveMatch() {
   const context = state.liveMatchContext;
   if (!context || state.activeView !== 'replay-view') return;
   try {
-    const snapshot = await api(`/tournaments/${context.tournamentId}/matches/${context.matchId}/live`);
+    // Live snapshots are ephemeral; prevent an intermediary/browser cache
+    // from returning the same turn (notably the old turn-100 snapshot).
+    const endpoint = context.spectator
+      ? `/tournaments/${context.tournamentId}/spectator/matches/${context.matchId}/live?ts=${Date.now()}`
+      : `/tournaments/${context.tournamentId}/matches/${context.matchId}/live?ts=${Date.now()}`;
+    const rawSnapshot = await api(endpoint);
+    const snapshot = context.spectator ? normalizeSpectatorLive(rawSnapshot) : rawSnapshot;
+    state.livePollBackoffMs = 0;
     if (state.liveMatchContext !== context || state.activeView !== 'replay-view') return;
     if (snapshot.status === 'unavailable') {
+      $('#replay-content').hidden = true;
+      const seriesCard = $('#replay-series-card'); if (seriesCard) seriesCard.hidden = true;
+      $('#replay-loading').hidden = false;
       const resultText = $('#r-result-text'); if (resultText) resultText.textContent = 'Chưa có dữ liệu trực tiếp';
       scheduleLiveMatchPoll();
       return;
     }
-    renderLiveMatchSnapshot(snapshot);
-    if (snapshot.status === 'in_progress') scheduleLiveMatchPoll();
+    state.liveLatestSnapshot = snapshot;
+    if (snapshot.status === 'finished' || snapshot.status === 'completed') showLiveGameResultModal(snapshot);
+    updateLiveHistory(snapshot);
+    if (snapshot.status === 'in_progress' || snapshot.series?.active) scheduleLiveMatchPoll();
   } catch (error) {
+    $('#replay-content').hidden = true;
+    const seriesCard = $('#replay-series-card'); if (seriesCard) seriesCard.hidden = true;
+    $('#replay-loading').hidden = false;
     if (state.liveMatchContext !== context || state.activeView !== 'replay-view') return;
+    if (error?.status === 429) state.livePollBackoffMs = Math.min(30_000, Math.max(3_000, (state.livePollBackoffMs || 1500) * 2));
     const resultText = $('#r-result-text'); if (resultText) resultText.textContent = error.message || 'Không thể tải dữ liệu trực tiếp';
     scheduleLiveMatchPoll();
   }
 }
 
-function openLiveMatch(tournamentId, matchId) {
+function normalizeSpectatorLive(response) {
+  const game = response.game;
+  const series = response.series || {};
+  const frame = game ? {
+    matchId: response.matchId,
+    gameNumber: game.gameNumber,
+    status: game.status,
+    sequence: game.sequence,
+    turn: game.turn,
+    currentPlayer: game.currentPlayer,
+    state: game.board,
+    latestMove: game.latestMove,
+    updatedAt: game.observedAt,
+  } : null;
+  const history = (response.history || []).map(item => ({
+    ...item,
+    matchId: response.matchId,
+    state: item.board,
+    latestMove: item.latestMove,
+    updatedAt: item.observedAt,
+    status: item.status,
+    sequence: item.sequence,
+    turn: item.turn,
+    currentPlayer: item.currentPlayer,
+    gameNumber: item.gameNumber,
+  }));
+  return {
+    ...frame,
+    ...(frame || { matchId: response.matchId, status: response.status, gameNumber: series.currentGameNumber || 1, sequence: 0, turn: 0, currentPlayer: 'A', state: null, latestMove: null, updatedAt: new Date().toISOString() }),
+    status: response.status === 'between_games' ? 'finished' : response.status,
+    history,
+    series: {
+      format: series.format,
+      bestOf: series.bestOf,
+      currentGame: series.currentGameNumber,
+      competitorA: series.competitorX,
+      competitorB: series.competitorY,
+      winsA: series.score?.A ?? 0,
+      winsB: series.score?.B ?? 0,
+      active: response.status === 'in_progress' || response.status === 'between_games',
+    },
+    participants: { A: game?.sideA ? { participantName: game.sideA.name } : null, B: game?.sideB ? { participantName: game.sideB.name } : null },
+    historyTruncated: response.historyTruncated,
+  };
+}
+
+function openLiveMatch(tournamentId, matchId, pairingId = null) {
   stopReplayPlayback();
   stopLiveMatchPolling();
-  state.liveMatchContext = { tournamentId, matchId };
+  hideLiveGameResultModal();
+  // Game selector buttons belong to replay navigation, not live viewing.
+  document.querySelector('#replay-series-controls')?.remove();
+  const inferredPairingId = pairingId || (String(matchId).startsWith(`${tournamentId}-`) ? String(matchId).slice(String(tournamentId).length + 1) : null);
+  state.liveMatchContext = { tournamentId, matchId, pairingId: inferredPairingId, spectator: state.spectatorMode === true };
   state.replayMatchId = matchId;
   $('#replay-view').classList.add('live-match-view');
   $('#replay-view-kicker').textContent = 'XEM TRỰC TIẾP TRẬN ĐẤU';
   $('#replay-view-title').textContent = 'Diễn biến trận đấu';
   $('#replay-content').hidden = true;
+  const seriesCard = $('#replay-series-card'); if (seriesCard) seriesCard.hidden = true;
   $('#replay-error').hidden = true;
   $('#replay-loading').hidden = false;
   $('#replay-loading').textContent = 'Đang kết nối dữ liệu trực tiếp…';
   navigate('replay-view');
-  state.liveMatchContext = { tournamentId, matchId };
-  void pollLiveMatch();
+  state.liveMatchContext = { tournamentId, matchId, pairingId: inferredPairingId, spectator: state.spectatorMode === true };
+  if (!startLiveMatchStream()) void pollLiveMatch();
+  if (!inferredPairingId) {
+    void request(`/tournaments/${tournamentId}`).then(tournament => {
+      const pairing = tournament.rounds?.flatMap(round => round.pairings || []).find(item => item.matchId === matchId);
+      if (state.liveMatchContext?.matchId !== matchId || !pairing) return;
+      state.liveMatchContext.pairingId = pairing.pairingId;
+    }).catch(() => {});
+  }
 }
 
 function closeReplay() {
@@ -3001,6 +3772,8 @@ function closeReplay() {
   stopLiveMatchPolling();
   const isPracticeReplay = state.replayContext?.practice === true;
   state.replay = null;
+  state.replaySeries = null;
+  state.replayGameIndex = 0;
   state.replayContext = null;
   state.replayMatchId = null;
   state.replayMoveIndex = -1;
@@ -3008,6 +3781,8 @@ function closeReplay() {
   state.liveMatchContext = null;
   state.liveMatchSnapshot = null;
   if (isPracticeReplay) {
+    state.practiceAbortController?.abort();
+    state.practiceAbortController = null;
     clearPracticeResult();
     state.practiceReplay = null;
     state.practiceReplayMoveIndex = -1;
@@ -3024,6 +3799,7 @@ function setReplayLoading(isLoading) {
   const content = $('#replay-content');
   if (loading) loading.hidden = !isLoading;
   if (content) content.hidden = isLoading;
+  if (isLoading) { const seriesCard = $('#replay-series-card'); if (seriesCard) seriesCard.hidden = true; }
 }
 
 function formatReplayReason(reason) { return localizeReason(reason); }
@@ -3044,6 +3820,39 @@ function replayWinnerLabel(replay) {
   return '—';
 }
 
+function getActiveReplay() {
+  return state.replay;
+}
+
+function renderReplaySeriesControls(replay) {
+  const existing = $('#replay-series-controls');
+  if (existing) existing.remove();
+  if (!replay?.series?.games?.length) return;
+  const controls = create('div', { className: 'replay-series-controls', attrs: { id: 'replay-series-controls', role: 'group', 'aria-label': 'Chọn ván trong series BO3' } });
+  const identities = Object.values(replay.participantIdentities || {}).filter(Boolean);
+  const names = new Map(identities.map(identity => [identity.participantId, identity.participantName]));
+  replay.series.games.forEach((game, index) => {
+    const sideA = names.get(game.participantA) || game.participantA;
+    const sideB = names.get(game.participantB) || game.participantB;
+    const result = game.winnerParticipantId ? ` · ${names.get(game.winnerParticipantId) || game.winnerParticipantId} thắng` : ' · Hòa';
+    const button = actionButton(`Ván ${game.gameNumber}: ${sideA} / ${sideB}${result}`, () => selectReplayGame(index), `replay-series-game:${index}`, 'secondary-btn');
+    button.classList.toggle('active', index === state.replayGameIndex);
+    button.textContent = `Ván ${game.gameNumber}`;
+    controls.appendChild(button);
+  });
+  $('#replay-series-slot')?.appendChild(controls);
+}
+
+function selectReplayGame(index) {
+  if (!state.replaySeries?.series?.games?.[index]) return;
+  stopReplayPlayback();
+  state.replayGameIndex = index;
+  state.replay = state.replaySeries.series.games[index].replay;
+  renderReplaySeriesControls(state.replaySeries);
+  renderReplaySummaryV2(state.replaySeries);
+  goToReplayTurn(-1);
+}
+
 function isReplayShape(replay) {
   return replay && replay.initialState && Number(replay.initialState.boardSize) === 9
     && Array.isArray(replay.initialState.pieces) && Array.isArray(replay.moves)
@@ -3057,8 +3866,12 @@ function applyReplayParticipantIdentities(replay) {
   const renderIdentity = (side, fallback) => {
     const identity = identities[side] || {};
     const revision = revisions.find(item => item.player === side);
-    $(`#r-p${side === 'A' ? '1' : '2'}-name`).textContent = identity.participantName || fallback;
-    const details = [identity.botName, runtimeLabel(identity.runtimeId || revision?.runtimeId), revision?.revisionId ? `Revision ${shortId(revision.revisionId)}` : ''].filter(Boolean).join(' · ');
+    const participantName = identity.participantName || fallback;
+    $(`#r-p${side === 'A' ? '1' : '2'}-name`).textContent = participantName;
+    // In practice matches the participant and bot can intentionally have the
+    // same display name. Do not render the same name twice in the header.
+    const botName = identity.botName && identity.botName !== participantName ? identity.botName : '';
+    const details = [botName, runtimeLabel(identity.runtimeId || revision?.runtimeId), revision?.revisionId ? `Revision ${shortId(revision.revisionId)}` : ''].filter(Boolean).join(' · ');
     $(`#r-p${side === 'A' ? '1' : '2'}-bot`).textContent = details;
   };
   renderIdentity('A', 'Người chơi A');
@@ -3070,10 +3883,60 @@ function renderReplaySummary(replay) {
   $('#r-match-id').textContent = String(replay.matchId || state.replayMatchId || 'â€”');
   $('#replay-scrubber').max = String(Math.max(-1, replay.moves.length - 1));
   applyReplayParticipantIdentities(replay);
+  // Practice replays are BO1 and use this legacy summary renderer. The score
+  // cards must still reflect the completed result instead of staying at 0-0.
+  updateReplaySeriesScore(replay.winner === 'A' ? 1 : 0, replay.winner === 'B' ? 1 : 0);
   $('#r-result-text').textContent = `${replayResultLabel(replay)} · ${formatReplayReason(replay.terminationReason)}`;
   $('#r-winner').textContent = replayWinnerLabel(replay);
   $('#r-termination').textContent = formatReplayReason(replay.terminationReason) || 'Chưa xác định';
   $('#r-protocol').textContent = String(replay.protocolVersion || 'unknown');
+  const statusBadge = $('#replay-status-badge'); if (statusBadge) statusBadge.textContent = 'Đã hoàn thành';
+  const contextNote = $('#replay-context-note'); if (contextNote) contextNote.textContent = state.replayContext?.practice ? 'Trận đấu thử' : 'Trận BO1';
+  const boardTitle = $('#replay-board-title'); if (boardTitle) boardTitle.textContent = 'Ván 1 · Diễn biến';
+  const seriesCard = $('#replay-series-card'); if (seriesCard) seriesCard.hidden = false;
+}
+
+function renderReplaySummaryV2(replay) {
+  const active = state.replay || replay;
+  const series = state.replaySeries?.series;
+  const title = $('#replay-view-title');
+  if (title) title.textContent = series ? 'Series BO3' : `Trận đấu ${shortId(active.matchId || state.replayMatchId)}`;
+  $('#r-match-id').textContent = String(state.replaySeries?.matchId || active.matchId || state.replayMatchId || '—');
+  $('#replay-scrubber').max = String(Math.max(-1, active.moves.length - 1));
+  // BO3 can swap temporary sides A/B. Keep the aggregate series identities
+  // in the header while the board uses the selected game's replay.
+  const identityReplay = series && state.replaySeries?.participantIdentities
+    ? { ...active, participantIdentities: state.replaySeries.participantIdentities, metadata: state.replaySeries.metadata }
+    : active;
+  applyReplayParticipantIdentities(identityReplay);
+  if (series) {
+    const identities = state.replaySeries?.participantIdentities || {};
+    const playerAId = identities.A?.participantId;
+    const playerBId = identities.B?.participantId;
+    const selectedIndex = Math.max(0, Math.min(Number(state.replayGameIndex) || 0, series.games.length - 1));
+    updateReplaySeriesSideColors(series.games[selectedIndex], playerAId, playerBId);
+    const visibleGames = series.games.slice(0, selectedIndex + 1);
+    const scoreA = visibleGames.filter(game => game.winnerParticipantId === playerAId).length;
+    const scoreB = visibleGames.filter(game => game.winnerParticipantId === playerBId).length;
+    const shownScoreA = playerAId ? scoreA : series.winsA;
+    const shownScoreB = playerBId ? scoreB : series.winsB;
+    updateReplaySeriesScore(shownScoreA, shownScoreB);
+    $('#r-result-text').textContent = `BO3 · Tỷ số ${series.winsA}-${series.winsB} · ${replayWinnerLabel(state.replaySeries)}`;
+    $('#r-winner').textContent = replayWinnerLabel(state.replaySeries);
+    $('#r-termination').textContent = `Đã đấu ${series.games.length} ván`;
+    const contextNote = $('#replay-context-note'); if (contextNote) contextNote.textContent = `Trận BO3 · ${series.games.length} ván`;
+    const boardTitle = $('#replay-board-title'); if (boardTitle) boardTitle.textContent = `Ván ${selectedIndex + 1} · Diễn biến`;
+  } else {
+    updateReplaySeriesScore(active.winner === 'A' ? 1 : 0, active.winner === 'B' ? 1 : 0);
+    $('#r-result-text').textContent = `${replayResultLabel(active)} · ${formatReplayReason(active.terminationReason)}`;
+    $('#r-winner').textContent = replayWinnerLabel(active);
+    $('#r-termination').textContent = formatReplayReason(active.terminationReason) || 'Chưa xác định';
+    const contextNote = $('#replay-context-note'); if (contextNote) contextNote.textContent = 'Trận BO1';
+    const boardTitle = $('#replay-board-title'); if (boardTitle) boardTitle.textContent = 'Ván 1 · Diễn biến';
+  }
+  $('#r-protocol').textContent = String(active.protocolVersion || 'unknown');
+  const statusBadge = $('#replay-status-badge'); if (statusBadge) statusBadge.textContent = 'Đã hoàn thành';
+  const seriesCard = $('#replay-series-card'); if (seriesCard) seriesCard.hidden = false;
 }
 
 function renderReplayPieceCounts(board) {
@@ -3089,24 +3952,30 @@ function renderReplayPieceCounts(board) {
 }
 
 async function playReplay(tournamentId, matchId) {
+  if (!await ensureReplaySession()) return;
   stopReplayPlayback();
   stopLiveMatchPolling();
   $('#replay-view').classList.remove('live-match-view');
   $('#replay-view-kicker').textContent = 'XEM LẠI TRẬN ĐẤU';
+  state.tournamentId = tournamentId;
   const authRevision = state.authRevision;
   const sourceViewRevision = state.viewRevision;
   const replayRevision = ++state.replayRevision;
   state.replayContext = { tournamentId, matchId, authRevision, sourceViewRevision };
   state.replay = null;
+  state.replaySeries = null;
   state.replayMatchId = matchId;
   state.replayMoveIndex = -1;
+  renderReplaySeriesControls(null);
   $('#replay-error').hidden = true;
   setReplayLoading(true);
   navigate('replay-view');
   const replayViewRevision = state.viewRevision;
   let replay;
   try {
-    replay = await api(`/tournaments/${tournamentId}/replays/${matchId}`);
+    replay = await api(state.spectatorMode
+      ? `/tournaments/${tournamentId}/spectator/matches/${matchId}/replay`
+      : `/tournaments/${tournamentId}/replays/${matchId}`);
     if (!isReplayShape(replay)) throw new Error('Dữ liệu xem lại không hợp lệ.');
   }
   catch (error) {
@@ -3114,6 +3983,7 @@ async function playReplay(tournamentId, matchId) {
       && state.replayContext?.tournamentId === tournamentId && state.replayContext?.matchId === matchId) {
       setReplayLoading(false);
       $('#replay-content').hidden = true;
+      const seriesCard = $('#replay-series-card'); if (seriesCard) seriesCard.hidden = true;
       $('#replay-error-message').textContent = error.message || 'Không thể tải dữ liệu xem lại.';
       $('#replay-error').hidden = false;
     }
@@ -3123,8 +3993,12 @@ async function playReplay(tournamentId, matchId) {
     || state.activeView !== 'replay-view' || state.viewRevision !== replayViewRevision
     || state.tournamentId !== tournamentId || state.replayContext?.matchId !== matchId) return;
   state.replay = replay;
+  state.replaySeries = replay.series ? replay : null;
+  state.replayGameIndex = 0;
+  if (state.replaySeries?.series?.games?.[0]?.replay) state.replay = state.replaySeries.series.games[0].replay;
   state.replayContext.replayViewRevision = replayViewRevision;
-  renderReplaySummary(replay);
+  renderReplaySeriesControls(replay);
+  renderReplaySummaryV2(replay);
   setReplayLoading(false);
   goToReplayTurn(-1);
 }
@@ -3193,7 +4067,7 @@ function renderReplayBoard(board, liveMove = null) {
 function goToReplayTurn(index) {
   if (!state.replay || state.activeView !== 'replay-view') return;
   state.replayMoveIndex = Math.max(-1, Math.min(index, state.replay.moves.length - 1));
-  $('#r-turn-display').textContent = `${Math.max(0, state.replayMoveIndex + 1)} / ${state.replay.moves.length}`;
+  $('#r-turn-display').textContent = `${Math.max(0, state.replayMoveIndex + 1)} / ${state.replay.moves.length} lượt`;
   const scrubber = $('#replay-scrubber');
   if (scrubber) scrubber.value = String(state.replayMoveIndex);
   const board = buildStateAt(state.replayMoveIndex);
@@ -3208,9 +4082,12 @@ function goToReplayTurn(index) {
   if (selected) selected.textContent = move?.pieceId
     ? `Move ${move.turn} · Player ${move.player}: ${replayCoordinate(move.from)} → ${replayCoordinate(move.to)}`
     : state.replayMoveIndex < 0 ? 'Initial position' : 'No applied move at this position';
-  $('#r-current-move').textContent = move?.pieceId
-    ? `Lượt ${move.turn} · Người chơi ${move.player}: ${replayCoordinate(move.from)} → ${replayCoordinate(move.to)}`
-    : state.replayMoveIndex >= 0 ? `Lượt ${move.turn} · Người chơi ${move.player}: không có nước đi được áp dụng` : 'Vị trí ban đầu';
+  const currentMove = $('#r-current-move');
+  currentMove?.classList.toggle('replay-current-move-a', move?.player === 'A');
+  currentMove?.classList.toggle('replay-current-move-b', move?.player === 'B');
+  currentMove.textContent = move?.pieceId
+    ? `Lượt ${move.turn} · ${replayHistoryPlayerName(move.player)}: ${replayCoordinate(move.from)} → ${replayCoordinate(move.to)}`
+    : state.replayMoveIndex >= 0 ? `Lượt ${move.turn} · ${replayHistoryPlayerName(move.player)}: không có nước đi được áp dụng` : 'Vị trí ban đầu';
 }
 
   if (false) {
@@ -3225,20 +4102,34 @@ function setupReplayCoordinates() {
 }
 
 function replayCoordinate(position) { return position ? `${'abcdefghi'[position.col] || '?'}${Number(position.row) + 1}` : '?'; }
+function replayHistoryPlayerName(player) {
+  const identity = state.replay?.participantIdentities?.[player];
+  if (identity?.participantName) return identity.participantName;
+  const name = $(`#r-p${player === 'A' ? '1' : '2'}-name`)?.textContent?.trim();
+  return name || `Người chơi ${player}`;
+}
 function renderReplayTimeline() {
   const list = $('#replay-timeline'); clear(list);
   const moves = state.replay?.moves || [];
-  const historyTitle = $('#replay-history-title'); if (historyTitle) historyTitle.textContent = `Lịch sử nước đi · ${moves.length}`;
+  const historyTitle = $('#replay-history-title'); if (historyTitle) historyTitle.textContent = 'Lịch sử nước đi';
+  const historyCount = $('#replay-history-count'); if (historyCount) historyCount.textContent = `${moves.length} lượt`;
   if (!state.replay?.moves.length) { list.appendChild(create('p', { className: 'ui-message', text: 'Chưa có nước đi nào được ghi nhận cho trận đấu này.' })); return; }
   state.replay.moves.forEach((move, index) => {
     const item = actionButton('', () => { stopReplayPlayback(); goToReplayTurn(index); }, `replay-seek:${index}`, 'replay-move');
     item.classList.toggle('active', index === state.replayMoveIndex);
     const applied = Boolean(move.pieceId);
     item.classList.toggle('replay-move-unapplied', !applied);
-    const label = applied ? `Lượt ${move.turn} · Người chơi ${move.player}: ${replayCoordinate(move.from)} → ${replayCoordinate(move.to)}${move.captures ? ' · ăn quân' : ''}` : `Lượt ${move.turn} · Người chơi ${move.player}: không có nước đi được áp dụng`;
+    const playerName = replayHistoryPlayerName(move.player);
+    const side = String(move.player || '').toLowerCase();
+    item.classList.add(`replay-move-side-${side}`);
+    const label = applied ? `Lượt ${move.turn} · ${playerName}: ${replayCoordinate(move.from)} → ${replayCoordinate(move.to)}${move.captures ? ' · ăn quân' : ''}` : `Lượt ${move.turn} · ${playerName}: không có nước đi được áp dụng`;
     item.setAttribute('aria-label', label);
     item.setAttribute('aria-current', index === state.replayMoveIndex ? 'step' : 'false');
-    item.textContent = label; list.appendChild(item);
+    const number = create('span', { className: 'replay-move-number', text: `#${index + 1}` });
+    const player = create('span', { className: `replay-move-player replay-move-player-${side}`, text: playerName });
+    const path = create('span', { className: 'replay-move-path', text: applied ? `${replayCoordinate(move.from)} → ${replayCoordinate(move.to)}${move.captures ? ' · Ăn quân' : ''}` : 'Không có nước đi được áp dụng' });
+    item.append(number, player, path);
+    list.appendChild(item);
   });
   const active = list.querySelector('.replay-move.active');
   if (active) active.scrollIntoView({ block: 'nearest' });
@@ -3274,23 +4165,47 @@ function toggleReplayPlayback() {
   state.replayTimer = setTimeout(tick, state.replaySpeed);
 }
 
+const domBindingRegistry = new WeakMap();
+
+function bindEvent(target, eventName, handler, { required = false, feature = eventName, options } = {}) {
+  const element = typeof target === 'string' ? $(target) : target;
+  if (!element) {
+    if (required) console.error(`[DOM binding] Missing required control for ${feature}: ${typeof target === 'string' ? target : 'event target'}`);
+    return false;
+  }
+  let bindings = domBindingRegistry.get(element);
+  if (!bindings) {
+    bindings = new Set();
+    domBindingRegistry.set(element, bindings);
+  }
+  const bindingKey = `${eventName}:${feature}`;
+  if (bindings.has(bindingKey)) return true;
+  element.addEventListener(eventName, handler, options);
+  bindings.add(bindingKey);
+  return true;
+}
+
 function bindEvents() {
-  document.querySelectorAll('.nav-link').forEach(link => link.addEventListener('click', () => {
+  const on = (target, eventName, handler, options = {}) => bindEvent(target, eventName, handler, {
+    ...options,
+    feature: options.feature || (typeof target === 'string' ? target : eventName),
+  });
+  document.querySelectorAll('.nav-link').forEach(link => on(link, 'click', () => {
     if (link.dataset.target === 'tournaments') state.tournamentScope = link.dataset.scope || 'discoverable';
     navigate(link.dataset.target);
   }));
-    $('#show-register').addEventListener('click', () => setAuthMode('register'));
-   $('#show-login').addEventListener('click', () => setAuthMode('login'));
-    $('#login-password-toggle').addEventListener('click', () => togglePassword('login-password', 'login-password-toggle'));
-    $('#register-password-toggle').addEventListener('click', () => togglePassword('register-password', 'register-password-toggle'));
+    on('#show-register', 'click', () => setAuthMode('register'));
+   on('#show-login', 'click', () => setAuthMode('login'));
+    on('#login-password-toggle', 'click', () => togglePassword('login-password', 'login-password-toggle'));
+    on('#register-password-toggle', 'click', () => togglePassword('register-password', 'register-password-toggle'));
    
   // Add real-time validation
-  $('#login-username').addEventListener('input', () => { clearAuthMessage('login'); validateField($('#login-username'), 'username'); updateButtonState('login'); });
-  $('#login-password').addEventListener('input', () => { clearAuthMessage('login'); validateField($('#login-password'), 'login-password'); updateButtonState('login'); });
-  $('#register-username').addEventListener('input', () => { clearAuthMessage('register'); validateField($('#register-username'), 'username'); updateButtonState('register'); });
-  $('#register-password').addEventListener('input', () => { clearAuthMessage('register'); validateField($('#register-password'), 'password'); updateButtonState('register'); });
+  on('#login-username', 'input', () => { clearAuthMessage('login'); validateField($('#login-username'), 'username'); updateButtonState('login'); });
+  on('#login-password', 'input', () => { clearAuthMessage('login'); validateField($('#login-password'), 'login-password'); updateButtonState('login'); });
+  on('#register-username', 'input', () => { clearAuthMessage('register'); validateField($('#register-username'), 'username'); updateButtonState('register'); });
+  on('#register-password', 'input', () => { clearAuthMessage('register'); validateField($('#register-password'), 'password'); updateButtonState('register'); });
 
-  $('#login-form').addEventListener('submit', event => { event.preventDefault(); void runPending('login', $('#login-submit'), async () => { 
+  on('#login-form', 'submit', event => { event.preventDefault(); void runPending('login', $('#login-submit'), async () => {
     const username = $('#login-username').value.trim();
     const password = $('#login-password').value;
     if (!username || !password) {
@@ -3304,8 +4219,8 @@ function bindEvents() {
     } catch (error) {
       setAuthMessage('login', error.message || 'Đăng nhập không thành công.');
     }
-  }); });
-  $('#register-form').addEventListener('submit', event => { event.preventDefault(); void runPending('register', $('#register-submit'), async () => { 
+  }); }, { required: true, feature: 'authentication login form' });
+  on('#register-form', 'submit', event => { event.preventDefault(); void runPending('register', $('#register-submit'), async () => {
     if (!validateForm('register')) {
       setAuthMessage('register', 'Vui lòng điền đủ thông tin và dùng mật khẩu có ít nhất 12 ký tự, gồm chữ hoa, chữ thường và số.');
       return;
@@ -3317,87 +4232,148 @@ function bindEvents() {
     } catch (error) {
       setAuthMessage('register', error.message || 'Không thể tạo tài khoản.');
     }
-  }); });
-  $('#logout-button').addEventListener('click', () => void runPending('logout', $('#logout-button'), async () => { try { await api('/auth/logout', { method: 'POST' }); } finally { showAuthScreen(); } }));
-  $('#open-bot-modal').addEventListener('click', () => openBotWorkspace()); $('#open-tournament-modal').addEventListener('click', openTournamentDialog);
-  $('#dashboard-create-bot').addEventListener('click', () => openBotWorkspace()); $('#dashboard-create-tournament').addEventListener('click', openTournamentDialog);
-  $('#dashboard-open-tournaments').addEventListener('click', () => { state.tournamentScope = 'discoverable'; navigate('tournaments'); });
-  $('#dashboard-open-bots').addEventListener('click', () => navigate('bots'));
-  $('#dash-empty-bot').addEventListener('click', () => {
+  }); }, { required: true, feature: 'authentication registration form' });
+  on('#logout-button', 'click', () => void runPending('logout', $('#logout-button'), async () => { try { await api('/auth/logout', { method: 'POST' }); } finally { showAuthScreen(); } }));
+  on('#open-bot-modal', 'click', () => openBotWorkspace()); on('#open-tournament-modal', 'click', openTournamentDialog);
+  on('#dashboard-create-bot', 'click', () => openBotWorkspace()); on('#dashboard-create-tournament', 'click', openTournamentDialog);
+  on('#dashboard-open-tournaments', 'click', () => { state.tournamentScope = 'discoverable'; navigate('tournaments'); });
+  on('#dashboard-open-bots', 'click', () => navigate('bots'));
+  on('#dash-empty-bot', 'click', () => {
     if (state.user?.role === 'competitor' && state.bots.length) {
       state.tournamentScope = 'discoverable';
       navigate('tournaments');
       return;
     }
     openBotWorkspace();
-  }); $('#dash-empty-tournament').addEventListener('click', openTournamentDialog);
-  $('#bot-search').addEventListener('input', event => { state.botSearch = event.target.value; renderBotList(); });
-  $('#bot-workspace-name').addEventListener('input', () => setSourceDirty(state.sourceDirty));
-  $('#bot-workspace-name').addEventListener('keydown', event => {
+  }); on('#dash-empty-tournament', 'click', openTournamentDialog);
+  on('#bot-search', 'input', event => { state.botSearch = event.target.value; renderBotList(); });
+  on('#bot-workspace-name', 'input', () => setSourceDirty(state.sourceDirty));
+  on('#bot-workspace-name', 'keydown', event => {
     if (event.key !== 'Enter' || event.isComposing) return;
     event.preventDefault();
     const saveButton = $('#save-bot-source');
     if (!saveButton.disabled) void submitBot();
   });
-   $('#bot-source-runtime').addEventListener('change', event => switchSourceRuntime(event.target.value));
-  $('#bot-source-runtime').addEventListener('change', event => updateSourceRuntimeMeta(event.target.value));
-  $('#bot-source-editor').addEventListener('input', () => setSourceDirty(true));
-  $('#bot-source-editor').addEventListener('keydown', event => {
+   on('#bot-source-runtime', 'change', event => switchSourceRuntime(event.target.value));
+  on('#bot-source-runtime', 'change', event => updateSourceRuntimeMeta(event.target.value), { feature: 'bot-source-runtime-meta' });
+  on('#bot-source-editor', 'input', () => setSourceDirty(true));
+  on('#bot-source-editor', 'keydown', event => {
+    if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Home', 'End', 'PageUp', 'PageDown'].includes(event.key)) event.stopPropagation();
+    if (event.key === 'Enter' && !event.shiftKey && !event.ctrlKey && !event.metaKey && !event.target.readOnly) {
+      event.preventDefault();
+      sourceIndentOnEnter(event.target);
+      setSourceDirty(true); updateEditorMetrics();
+      return;
+    }
+    if (!event.ctrlKey && !event.metaKey && !event.altKey && !event.target.readOnly && ['(', '[', '{'].includes(event.key)) {
+      event.preventDefault();
+      sourceInsertPair(event.target, event.key, { '(': ')', '[': ']', '{': '}' }[event.key]);
+      setSourceDirty(true); updateEditorMetrics();
+      return;
+    }
+    if (!event.ctrlKey && !event.metaKey && !event.altKey && !event.target.readOnly && [')', ']', '}'].includes(event.key) && event.target.value[event.target.selectionStart] === event.key && event.target.selectionStart === event.target.selectionEnd) {
+      event.preventDefault(); event.target.selectionStart += 1; event.target.selectionEnd = event.target.selectionStart; syncSourceEditorTools(); return;
+    }
+    if (event.key === 'Backspace' && !event.target.readOnly && event.target.selectionStart === event.target.selectionEnd) {
+      const cursor = event.target.selectionStart;
+      if ('([{'.includes(event.target.value[cursor - 1]) && { '(': ')', '[': ']', '{': '}' }[event.target.value[cursor - 1]] === event.target.value[cursor]) {
+        event.preventDefault(); event.target.setRangeText('', cursor - 1, cursor + 1, 'end'); setSourceDirty(true); updateEditorMetrics(); return;
+      }
+    }
     if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') {
       event.preventDefault();
       const saveButton = $('#save-bot-source');
       if (!saveButton.disabled) void submitBot();
       return;
     }
-    if (event.key !== 'Tab' || event.shiftKey || event.altKey || event.ctrlKey || event.metaKey || event.target.readOnly) return;
+    if (event.key !== 'Tab' || event.altKey || event.ctrlKey || event.metaKey || event.target.readOnly) return;
     event.preventDefault();
     const editor = event.target;
     const start = editor.selectionStart;
     const end = editor.selectionEnd;
-    editor.setRangeText('  ', start, end, 'end');
+    const selected = editor.value.slice(start, end);
+    const hasMultipleLines = selected.includes('\n');
+    if (hasMultipleLines) {
+      const blockStart = editor.value.lastIndexOf('\n', start - 1) + 1;
+      const blockEndIndex = editor.value.indexOf('\n', end);
+      const blockEnd = blockEndIndex < 0 ? editor.value.length : blockEndIndex;
+      const block = editor.value.slice(blockStart, blockEnd);
+      const changed = event.shiftKey
+        ? block.replace(/^ {1,2}/gm, '')
+        : block.replace(/^/gm, '  ');
+      editor.setRangeText(changed, blockStart, blockEnd, 'select');
+    } else if (event.shiftKey) {
+      const lineStart = editor.value.lastIndexOf('\n', start - 1) + 1;
+      const removeCount = Math.min(2, editor.value.slice(lineStart, start).match(/^ {1,2}/)?.[0].length || 0);
+      if (removeCount) {
+        editor.setRangeText('', lineStart, lineStart + removeCount, 'end');
+        editor.selectionStart = Math.max(lineStart, start - removeCount);
+        editor.selectionEnd = Math.max(lineStart, end - removeCount);
+      }
+    } else {
+      editor.setRangeText('  ', start, end, 'end');
+    }
     setSourceDirty(true);
+    updateEditorMetrics();
   });
-  $('#bot-source-editor').addEventListener('input', updateEditorMetrics);
-  $('#bot-source-editor').addEventListener('scroll', updateEditorMetrics, { passive: true });
-  $('#save-bot-source').addEventListener('click', () => void submitBot());
-  $('#run-bot-practice').addEventListener('click', openCurrentPracticeRunner);
-  $('#practice-run').addEventListener('click', () => void testBotMatch());
-  $('#practice-replay-start').addEventListener('click', () => { stopPracticeReplay(); goToPracticeTurn(-1); });
-  $('#practice-replay-prev').addEventListener('click', () => { stopPracticeReplay(); goToPracticeTurn(state.practiceReplayMoveIndex - 1); });
-  $('#practice-replay-next').addEventListener('click', () => { stopPracticeReplay(); goToPracticeTurn(state.practiceReplayMoveIndex + 1); });
-  $('#practice-replay-end').addEventListener('click', () => { stopPracticeReplay(); goToPracticeTurn((state.practiceReplay?.moves?.length || 1) - 1); });
-  $('#practice-replay-play').addEventListener('click', togglePracticeReplay);
-  $('#practice-replay-scrubber').addEventListener('input', event => { stopPracticeReplay(); goToPracticeTurn(Number(event.target.value)); });
-  $('#practice-replay-speed').addEventListener('change', () => { if (state.practiceReplayActive) { stopPracticeReplay(); togglePracticeReplay(); } });
-  if ($('#practice-scenario')) $('#practice-scenario').addEventListener('change', () => {
+  on('#bot-source-editor', 'input', updateEditorMetrics, { feature: 'bot-source-editor-metrics' });
+  on('#bot-source-editor', 'keyup', syncSourceEditorTools, { feature: 'bot-source-editor-cursor' });
+  on('#bot-source-editor', 'click', syncSourceEditorTools, { feature: 'bot-source-editor-cursor-click' });
+  on('#bot-source-editor', 'scroll', updateEditorMetrics, { options: { passive: true } });
+  on('#source-format', 'click', formatSourceCode);
+  on('#source-theme', 'click', () => {
+    const shell = $('.source-editor-shell'); if (!shell) return;
+    const light = shell.classList.toggle('is-light');
+    const button = $('#source-theme'); if (button) button.textContent = light ? 'Tối' : 'Sáng';
+  });
+  on('#source-expand', 'click', () => {
+    const panel = $('.bot-editor-panel'); if (!panel) return;
+    const expanded = panel.classList.toggle('is-expanded'); const button = $('#source-expand'); if (button) button.textContent = expanded ? 'Thu nhỏ' : 'Phóng to';
+    updateEditorMetrics();
+  });
+  on('#save-bot-source', 'click', () => void submitBot());
+  on('#run-bot-practice', 'click', openCurrentPracticeRunner);
+  on('#practice-run', 'click', () => void testBotMatch());
+  on('#practice-replay-start', 'click', () => { stopPracticeReplay(); goToPracticeTurn(-1); });
+  on('#practice-replay-prev', 'click', () => { stopPracticeReplay(); goToPracticeTurn(state.practiceReplayMoveIndex - 1); });
+  on('#practice-replay-next', 'click', () => { stopPracticeReplay(); goToPracticeTurn(state.practiceReplayMoveIndex + 1); });
+  on('#practice-replay-end', 'click', () => { stopPracticeReplay(); goToPracticeTurn((state.practiceReplay?.moves?.length || 1) - 1); });
+  on('#practice-replay-play', 'click', togglePracticeReplay);
+  on('#practice-replay-scrubber', 'input', event => { stopPracticeReplay(); goToPracticeTurn(Number(event.target.value)); });
+  on('#practice-replay-speed', 'change', () => { if (state.practiceReplayActive) { stopPracticeReplay(); togglePracticeReplay(); } });
+  on('#practice-scenario', 'change', () => {
+    state.practiceAbortController?.abort();
+    state.practiceAbortController = null;
     state.practiceRequestToken += 1;
     clearPracticeResult();
   });
-  $('#bot-workspace-back').addEventListener('click', () => navigate('bots'));
-   $('#tournament-search').addEventListener('input', event => { state.tournamentSearch = event.target.value; renderTournamentList(); });
-   $('#tournament-status-filter').addEventListener('change', event => { state.tournamentStatusFilter = event.target.value; renderTournamentList(); });
-   $('#dashboard-tournament-search').addEventListener('input', event => { state.dashboardTournamentSearch = event.target.value; void loadDashboard(); });
-   $('#dashboard-tournament-status').addEventListener('change', event => { state.dashboardTournamentStatus = event.target.value; void loadDashboard(); });
-  $('#confirm-delete-bot').addEventListener('click', () => void deleteBot());
-  $('#confirm-tournament-action').addEventListener('click', () => { const pending = state.pendingTournamentAction; if (!pending) return; const revision = state.tournamentActionRevision; void runPending(`tournament:${pending.tournamentId}:${pending.action}`, $('#confirm-tournament-action'), async () => { await tournamentAction(pending.tournamentId, pending.authRevision, pending.viewRevision, pending.action); if (state.tournamentActionRevision === revision) closeModal('tournament-action-modal'); }); });
-  $('#mobile-menu-toggle').addEventListener('click', toggleMobileNavigation); $('#sidebar-backdrop').addEventListener('click', closeMobileNavigation);
-  $('#open-bot-guide').addEventListener('click', openBotGuide);
-  $('#back-to-tournaments').addEventListener('click', () => navigate('tournaments')); $('#btn-register-bot').addEventListener('click', () => { openRegistrationDialog(); void populateBotSelect(); });
-  $('#go-to-bots-from-registration').addEventListener('click', goToBotsFromRegistration);
-  $('#retry-registration-bots').addEventListener('click', retryRegistrationBots);
-  $('#reg-part-name').addEventListener('input', () => { $('#reg-part-name').setAttribute('aria-invalid', $('#reg-part-name').value.trim() ? 'false' : 'true'); });
-  $('#reg-bot-select').addEventListener('change', () => { $('#reg-bot-select').setAttribute('aria-invalid', $('#reg-bot-select').value ? 'false' : 'true'); });
-  $('#reg-bot-select').addEventListener('change', event => { void populateRevisionSelect(event.target.value); });
-   $('#reg-revision-select').addEventListener('change', () => { $('#reg-revision-select').setAttribute('aria-invalid', $('#reg-revision-select').value ? 'false' : 'true'); updateRegistrationRevisionSummary(); });
-   $('#copy-replay-match-id').addEventListener('click', () => {
+  on('#bot-workspace-back', 'click', () => navigate('bots'));
+   on('#tournament-search', 'input', event => { state.tournamentSearch = event.target.value; renderTournamentList(); });
+   on('#tournament-status-filter', 'change', event => { state.tournamentStatusFilter = event.target.value; renderTournamentList(); });
+   on('#dashboard-tournament-search', 'input', event => { state.dashboardTournamentSearch = event.target.value; void loadDashboard(); });
+   on('#dashboard-tournament-status', 'change', event => { state.dashboardTournamentStatus = event.target.value; void loadDashboard(); });
+  on('#confirm-delete-bot', 'click', () => void deleteBot());
+  on('#confirm-delete-revision', 'click', () => void deleteRevision());
+  on('#confirm-tournament-action', 'click', () => { const pending = state.pendingTournamentAction; if (!pending) return; const revision = state.tournamentActionRevision; void runPending(`tournament:${pending.tournamentId}:${pending.action}`, $('#confirm-tournament-action'), async () => { await tournamentAction(pending.tournamentId, pending.authRevision, pending.viewRevision, pending.action); if (state.tournamentActionRevision === revision) closeModal('tournament-action-modal'); }); });
+  on('#mobile-menu-toggle', 'click', toggleMobileNavigation); on('#sidebar-backdrop', 'click', closeMobileNavigation);
+  on('#open-bot-guide', 'click', openBotGuide);
+  on('#back-to-tournaments', 'click', () => navigate('tournaments')); on('#btn-register-bot', 'click', () => { openRegistrationDialog(); void populateBotSelect(); });
+  on('#go-to-bots-from-registration', 'click', goToBotsFromRegistration);
+  on('#retry-registration-bots', 'click', retryRegistrationBots);
+  on('#reg-part-name', 'input', () => { $('#reg-part-name').setAttribute('aria-invalid', $('#reg-part-name').value.trim() ? 'false' : 'true'); });
+  on('#reg-bot-select', 'change', () => { $('#reg-bot-select').setAttribute('aria-invalid', $('#reg-bot-select').value ? 'false' : 'true'); });
+  on('#reg-bot-select', 'change', event => { void populateRevisionSelect(event.target.value); }, { feature: 'registration-revision-loader' });
+   on('#reg-revision-select', 'change', () => { $('#reg-revision-select').setAttribute('aria-invalid', $('#reg-revision-select').value ? 'false' : 'true'); updateRegistrationRevisionSummary(); });
+   on('#copy-replay-match-id', 'click', () => {
      const matchId = state.replayMatchId;
      if (!matchId || !navigator.clipboard?.writeText) { showToast('Không thể sao chép mã trận.', 'error'); return; }
      void navigator.clipboard.writeText(matchId).then(() => showToast('Đã sao chép mã trận.', 'success')).catch(() => showToast('Không thể sao chép mã trận.', 'error'));
    });
-  $('#close-replay').addEventListener('click', closeReplay); $('#btn-replay-play').addEventListener('click', toggleReplayPlayback); $('#replay-retry').addEventListener('click', retryReplay); $('#replay-speed').addEventListener('change', event => { state.replaySpeed = Number(event.target.value); if (state.replayPlaybackActive) { stopReplayPlayback(); toggleReplayPlayback(); } }); $('#replay-scrubber').addEventListener('input', event => { stopReplayPlayback(); goToReplayTurn(Number(event.target.value)); }); $('#new-tourney-name').addEventListener('input', () => { $('#new-tourney-name').setAttribute('aria-invalid', 'false'); $('#tournament-form-error').hidden = true; }); $('#new-tourney-visibility').addEventListener('change', () => { $('#tournament-form-error').hidden = true; }); $('#submit-tournament').addEventListener('click', () => void submitNewTournament()); $('#submit-registration').addEventListener('click', () => void submitTournamentRegistration());
-  document.querySelectorAll('[data-close-modal]').forEach(button => button.addEventListener('click', () => closeModal(button.dataset.closeModal)));
-  document.querySelectorAll('.modal-overlay').forEach(modal => modal.addEventListener('click', event => { if (event.target === modal) closeModal(modal.id); }));
-  document.addEventListener('keydown', event => {
+  on('#close-replay', 'click', closeReplay); on('#btn-replay-play', 'click', toggleReplayPlayback); on('#replay-retry', 'click', retryReplay); on('#replay-speed', 'change', event => { state.replaySpeed = Number(event.target.value); if (state.replayPlaybackActive) { stopReplayPlayback(); toggleReplayPlayback(); } }); on('#replay-scrubber', 'input', event => { stopReplayPlayback(); goToReplayTurn(Number(event.target.value)); }); on('#new-tourney-name', 'input', () => { $('#new-tourney-name').setAttribute('aria-invalid', 'false'); $('#tournament-form-error').hidden = true; }); on('#submit-tournament', 'click', () => void submitNewTournament()); on('#submit-registration', 'click', () => void submitTournamentRegistration());
+  on('#live-game-result-close', 'click', closeLiveGameResultModal);
+  document.querySelectorAll('[data-close-modal]').forEach(button => on(button, 'click', () => closeModal(button.dataset.closeModal)));
+  document.querySelectorAll('.modal-overlay').forEach(modal => on(modal, 'click', event => { if (event.target === modal) closeModal(modal.id); }));
+  on(document, 'keydown', event => {
     if (event.key === 'Escape') {
       document.querySelectorAll('.modal-overlay.open').forEach(modal => closeModal(modal.id));
       closeMobileNavigation();
@@ -3409,21 +4385,164 @@ function bindEvents() {
       else if (event.key === 'Home') { event.preventDefault(); stopReplayPlayback(); goToReplayTurn(-1); }
       else if (event.key === 'End' && state.replay) { event.preventDefault(); stopReplayPlayback(); goToReplayTurn(state.replay.moves.length - 1); }
     } else trapModalFocus(event);
-  });
-  window.addEventListener('beforeunload', event => {
+  }, { required: true, feature: 'global keyboard navigation' });
+  on(window, 'beforeunload', event => {
     if (!state.sourceDirty) return;
     event.preventDefault();
     event.returnValue = '';
   });
-  window.addEventListener('popstate', () => {
+  on(window, 'popstate', () => {
     const hashView = window.location.hash.slice(1);
     if (hashView === 'bot-workspace') return;
     if (['dashboard', 'bots', 'tournaments'].includes(hashView)) {
       if (hashView === 'tournaments' && state.user?.role === 'competitor') state.tournamentScope = 'discoverable';
       navigate(hashView, { history: false });
     } else if (state.activeView === 'bot-workspace') navigate('bots', { history: false });
+  }, { required: true, feature: 'history navigation' });
+  on('#btn-replay-start', 'click', () => { stopReplayPlayback(); goToReplayTurn(-1); }); on('#btn-replay-prev', 'click', () => { stopReplayPlayback(); goToReplayTurn(state.replayMoveIndex - 1); }); on('#btn-replay-next', 'click', () => { stopReplayPlayback(); goToReplayTurn(state.replayMoveIndex + 1); }); on('#btn-replay-end', 'click', () => { stopReplayPlayback(); if (state.replay) goToReplayTurn(state.replay.moves.length - 1); });
+}
+
+// Clearer tournament schedule presentation: use explicit labels, winner emphasis,
+// and a compact match summary so the table can be understood at a glance.
+function renderScheduleBeforeScore(tournament) {
+  const schedule = $('#td-schedule');
+  clear(schedule);
+  if (!schedule || !tournament?.rounds?.length) return;
+
+  tournament.rounds.forEach(round => {
+    const section = create('section', { className: 'schedule-round' });
+    const heading = create('div', { className: 'schedule-round-heading' });
+    const title = create('div', { className: 'schedule-round-title' });
+    title.append(icon('td-icon-swords'), create('span', { text: `Vòng ${round.roundNumber}` }));
+    heading.append(title, create('span', {
+      className: 'schedule-round-count',
+      text: `${round.pairings.length} trận đấu`,
+    }));
+    section.appendChild(heading);
+
+    const table = create('table', { className: 'data-table schedule-table schedule-desktop-table' });
+    const headRow = create('tr');
+    ['Trận đấu', 'Đội 1', 'Đội 2', 'Trạng thái', 'Đội thắng', 'Thao tác'].forEach(label => headRow.appendChild(textCell(label, 'th')));
+    const body = create('tbody');
+    const mobileList = create('div', { className: 'schedule-mobile-list' });
+
+    round.pairings.forEach((pairing, pairingIndex) => {
+      const playerA = tournament.participants.find(participant => participant.participantId === pairing.participantA)?.name || pairing.participantA;
+      const playerB = pairing.participantB
+        ? (tournament.participants.find(participant => participant.participantId === pairing.participantB)?.name || pairing.participantB)
+        : 'Miễn đấu';
+      const isBye = pairing.participantB === null;
+      const winnerSide = pairing.matchResult?.winner;
+      let winner = isBye ? '—' : winnerSide === 'A' ? playerA : winnerSide === 'B' ? playerB : winnerSide === 'draw' ? 'Hòa' : 'Chưa có';
+      if (pairing.matchResult?.series) winner += ` · BO3 ${pairing.matchResult.series.winsA}-${pairing.matchResult.series.winsB}`;
+
+      const row = create('tr', { className: 'schedule-match-row' });
+      row.append(textCell(`Trận ${pairingIndex + 1}`), textCell(playerA), textCell(playerB));
+      const statusCell = create('td');
+      statusCell.appendChild(statusBadge(isBye ? 'bye' : pairing.status));
+      row.append(statusCell);
+      const winnerCell = textCell(winner);
+      winnerCell.classList.add('schedule-winner-cell');
+      row.append(winnerCell);
+      const actionCell = create('td', { className: 'schedule-action-cell' });
+      if (pairing.status === 'failed' && state.user?.role === 'organizer') {
+        const unavailableReplay = actionButton('Xem diễn biến', () => {}, `replay-unavailable:${tournament.tournamentId}:${pairing.pairingId}`, 'secondary-btn');
+        unavailableReplay.disabled = true;
+        unavailableReplay.title = 'Trận lỗi không có replay hợp lệ';
+        actionCell.appendChild(unavailableReplay);
+      }
+      if (pairing.status === 'failed' && state.user?.role === 'organizer') {
+        actionCell.appendChild(actionButton('Chạy lại trận', () => retryTournamentPairing(tournament.tournamentId, pairing.pairingId), `retry:${tournament.tournamentId}:${pairing.pairingId}`, 'primary-btn tournament-retry-action'));
+      }
+      if (pairing.matchId && pairing.status === 'in_progress' && (state.user?.role === 'organizer' || state.spectatorMode)) {
+        actionCell.appendChild(actionButton('Xem trực tiếp', () => openLiveMatch(tournament.tournamentId, pairing.matchId), `live:${pairing.matchId}`));
+      } else if (pairing.matchId && pairing.status !== 'failed') {
+        actionCell.appendChild(actionButton('Xem chi tiết', () => playReplay(tournament.tournamentId, pairing.matchId), `replay:${pairing.matchId}`));
+      }
+      if (!actionCell.childElementCount) actionCell.appendChild(create('span', { className: 'schedule-action-empty', text: '—' }));
+      const actionContent = create('div', { className: 'action-content' });
+      while (actionCell.firstChild) actionContent.appendChild(actionCell.firstChild);
+      actionCell.appendChild(actionContent);
+      row.append(actionCell);
+      body.appendChild(row);
+
+      const card = create('article', { className: 'schedule-match-card' });
+      const cardHeader = create('div', { className: 'schedule-card-header' });
+      cardHeader.append(create('strong', { text: `Trận ${pairingIndex + 1}` }), statusBadge(isBye ? 'bye' : pairing.status));
+      const players = create('div', { className: 'schedule-card-players' });
+      const playerCard = (label, name, isWinner) => {
+        const item = create('div', { className: `schedule-card-player${isWinner ? ' is-winner' : ''}` });
+        item.append(create('small', { text: label }), create('strong', { text: name }));
+        if (isWinner) item.append(create('span', { className: 'schedule-winner-mark', text: 'THẮNG' }));
+        return item;
+      };
+      players.append(playerCard('Đội 1', playerA, !isBye && winnerSide === 'A'), create('span', { className: 'schedule-card-vs', text: 'VS', attrs: { 'aria-hidden': 'true' } }), playerCard('Đội 2', playerB, !isBye && winnerSide === 'B'));
+      const footer = create('div', { className: 'schedule-card-footer' });
+      if (pairing.status === 'failed' && state.user?.role === 'organizer') {
+        const unavailableReplay = actionButton('Xem diễn biến', () => {}, `replay-unavailable:${tournament.tournamentId}:${pairing.pairingId}`, 'secondary-btn');
+        unavailableReplay.disabled = true;
+        unavailableReplay.title = 'Trận lỗi không có replay hợp lệ';
+        footer.appendChild(unavailableReplay);
+      }
+      if (pairing.status === 'failed' && state.user?.role === 'organizer') footer.appendChild(actionButton('Chạy lại trận', () => retryTournamentPairing(tournament.tournamentId, pairing.pairingId), `retry:${tournament.tournamentId}:${pairing.pairingId}`, 'primary-btn tournament-retry-action'));
+      footer.appendChild(create('span', { className: 'schedule-card-winner', text: isBye ? 'Miễn đấu' : `Đội thắng: ${winner}` }));
+      if (pairing.matchId && pairing.status === 'in_progress' && (state.user?.role === 'organizer' || state.spectatorMode)) {
+        footer.appendChild(actionButton('Xem trực tiếp', () => openLiveMatch(tournament.tournamentId, pairing.matchId), `live:${pairing.matchId}`));
+      }
+      else if (pairing.matchId) footer.appendChild(actionButton('Xem chi tiết', () => playReplay(tournament.tournamentId, pairing.matchId), `replay:${pairing.matchId}`));
+      card.append(cardHeader, players, footer);
+      mobileList.appendChild(card);
+    });
+
+    const head = create('thead');
+    head.appendChild(headRow);
+    table.append(head, body);
+    const tableWrap = create('div', { className: 'schedule-table-scroll', attrs: { role: 'region', 'aria-label': `Lịch thi đấu vòng ${round.roundNumber}`, tabindex: '0' } });
+    tableWrap.appendChild(table);
+    section.append(mobileList, tableWrap);
+    schedule.appendChild(section);
   });
-  $('#btn-replay-start').addEventListener('click', () => { stopReplayPlayback(); goToReplayTurn(-1); }); $('#btn-replay-prev').addEventListener('click', () => { stopReplayPlayback(); goToReplayTurn(state.replayMoveIndex - 1); }); $('#btn-replay-next').addEventListener('click', () => { stopReplayPlayback(); goToReplayTurn(state.replayMoveIndex + 1); }); $('#btn-replay-end').addEventListener('click', () => { stopReplayPlayback(); if (state.replay) goToReplayTurn(state.replay.moves.length - 1); });
+}
+
+function renderSchedule(tournament, viewerParticipantIds = []) {
+  renderScheduleBeforeScore(tournament);
+  const rounds = [...document.querySelectorAll('#td-schedule .schedule-round')];
+  rounds.forEach((section, roundIndex) => {
+    const pairings = tournament.rounds?.[roundIndex]?.pairings || [];
+    const table = section.querySelector('.schedule-table');
+    const headerRow = table?.querySelector('thead tr');
+    if (headerRow) headerRow.insertBefore(textCell('T\u1ec9 s\u1ed1', 'th'), headerRow.cells[4]);
+    section.querySelectorAll('.schedule-table tbody tr').forEach((row, pairingIndex) => {
+      const pairing = pairings[pairingIndex];
+      if (pairing && (viewerParticipantIds.includes(pairing.participantA) || viewerParticipantIds.includes(pairing.participantB))) row.classList.add('is-viewer-match');
+      const score = pairing?.matchResult?.series
+        ? `${pairing.matchResult.series.winsA}\u2013${pairing.matchResult.series.winsB}`
+        : pairing?.matchResult?.score
+          || (pairing?.matchResult?.winner === 'A' ? '1\u20130' : pairing?.matchResult?.winner === 'B' ? '0\u20131' : pairing?.matchResult?.winner === 'draw' ? '0\u20130' : '\u2014');
+      const scoreCell = textCell(score);
+      scoreCell.classList.add('schedule-score-cell');
+      row.insertBefore(scoreCell, row.cells[4]);
+      const winnerCell = row.cells[5];
+      if (winnerCell && pairing?.matchResult?.winner) {
+        const winnerId = pairing.matchResult.winner === 'A' ? pairing.participantA : pairing.matchResult.winner === 'B' ? pairing.participantB : null;
+        const winnerName = winnerId ? tournament.participants.find(participant => participant.participantId === winnerId)?.name || winnerId : 'Hòa';
+        winnerCell.textContent = winnerName;
+      }
+    });
+    section.querySelectorAll('.schedule-table td .secondary-btn, .schedule-card-footer .secondary-btn').forEach(button => {
+      button.textContent = 'Xem di\u1ec5n bi\u1ebfn';
+    });
+    section.querySelectorAll('.schedule-mobile-list .schedule-match-card').forEach((card, pairingIndex) => {
+      const pairing = pairings[pairingIndex];
+      if (pairing && (viewerParticipantIds.includes(pairing.participantA) || viewerParticipantIds.includes(pairing.participantB))) card.classList.add('is-viewer-match');
+      const score = pairing?.matchResult?.series
+        ? `${pairing.matchResult.series.winsA}\u2013${pairing.matchResult.series.winsB}`
+        : pairing?.matchResult?.score
+          || (pairing?.matchResult?.winner === 'A' ? '1\u20130' : pairing?.matchResult?.winner === 'B' ? '0\u20131' : pairing?.matchResult?.winner === 'draw' ? '0\u20130' : '\u2014');
+      const winner = card.querySelector('.schedule-card-winner');
+      if (winner) winner.textContent = `${winner.textContent.replace(/\s*[·Â·].*$/, '')} · T\u1ec9 s\u1ed1: ${score}`;
+    });
+  });
 }
 
 repairMojibakeDom();
@@ -3432,11 +4551,14 @@ if (window.MutationObserver) {
   const mojibakeObserver = new MutationObserver(() => repairMojibakeDom());
   mojibakeObserver.observe(document.body, { childList: true, characterData: true, subtree: true, attributes: true, attributeFilter: ['aria-label', 'title', 'placeholder'] });
 }
-document.querySelectorAll('.bottom-nav [data-target]').forEach(button => button.addEventListener('click', () => {
+document.querySelectorAll('.bottom-nav [data-target]').forEach(button => bindEvent(button, 'click', () => {
   state.tournamentScope = button.dataset.target === 'my-tournaments' ? 'mine' : 'discoverable';
   navigate(button.dataset.target === 'my-tournaments' ? 'tournaments' : button.dataset.target);
 }));
-if (window.ResizeObserver) new ResizeObserver(updateEditorMetrics).observe($('#bot-source-editor'));
+if (window.ResizeObserver) {
+  const editor = $('#bot-source-editor');
+  if (editor) new ResizeObserver(updateEditorMetrics).observe(editor);
+}
 updateEditorMetrics();
 setAuthMode('login', false); setupReplayCoordinates(); void restoreSession();
 setInterval(() => {

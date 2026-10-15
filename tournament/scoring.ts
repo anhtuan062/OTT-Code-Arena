@@ -52,7 +52,9 @@ export function analyzeMatchForParticipant(
       opponentId: null,
       isBye: true,
       result: 'bye',
-      points: scoringConfig.byePoints ?? scoringConfig.winPoints,
+      // A bye advances the participant without being a played win and must
+      // never award tournament points.
+      points: 0,
       terminationReason,
       isForfeit: false,
     };

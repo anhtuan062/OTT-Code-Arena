@@ -12,8 +12,99 @@ import {
 } from '@tournament/manager.js';
 import { FileTournamentRepository } from '@tournament/persistence.js';
 import { clearExecutorCache } from '@bot-executor/index.js';
-import type { TournamentBot } from '@tournament/types.js';
+import { createChildProcessExecutor } from '@bot-executor/index.js';
+import { createMatchRunnerExecutor } from '@tournament/executor.js';
+import type { TournamentBot, TournamentMatchRecord, TournamentScoringConfig, TournamentStanding } from '@tournament/types.js';
 import type { MatchResult } from '@match-runner/types.js';
+import type { MatchExecutor } from '@tournament/executor.js';
+
+const diagnosticProgress = process.env.BO3_DIAGNOSTIC_PROGRESS === '1';
+const diagnosticLog = (event: string, fields: Record<string, unknown> = {}): void => {
+  if (diagnosticProgress) console.log(JSON.stringify({ diagnostic: 'integration-progress', at: new Date().toISOString(), event, ...fields }));
+};
+
+async function createDiagnosticExecutor(): Promise<MatchExecutor | undefined> {
+  if (!diagnosticProgress) return undefined;
+  const botExecutor = createChildProcessExecutor({ executionPolicy: 'development' });
+  const runner = await createMatchRunnerExecutor({}, botExecutor);
+  return {
+    async isAvailable() { return runner.isAvailable(); },
+    async executeMatch(matchId, playerA, playerB, config, callbacks, signal) {
+      const startedAt = Date.now();
+      let turnsStarted = 0;
+      diagnosticLog('match-start', { matchId, playerA: playerA.botId, playerB: playerB.botId });
+      const result = await runner.executeMatch(matchId, playerA, playerB, config, {
+        ...callbacks,
+        onTurnStart: (turn, player) => {
+          turnsStarted += 1;
+          if (turn === 1 || turn % 10 === 0) {
+            diagnosticLog('turn-progress', { matchId, turn, player, turnsStarted, elapsedMs: Date.now() - startedAt });
+          }
+          callbacks?.onTurnStart?.(turn, player);
+        },
+        onMatchEnd: result => {
+          diagnosticLog('game-complete', { matchId, turnsStarted, elapsedMs: Date.now() - startedAt, winner: result.winner, terminationReason: result.terminationReason });
+          callbacks?.onMatchEnd?.(result);
+        },
+      }, signal);
+      diagnosticLog('match-complete', { matchId, turnsStarted, elapsedMs: Date.now() - startedAt, winner: result.winner, terminationReason: result.terminationReason });
+      return result;
+    },
+  };
+}
+
+type OracleStanding = Pick<TournamentStanding, 'matchesPlayed' | 'wins' | 'draws' | 'losses' | 'forfeits' | 'points'>;
+
+const BOT_FORFEIT_TERMINATIONS = new Set([
+  'bot_timeout', 'bot_crash', 'bot_invalid_json', 'bot_invalid_response', 'bot_illegal_move', 'bot_empty_output',
+]);
+const LEGITIMATE_DRAW_TERMINATIONS = new Set(['turn_limit', 'repetition', 'insufficient_material']);
+
+/**
+ * Test oracle deliberately maps final committed outcomes to table points
+ * without calling the production standings calculator.
+ */
+function independentlyScoreCompletedMatches(
+  participants: readonly string[],
+  records: readonly TournamentMatchRecord[],
+  scoring: TournamentScoringConfig,
+): Map<string, OracleStanding> {
+  const expected = new Map(participants.map(participantId => [participantId, {
+    matchesPlayed: 0, wins: 0, draws: 0, losses: 0, forfeits: 0, points: 0,
+  }]));
+  const matchIds = new Set<string>();
+  const pairingIds = new Set<string>();
+
+  for (const record of records) {
+    if (!record.participantB || record.winner === null || record.seriesGameOf
+      || record.terminationReason === 'engine_error' || record.terminationReason === 'unknown') {
+      throw new Error(`Unsupported or incomplete standings record: ${record.matchId}`);
+    }
+    if (matchIds.has(record.matchId) || pairingIds.has(record.pairingId)) {
+      throw new Error(`Duplicate committed match result: ${record.matchId}`);
+    }
+    matchIds.add(record.matchId); pairingIds.add(record.pairingId);
+    const a = expected.get(record.participantA);
+    const b = expected.get(record.participantB);
+    if (!a || !b) throw new Error(`Unknown participant in match result: ${record.matchId}`);
+    a.matchesPlayed += 1; b.matchesPlayed += 1;
+    const isForfeit = BOT_FORFEIT_TERMINATIONS.has(record.terminationReason);
+    if (record.winner === 'draw') {
+      if (!LEGITIMATE_DRAW_TERMINATIONS.has(record.terminationReason)) {
+        throw new Error(`Non-competitive draw result: ${record.matchId}`);
+      }
+      a.draws += 1; b.draws += 1;
+      a.points += scoring.drawPoints; b.points += scoring.drawPoints;
+      continue;
+    }
+    const winner = record.winner === 'A' ? a : b;
+    const loser = record.winner === 'A' ? b : a;
+    winner.wins += 1; loser.losses += 1;
+    winner.points += scoring.winPoints; loser.points += scoring.lossPoints;
+    if (isForfeit) { winner.forfeits += 1; loser.forfeits += 1; }
+  }
+  return expected;
+}
 
 describe('Tournament Manager - Integration', () => {
   let testDir: string;
@@ -23,7 +114,9 @@ describe('Tournament Manager - Integration', () => {
     clearExecutorCache();
     testDir = path.join(os.tmpdir(), `ott-integration-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
     await fs.mkdir(testDir, { recursive: true });
-    manager = await createTournamentManager(testDir);
+    const diagnosticExecutor = await createDiagnosticExecutor();
+    manager = await createTournamentManager(testDir, diagnosticExecutor);
+    diagnosticLog('fixture-ready', { testDir });
   });
 
   afterEach(async () => {
@@ -82,14 +175,46 @@ describe('Tournament Manager - Integration', () => {
     const tournament = (await manager.loadTournament('integration-1')).data!;
     expect(tournament.status).toBe('completed');
 
-    // Verify standings
+    // Independently reconstruct final committed outcomes. This fixture's bots
+    // can legally draw at the turn limit, so a fixed "three points per match"
+    // assertion is not a valid standings oracle.
+    const completedPairings = tournament.rounds.flatMap(round => round.pairings)
+      .filter(pairing => pairing.participantB !== null);
+    expect(completedPairings).toHaveLength(totalMatches);
+    expect(completedPairings.every(pairing => pairing.status === 'completed' && pairing.matchResult !== null)).toBe(true);
+    const committedRecords = completedPairings.map(pairing => pairing.matchResult!);
+    const expectedStandings = independentlyScoreCompletedMatches(
+      tournament.participants.map(participant => participant.participantId),
+      committedRecords,
+      tournament.scoringConfig,
+    );
+
+    if (process.env.BO3_SCORING_SUMMARY === '1') {
+      console.log(JSON.stringify({
+        diagnostic: 'scoring-summary',
+        matches: committedRecords.map((record) => ({
+          id: record.id,
+          pairingId: record.pairingId,
+          participantAId: record.participantAId,
+          participantBId: record.participantBId,
+          winner: record.winner,
+          terminationReason: record.terminationReason,
+          seriesGameOf: record.seriesGameOf,
+        })),
+        expectedStandings: Object.fromEntries(expectedStandings),
+      }));
+    }
+
+    // Verify production standings against the independent outcome mapping.
     const standingsResult = await manager.getStandings('integration-1');
     expect(standingsResult.success).toBe(true);
     expect(standingsResult.data).toHaveLength(4);
-
-    // Total points should equal 3 * 6 = 18 (3 points per match * 6 matches)
-    const totalPoints = standingsResult.data!.reduce((sum, s) => sum + s.points, 0);
-    expect(totalPoints).toBe(18);
+    for (const standing of standingsResult.data!) {
+      expect(standing).toMatchObject(expectedStandings.get(standing.participantId)!);
+    }
+    const expectedAggregatePoints = [...expectedStandings.values()].reduce((sum, standing) => sum + standing.points, 0);
+    const actualAggregatePoints = standingsResult.data!.reduce((sum, standing) => sum + standing.points, 0);
+    expect(actualAggregatePoints).toBe(expectedAggregatePoints);
 
     // Verify all match results persisted
     const statsResult = await manager.getStats('integration-1');
@@ -102,6 +227,10 @@ describe('Tournament Manager - Integration', () => {
       const replayResult = await manager.getReplay('integration-1', match.matchResult.matchId);
       expect(replayResult.success).toBe(true);
       expect(replayResult.data).toBeDefined();
+      expect(replayResult.data?.matchId).toBe(match.matchResult.matchId);
+      expect(replayResult.data?.winner).toBe(match.matchResult.winner);
+      expect(replayResult.data?.terminationReason).toBe(match.matchResult.terminationReason);
+      expect(replayResult.data?.finalState).toBeDefined();
     }
   }, 120000); // 2 minute timeout for full tournament
 

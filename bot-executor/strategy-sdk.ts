@@ -8,6 +8,9 @@ import type { SourceRuntimeId } from '@match-runner/types.js';
 export const STRATEGY_SDK_VERSION = '1.0.0';
 export type StrategyExecutionMode = 'raw' | 'strategy';
 
+const SDK_VERSION_PREFIX = 'ott-strategy-sdk@';
+const SDK_VERSION_PATTERN = /^([0-9]+\.[0-9]+\.[0-9]+)$/;
+
 export function wrapCppStrategySource(source: string): string {
   return '#include "ott_strategy_sdk.hpp"\n' + source + '\nint main() { return ott::run(chooseMove); }\n';
 }
@@ -27,10 +30,31 @@ function filesFor(runtimeId: SourceRuntimeId): string[] {
     : [path.join(root, 'VERSION'), path.join(root, 'python', 'ott_strategy_sdk.py'), path.join(root, 'python', 'runner.py')];
 }
 
+function parseSdkVersion(content: Buffer): string {
+  const descriptor = content.toString('utf8').trim();
+  if (!descriptor.startsWith(SDK_VERSION_PREFIX)) {
+    throw new Error('Strategy SDK VERSION must use the ott-strategy-sdk@X.Y.Z format');
+  }
+  const version = descriptor.slice(SDK_VERSION_PREFIX.length);
+  if (!SDK_VERSION_PATTERN.test(version)) {
+    throw new Error('Strategy SDK VERSION contains an invalid version');
+  }
+  if (version !== STRATEGY_SDK_VERSION) {
+    throw new Error('Strategy SDK VERSION disagrees with the compatibility version constant');
+  }
+  return version;
+}
+
 export async function getStrategySdkIdentity(runtimeId: SourceRuntimeId): Promise<{ version: string; digest: string }> {
-  const contents = await Promise.all(filesFor(runtimeId).map(file => readFile(file)));
+  let contents: Buffer[];
+  try {
+    contents = await Promise.all(filesFor(runtimeId).map(file => readFile(file)));
+  } catch {
+    throw new Error('Strategy SDK artifact is incomplete or unreadable');
+  }
+  const version = parseSdkVersion(contents[0]!);
   const digest = createHash('sha256').update(Buffer.concat(contents)).digest('hex');
-  return { version: STRATEGY_SDK_VERSION, digest };
+  return { version, digest };
 }
 
 export async function materializeStrategySdk(runtimeId: SourceRuntimeId, targetRoot: string): Promise<void> {

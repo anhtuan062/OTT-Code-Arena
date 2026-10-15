@@ -1,83 +1,76 @@
-# OTTv2 Game Rules
+# Luật chơi OTTv2
 
-## Board
-- Size: 9×9
-- Coordinates: `a1` through `i9` (columns a-i, rows 1-9)
-- Internal representation: 0-indexed rows (0-8) and columns (0-8)
-- Goal squares: `a1` (0,0) and `i9` (8,8)
+## Bàn cờ và quân
 
-## Pieces
-Each player starts with 9 pieces (3 of each type):
-- **Dam (Búa/Rock)**: defeats Keo
-- **La (Lá/Paper)**: defeats Dam
-- **Keo (Kéo/Scissors)**: defeats La
+- Bàn cờ có kích thước 9×9.
+- Tọa độ ngoài dùng từ `a1` đến `i9`; bên trong dùng `row` và `col` từ 0 đến 8.
+- Mỗi bên bắt đầu với 9 quân: 3 Búa (`dam`), 3 Bao (`la`) và 3 Kéo (`keo`).
+- Bên A đi trước và xuất phát ở ba hàng phía trên; bên B xuất phát ở ba hàng phía dưới.
 
-### Initial Layout (Player 1 at top/left, Player 2 at bottom/right)
+Trong BO3, layout được chọn ổn định từ series seed. Ván 1, 2 và 3 dùng ba layout khác nhau; chạy lại hoặc khởi động lại vẫn tái tạo đúng layout của ván đó.
 
-**Player 1 (rows 0-2):**
-| Piece | Positions (row, col) | Algebraic |
-|-------|---------------------|-----------|
-| Dam   | (0,2), (1,6), (2,7) | c1, g2, h3 |
-| La    | (0,5), (1,8), (2,1) | f1, i2, b3 |
-| Keo   | (0,8), (1,3), (2,4) | i1, d2, e3 |
+## Di chuyển
 
-**Player 2 (rows 6-8):**
-| Piece | Positions (row, col) | Algebraic |
-|-------|---------------------|-----------|
-| Dam   | (8,6), (7,2), (6,1) | g9, c8, b7 |
-| La    | (8,3), (7,0), (6,7) | d9, a8, h7 |
-| Keo   | (8,0), (7,5), (6,4) | a9, f8, e7 |
+Một quân đi đúng một ô theo một trong tám hướng:
 
-## Movement
-- A piece moves exactly one square in any of 8 directions (king's move in chess)
-- Valid moves: (dr, dc) where dr,dc ∈ {-1,0,1} and not both 0
-- Cannot move off board
-- Cannot move onto own piece
-- Can move to empty square OR capture enemy piece
+- ngang;
+- dọc;
+- chéo.
 
-## Capture Rules
-- Can only capture enemy piece of a type that your piece defeats
-- Cannot capture same type (Dam cannot capture Dam)
-- Cannot capture friendly piece
-- Capture relationships (rock-paper-scissors):
-  - Dam (Rock) → Keo (Scissors)
-  - Keo (Scissors) → La (Paper)
-  - La (Paper) → Dam (Rock)
+Không được đi ra ngoài bàn cờ, đứng yên hoặc đi vào ô có quân cùng bên.
 
-## Win Conditions
-A player wins immediately when ANY of these occur:
-1. **Type elimination**: Opponent has 0 pieces of any one type (Dam, La, or Keo)
-2. **Goal square**: A piece reaches `a1` (0,0) or `i9` (8,8)
+## Ăn quân
 
-## Turn Order
-- Player 1 moves first
-- Players alternate turns
-- Turn counter increments after each successful move
+Quan hệ ăn quân:
 
-## Draw Conditions (Provisional - needs confirmation)
-- Maximum 200 turns (configurable)
-- Threefold repetition (same position with same player to move)
-- Insufficient material (both players cannot win)
+| Quân đi | Ăn được |
+| --- | --- |
+| Búa (`dam`) | Kéo (`keo`) |
+| Kéo (`keo`) | Bao (`la`) |
+| Bao (`la`) | Búa (`dam`) |
 
-## Invalid Move Handling (Provisional)
-- Bot loses the game immediately on invalid move
-- Alternative: skip turn, log warning (needs decision)
+Không được ăn quân cùng loại hoặc quân cùng bên.
 
-## Timeout/Crash Handling (Provisional)
-- Bot loses on timeout (>2 seconds per move, configurable)
-- Bot loses on crash (non-zero exit code, stderr output)
-- Match recorded as forfeit
+## Điều kiện thắng
 
-## Unresolved Decisions (TODO)
-- [ ] Are goal squares assigned to specific players or shared?
-- [ ] What happens if both win conditions trigger simultaneously?
-- [ ] Exact maximum turn limit
-- [ ] Threefold repetition detection implementation
-- [ ] Insufficient material definition
-- [ ] Invalid move penalty severity
-- [ ] Timeout duration
-- [ ] Scoring system for tournament (win=3, draw=1, loss=0?)
-- [ ] Tie-breaking rules
+Một bên thắng ngay khi:
 
-## Configuration
-All provisional values should be configurable via a rules config object to allow easy adjustment once official rules are confirmed.
+1. ăn hết toàn bộ quân đối thủ; hoặc
+2. đưa một quân tới ô đích của mình.
+
+Ô đích được gắn theo bên:
+
+- A thắng khi tới `i9`;
+- B thắng khi tới `a1`.
+
+Chỉ ăn hết một loại quân của đối thủ không tạo chiến thắng.
+
+## Điều kiện hòa
+
+Ván đấu hòa khi:
+
+- số lượt vượt quá `maxTurns` của trận, mặc định 200;
+- cùng một thế cờ với cùng bên đến lượt xuất hiện ba lần khi position history được cung cấp;
+- hai bên chỉ còn một loại quân giống nhau;
+- không còn legal move nhưng engine không xác định được bên thắng.
+
+## Lỗi bot
+
+Bot thua ván theo forfeit nếu:
+
+- timeout;
+- process crash;
+- output rỗng hoặc không phải JSON hợp lệ;
+- response thiếu trường bắt buộc;
+- nước đi không nằm trong legal moves;
+- vi phạm policy bảo mật hoặc giới hạn tài nguyên.
+
+Lỗi hạ tầng như Docker không sẵn sàng được phân biệt với kết quả thi đấu; pairing có thể chuyển sang `failed` để organizer chạy lại.
+
+## BO1, BO3 và điểm giải
+
+- BO1 kết thúc sau một ván và hiển thị tỷ số `1-0`, `0-1` hoặc `0-0` nếu hòa.
+- BO3 kết thúc khi một participant đủ hai ván thắng hoặc sau ba ván.
+- Ván hòa không cộng vào số ván thắng.
+- Điểm bảng xếp hạng tính theo series: thắng 3, hòa 1, thua 0.
+- Miễn đấu chỉ giúp participant đi tiếp trong lịch; không đánh dấu là thắng và không cộng điểm.

@@ -430,6 +430,30 @@ describe('Tournament Manager', () => {
       expect(completed.rounds[0]?.pairings[0]?.status).toBe('completed');
     });
 
+    it('fails closed when retry is requested for a completed pairing', async () => {
+      const manager = new TournamentManager({ repository, executor: mockExecutor });
+      await createTestTournament(manager, 'retry-completed-policy', 'Completed retry policy');
+      await registerParticipants(manager, 'retry-completed-policy', 2);
+      await manager.openRegistration('retry-completed-policy');
+      await manager.generateSchedule('retry-completed-policy');
+      await manager.startTournament('retry-completed-policy');
+
+      mockExecutor.setMatchResult(
+        'retry-completed-policy-P1-v-P2-r1',
+        createMockMatchResult('retry-completed-policy-P1-v-P2-r1'),
+      );
+      expect((await manager.runAllMatches('retry-completed-policy')).success).toBe(true);
+
+      const tournament = (await manager.loadTournament('retry-completed-policy')).data!;
+      const pairing = tournament.rounds[0]?.pairings[0];
+      expect(pairing?.status).toBe('completed');
+      const retry = await manager.retryPairingById('retry-completed-policy', pairing!.pairingId);
+
+      expect(retry.success).toBe(false);
+      expect(retry.error).toContain('explicit attempt policy');
+      expect((await manager.loadTournament('retry-completed-policy')).data?.rounds[0]?.pairings[0]?.status).toBe('completed');
+    });
+
     it('should complete tournament after all matches', async () => {
       const manager = new TournamentManager({
         repository,

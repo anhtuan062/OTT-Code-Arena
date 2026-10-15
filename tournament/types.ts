@@ -112,6 +112,18 @@ export interface TournamentPairing {
   failureReason?: string | null;
   /** Stable diagnostic category; never contains internal exception text. */
   failureCode?: PairingFailureCode | null;
+  /** Durable BO3 progress. Absent on legacy BO1 pairings. */
+  seriesProgress?: TournamentSeriesProgress | null;
+}
+
+export interface TournamentSeriesProgress {
+  format: 'bo3';
+  bestOf: 3;
+  seed: string;
+  nextGame: 1 | 2 | 3;
+  winsA: number;
+  winsB: number;
+  games: TournamentSeriesGameRecord[];
 }
 
 /**
@@ -130,6 +142,34 @@ export interface TournamentMatchRecord {
   completedAt: string;
   executionProvenance?: import('@match-runner/types.js').ExecutionProvenance[];
   executionDiagnostics?: ExecutionDiagnostic[];
+  /** Present for a BO3 aggregate record; absent for historical BO1 records. */
+  series?: TournamentSeriesRecord;
+  /** Internal per-game artifact, excluded from standings aggregation. */
+  seriesGameOf?: string;
+}
+
+export interface TournamentSeriesGameRecord {
+  gameNumber: 1 | 2 | 3;
+  matchId: string;
+  participantA: string;
+  participantB: string;
+  winner: Player | 'draw' | null;
+  winnerParticipantId: string | null;
+  terminationReason: TerminationReason | null;
+  turnCount: number;
+  durationMs: number;
+  replayRef: string;
+  completedAt: string;
+}
+
+export interface TournamentSeriesRecord {
+  format: 'bo3';
+  bestOf: 3;
+  seed: string;
+  games: TournamentSeriesGameRecord[];
+  winsA: number;
+  winsB: number;
+  winner: Player | 'draw';
 }
 
 /**
@@ -146,6 +186,8 @@ export interface TournamentMatchConfig {
   logRequests: boolean;
   logResponses: boolean;
   logStates: boolean;
+  /** New tournaments default to BO3; omitted means legacy BO1. */
+  bestOf?: 1 | 3;
 }
 
 /**
@@ -155,7 +197,7 @@ export interface TournamentScoringConfig {
   winPoints: number;
   drawPoints: number;
   lossPoints: number;
-  byePoints?: number; // Points awarded for a bye (default: winPoints)
+  byePoints?: number; // Deprecated; byes always award 0 points.
 }
 
 /**
@@ -211,6 +253,10 @@ export const DEFAULT_TOURNAMENT_MATCH_CONFIG: TournamentMatchConfig = {
   logRequests: true,
   logResponses: true,
   logStates: false,
+  // Library-created fixtures remain BO1 unless the production API opts into
+  // the new series format explicitly. Persisted tournaments without this
+  // field are therefore safely treated as historical BO1 records.
+  bestOf: 1,
 };
 
 /**
@@ -220,7 +266,7 @@ export const DEFAULT_SCORING_CONFIG: TournamentScoringConfig = {
   winPoints: 3,
   drawPoints: 1,
   lossPoints: 0,
-  byePoints: 3, // By default, bye = win
+  byePoints: 0, // A bye advances without awarding points.
 };
 
 /**

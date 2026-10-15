@@ -148,8 +148,12 @@ export interface ExecutionContext {
   matchId: string;
   turn: number;
   player: 'A' | 'B';
+  /** Optional per-runtime budget. When omitted, the executor default is used. */
+  timeoutMs?: number;
   resourceLimits?: ResourceLimits;
   signal?: AbortSignal;
+  /** Keeps a prepared source artifact alive only for this match/session. */
+  revisionScopeId?: string;
 }
 
 export class ExecutionCancelledError extends Error {
@@ -204,6 +208,9 @@ export interface SourceRevisionExecutor {
     revision: { execution: SourceRevisionExecution; source: Buffer },
     request: BotRequestMessage
   ): Promise<BotExecutionResult>;
+
+  /** Release artifacts retained for a completed match/session. */
+  releaseRevisionScope?(scopeId: string): Promise<boolean>;
 }
 
 /**

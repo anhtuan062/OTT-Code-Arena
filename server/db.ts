@@ -11,7 +11,7 @@ import * as path from 'path';
 import * as fs from 'fs/promises';
 import { randomUUID } from 'crypto';
 
-export const CURRENT_SCHEMA_VERSION = 4;
+export const CURRENT_SCHEMA_VERSION = 5;
 
 export interface DatabaseConfig {
   path: string;
@@ -181,7 +181,22 @@ function getMigrations(): string[] {
     ALTER TABLE bot_revisions ADD COLUMN execution_mode TEXT NOT NULL DEFAULT 'raw'
       CHECK (execution_mode IN ('raw', 'strategy'));
     ALTER TABLE bot_revisions ADD COLUMN sdk_version TEXT;
-    ALTER TABLE bot_revisions ADD COLUMN sdk_digest TEXT;`];
+    ALTER TABLE bot_revisions ADD COLUMN sdk_digest TEXT;`, `
+    CREATE TABLE IF NOT EXISTS spectator_entitlements (
+      id TEXT PRIMARY KEY,
+      tournament_id TEXT NOT NULL,
+      viewer_id TEXT NOT NULL,
+      granted_by TEXT NOT NULL,
+      granted_at TEXT NOT NULL,
+      revoked_at TEXT,
+      UNIQUE (tournament_id, viewer_id),
+      FOREIGN KEY (viewer_id) REFERENCES users(id) ON DELETE CASCADE,
+      FOREIGN KEY (granted_by) REFERENCES users(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_spectator_entitlements_tournament
+      ON spectator_entitlements(tournament_id, revoked_at);
+    CREATE INDEX IF NOT EXISTS idx_spectator_entitlements_viewer
+      ON spectator_entitlements(viewer_id, revoked_at);`];
 }
 
 export async function initializeDatabase(config: DatabaseConfig): Promise<DatabaseWrapper> {

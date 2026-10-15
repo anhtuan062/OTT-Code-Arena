@@ -85,6 +85,43 @@ describe('Execution Policy', () => {
       ).rejects.toThrow('Sandbox-required policy does not allow child-process executor');
     });
 
+    it('rejects an explicitly unsafe policy even when NODE_ENV is production', async () => {
+      const previousNodeEnv = process.env.NODE_ENV;
+      try {
+        process.env.NODE_ENV = 'production';
+        await expect(createExecutor({
+          type: 'child-process',
+          childProcessConfig: { executionPolicy: 'development' },
+        })).rejects.toThrow('Production requires sandbox-required execution policy');
+        expect(getCachedExecutorType()).toBeNull();
+      } finally {
+        if (previousNodeEnv === undefined) delete process.env.NODE_ENV;
+        else process.env.NODE_ENV = previousNodeEnv;
+      }
+    });
+
+    it('rejects production auto mode before any host fallback when Docker is unavailable', async () => {
+      const previousNodeEnv = process.env.NODE_ENV;
+      const previousPolicy = process.env.EXECUTION_POLICY;
+      const previousImage = process.env.BOT_DOCKER_IMAGE;
+      try {
+        process.env.NODE_ENV = 'production';
+        delete process.env.BOT_DOCKER_IMAGE;
+        await expect(createExecutor({
+          type: 'auto',
+          childProcessConfig: { executionPolicy: 'sandbox-required' },
+        })).rejects.toThrow('BOT_DOCKER_IMAGE');
+        expect(getCachedExecutorType()).toBeNull();
+      } finally {
+        if (previousNodeEnv === undefined) delete process.env.NODE_ENV;
+        else process.env.NODE_ENV = previousNodeEnv;
+        if (previousPolicy === undefined) delete process.env.EXECUTION_POLICY;
+        else process.env.EXECUTION_POLICY = previousPolicy;
+        if (previousImage === undefined) delete process.env.BOT_DOCKER_IMAGE;
+        else process.env.BOT_DOCKER_IMAGE = previousImage;
+      }
+    });
+
     it('should reject auto mode when Docker unavailable and sandbox-required', async () => {
       await expect(
         createExecutor({
@@ -152,15 +189,23 @@ describe('Execution Policy', () => {
       expect(getCachedPolicy()).toBe('development');
     });
 
-    it('should fall back to child-process when Docker unavailable in development auto mode', async () => {
+    it('requires explicit child-process selection for local development host execution', async () => {
       const executor = await createExecutor({
-        type: 'auto',
-        dockerConfig: unavailableDocker,
+        type: 'child-process',
         childProcessConfig: { executionPolicy: 'development' },
       });
       expect(executor).toBeDefined();
       expect(getCachedExecutorType()).toBe('child-process');
       expect(getCachedPolicy()).toBe('development');
+    });
+
+    it('does not silently fall back to host execution in development auto mode', async () => {
+      await expect(createExecutor({
+        type: 'auto',
+        dockerConfig: unavailableDocker,
+        childProcessConfig: { executionPolicy: 'development' },
+      })).rejects.toThrow('Docker executor is unavailable');
+      expect(getCachedExecutorType()).toBeNull();
     });
 
     it('should default to development policy when not specified', async () => {

@@ -20,42 +20,21 @@ export function checkWin(state: GameState): WinCheckResult {
     };
   }
 
-  // Check type elimination for both players
+  // A player wins only after capturing every opposing piece.
   const aPieces = getPlayerPieces(state, 'A');
   const bPieces = getPlayerPieces(state, 'B');
-  const aTypes = new Set(aPieces.map(p => p.type));
-  const bTypes = new Set(bPieces.map(p => p.type));
-
-  const aMissingDam = !aTypes.has('dam');
-  const aMissingLa = !aTypes.has('la');
-  const aMissingKeo = !aTypes.has('keo');
-  const bMissingDam = !bTypes.has('dam');
-  const bMissingLa = !bTypes.has('la');
-  const bMissingKeo = !bTypes.has('keo');
-
-  const aMissingAny = aMissingDam || aMissingLa || aMissingKeo;
-  const bMissingAny = bMissingDam || bMissingLa || bMissingKeo;
-
-  // If both players missing types, it's a draw (insufficient material)
-  if (aMissingAny && bMissingAny) {
-    return { isWin: false, winner: null, reason: null };
-  }
-
-  // Player A wins if B is missing a type
-  if (bMissingAny) {
+  if (bPieces.length === 0 && aPieces.length > 0) {
     return {
       isWin: true,
       winner: 'A',
-      reason: 'type_elimination',
+      reason: 'all_pieces_captured',
     };
   }
-
-  // Player B wins if A is missing a type
-  if (aMissingAny) {
+  if (aPieces.length === 0 && bPieces.length > 0) {
     return {
       isWin: true,
       winner: 'B',
-      reason: 'type_elimination',
+      reason: 'all_pieces_captured',
     };
   }
 

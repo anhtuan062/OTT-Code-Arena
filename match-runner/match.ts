@@ -3,7 +3,7 @@
  */
 
 import { GameEngine } from '@engine/index.js';
-import { constructBotRequest, botMoveToCoords } from '@bot-protocol/validation.js';
+import { constructBotRequest, validateBotRequest, botMoveToCoords } from '@bot-protocol/validation.js';
 import { BotRunner, createBotProcessConfig } from '@bot-runner/index.js';
 import { BotExecutor, BotRunnerAdapter } from '@bot-executor/index.js';
 import {
@@ -25,6 +25,18 @@ import type { BotRequestMessage } from '@bot-runner/types.js';
 import { ExecutionCancelledError } from '@bot-executor/types.js';
 import type { BotProcessConfig, BotExecutionResult, SourceRevisionExecutor } from '@bot-executor/types.js';
 import type { SourceRevisionExecution, ExecutionDiagnostic } from './types.js';
+import { createHash } from 'node:crypto';
+
+function createTurnExecutionId(matchId: string, turn: number, player: Player): string {
+  const suffix = `-turn-${turn}-${player}`;
+  const plain = `${matchId}${suffix}`;
+  if (plain.length <= 128) return plain;
+  // Docker/container identifiers are capped at 128 characters. Preserve a
+  // stable match fingerprint plus the turn/player suffix so long tournament
+  // match IDs continue working past turn 99.
+  const fingerprint = createHash('sha256').update(matchId).digest('hex').slice(0, 32);
+  return `m-${fingerprint}${suffix}`;
+}
 
 export class MatchRunner {
   private config: MatchConfig;
@@ -61,6 +73,7 @@ export class MatchRunner {
     const engineConfig: Partial<GameConfig> = {
       maxTurns: this.config.maxTurns,
       turnTimeoutMs: this.config.turnTimeoutMs,
+      ...(this.config.initialPieces ? { initialPieces: this.config.initialPieces } : {}),
     };
     this.engine = new GameEngine(engineConfig);
 
@@ -82,6 +95,14 @@ export class MatchRunner {
   }
 
   async run(signal?: AbortSignal): Promise<MatchResult> {
+    try {
+      return await this.runMatch(signal);
+    } finally {
+      await this.revisionExecutor?.releaseRevisionScope?.(this.config.matchId);
+    }
+  }
+
+  private async runMatch(signal?: AbortSignal): Promise<MatchResult> {
     let currentState = this.engine.getState();
     this.emitSnapshot('in_progress', currentState);
 
@@ -94,7 +115,9 @@ export class MatchRunner {
 
       // Check turn limit
       if (turn > this.config.maxTurns) {
-        return this.finishMatch('turn_limit', null, currentState);
+        // The engine's authoritative result contract classifies max turns as
+        // a legitimate draw. Keep infrastructure/unknown null winners distinct.
+        return this.finishMatch('turn_limit', 'draw', currentState);
       }
 
       // Get legal moves
@@ -112,6 +135,10 @@ export class MatchRunner {
 
       // Construct bot request
       const request = constructBotRequest(this.config.matchId, currentState, legalMoves);
+      const requestValidation = validateBotRequest(request);
+      if (!requestValidation.valid) {
+        throw new Error(`Constructed bot request failed protocol validation: ${requestValidation.error?.message ?? 'unknown error'}`);
+      }
 
       // Get bot process config
       const botDef = currentPlayer === 'A' ? this.playerA : this.playerB;
@@ -126,13 +153,20 @@ export class MatchRunner {
       };
 
       // Run bot using BotExecutor
-      const executionId = `${this.config.matchId}-turn-${turn}-${currentPlayer}`;
+      const executionId = createTurnExecutionId(this.config.matchId, turn, currentPlayer);
       const executionContext = {
         executionId,
         matchId: this.config.matchId,
         turn,
         player: currentPlayer,
+        // Strategy source revisions run inside Docker. Give both C++ and
+        // Python the same 5-second turn budget so runtime startup and SDK
+        // loading do not cause avoidable timeouts.
+        timeoutMs: botDef.execution?.kind === 'source-revision'
+          ? Math.max(this.config.turnTimeoutMs, 5_000)
+          : this.config.turnTimeoutMs,
         signal,
+        revisionScopeId: this.config.matchId,
       };
 
       let botResult: BotExecutionResult;

@@ -133,6 +133,16 @@ export class SqlBotRevisionRepository {
     return this.findOwned(botId, revisionId, ownerId);
   }
 
+  async delete(botId: string, revisionId: string, ownerId: string): Promise<boolean> {
+    const revision = this.db.prepare(`SELECT revision_id, storage_ref FROM bot_revisions
+      WHERE revision_id = ? AND bot_id = ? AND owner_id = ?`).get(revisionId, botId, ownerId) as { revision_id: string; storage_ref: string } | undefined;
+    if (!revision) return false;
+    const result = this.db.prepare('DELETE FROM bot_revisions WHERE revision_id = ? AND bot_id = ? AND owner_id = ?').run(revisionId, botId, ownerId);
+    if (result.changes !== 1) return false;
+    await rm(await this.preparePath(revision.storage_ref, false), { force: true });
+    return true;
+  }
+
   hasRevisions(botId: string, ownerId: string): boolean {
     const row = this.db.prepare(`SELECT 1 FROM bot_revisions WHERE bot_id = ? AND owner_id = ? LIMIT 1`).get(botId, ownerId);
     return Boolean(row);

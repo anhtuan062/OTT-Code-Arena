@@ -210,6 +210,35 @@ describe('source revision Docker adapter contracts', () => {
     expect(run).toHaveBeenCalledTimes(2);
   });
 
+  it('compiles once per revision scope and releases the retained artifact', async () => {
+    const workingDirBase = await fs.mkdtemp(path.join(os.tmpdir(), 'ott-revision-scope-'));
+    try {
+      const executor = createRevisionDockerExecutor({ ...config(), workingDirBase }) as any;
+      vi.spyOn(executor, 'isAvailable').mockResolvedValue(true);
+      const run = vi.spyOn(executor, 'runContainer');
+      run.mockResolvedValueOnce({ code: 0, stdout: '', stderr: '', timedOut: false, killed: false, cancelled: false });
+      run.mockResolvedValueOnce({ code: 0, stdout: '{"move":{"piece_id":"A-dam-1","from":"c1","to":"c2"}}\n', stderr: '', timedOut: false, killed: false, cancelled: false });
+      run.mockResolvedValueOnce({ code: 0, stdout: '{"move":{"piece_id":"A-dam-1","from":"c1","to":"c2"}}\n', stderr: '', timedOut: false, killed: false, cancelled: false });
+      const revision = sourceRevision('cpp', 'int main() { return 0; }');
+      const first = await executor.executeRevision(
+        { executionId: 'scoped-turn-1', matchId: 'match-scope', turn: 1, player: 'A', revisionScopeId: 'match-scope' }, revision, request,
+      );
+      const second = await executor.executeRevision(
+        { executionId: 'scoped-turn-2', matchId: 'match-scope', turn: 2, player: 'A', revisionScopeId: 'match-scope' }, revision, request,
+      );
+      expect(first.success).toBe(true);
+      expect(second.success).toBe(true);
+      expect(run).toHaveBeenCalledTimes(3);
+      expect(run.mock.calls.filter(call => String(call[0]).endsWith('-compile'))).toHaveLength(1);
+      expect(executor.preparedArtifacts.size).toBe(1);
+      expect(await executor.releaseRevisionScope('match-scope')).toBe(true);
+      expect(executor.preparedArtifacts.size).toBe(0);
+      await expect(fs.stat(path.join(workingDirBase, 'source-exec', 'scoped-turn-1'))).rejects.toThrow();
+    } finally {
+      await fs.rm(workingDirBase, { recursive: true, force: true });
+    }
+  });
+
   it('executes a pinned strategy revision through the SDK wrapper path', async () => {
     const workingDirBase = await fs.mkdtemp(`${os.tmpdir()}\\ott-sdk-test-`);
     try {

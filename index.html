@@ -11,7 +11,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;700&display=swap"
     rel="stylesheet">
-  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="style.css?v=retry-layout-2">
   <style>
     /* Additions to existing style.css for Dashboard/Tournaments */
     .nav-bar {
@@ -1869,7 +1869,6 @@
       justify-content: space-between;
       gap: 12px;
       padding: 11px 0;
-      border-bottom: 1px solid var(--border-light);
       overflow-wrap: anywhere;
     }
 
@@ -2043,6 +2042,90 @@
       }
     }
 
+    .schedule-round-heading {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 13px;
+    }
+
+    .schedule-round-title {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      color: var(--text-primary);
+      font-weight: 750;
+    }
+
+    .schedule-round-title .td-icon {
+      width: 18px;
+      height: 18px;
+      color: #16803c;
+    }
+
+    .schedule-round-count {
+      padding: 5px 9px;
+      border-radius: 999px;
+      background: #f1f7f2;
+      color: var(--text-secondary);
+      font-size: .72rem;
+      font-weight: 650;
+    }
+
+    .schedule-table .schedule-match-row td:first-child {
+      color: var(--text-secondary);
+      font-weight: 700;
+    }
+
+    .schedule-winner-cell {
+      color: #126b34;
+      font-weight: 750;
+    }
+
+    .schedule-score-cell {
+      min-width: 72px;
+      color: var(--text-primary);
+      font-size: .95rem;
+      font-weight: 800;
+      letter-spacing: .04em;
+      text-align: center !important;
+    }
+
+    .schedule-action-cell .secondary-btn {
+      width: auto;
+      min-width: 104px;
+      padding: 8px 11px;
+      color: #126b34;
+      border-color: #cfe4d4;
+      background: #f4fbf5;
+    }
+
+    .schedule-action-cell .secondary-btn:hover {
+      background: #e4f3e9;
+    }
+
+    .schedule-card-player.is-winner strong {
+      color: #126b34;
+    }
+
+    .schedule-winner-mark {
+      width: fit-content;
+      margin-top: 2px;
+      padding: 2px 6px;
+      border-radius: 999px;
+      background: #e4f3e9;
+      color: #126b34;
+      font-size: .58rem;
+      font-weight: 800;
+      letter-spacing: .04em;
+    }
+
+    .schedule-card-footer .schedule-card-winner {
+      color: #126b34;
+      font-weight: 650;
+    }
+
     /* Phase 4: replay viewer */
     .replay-header {
       display: flex;
@@ -2074,6 +2157,49 @@
       color: var(--text-secondary);
       text-align: center;
     }
+
+    .is-loading-skeleton {
+      position: relative;
+      overflow: hidden;
+    }
+    .is-loading-skeleton::after {
+      content: '';
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      background: linear-gradient(105deg, transparent 25%, rgba(255,255,255,.62) 45%, transparent 65%);
+      transform: translateX(-100%);
+      animation: skeleton-shimmer 1.35s ease-in-out infinite;
+    }
+    .loading-skeleton-card {
+      display: grid;
+      grid-template-columns: 38px minmax(0, 1fr);
+      align-content: center;
+      gap: 8px 11px;
+      min-height: 166px;
+      padding: 20px;
+      border: 1px solid #e1e9e3;
+      border-radius: 14px;
+      background: #fff;
+    }
+    .loading-skeleton-avatar,
+    .loading-skeleton-line {
+      display: block;
+      border-radius: 7px;
+      background: linear-gradient(90deg, #e8efea 0%, #f5f8f5 50%, #e8efea 100%);
+      background-size: 220% 100%;
+      animation: skeleton-pulse 1.2s ease-in-out infinite;
+    }
+    .loading-skeleton-avatar { grid-row: 1 / span 3; width: 38px; height: 38px; border-radius: 10px; }
+    .loading-skeleton-line { height: 10px; }
+    .loading-skeleton-line-title { width: 58%; height: 13px; }
+    .loading-skeleton-line-wide { width: 92%; }
+    .loading-skeleton-line-short { width: 64%; }
+    .loading-skeleton-card.tournament-skeleton { min-height: 148px; }
+    .loading-skeleton-row td { height: 54px; padding: 12px 16px; border-bottom: 1px solid #e5ebe6; }
+    .loading-skeleton-row .loading-skeleton-line { width: 76%; height: 11px; }
+    @keyframes skeleton-shimmer { to { transform: translateX(100%); } }
+    @keyframes skeleton-pulse { 0%, 100% { opacity: .72; background-position: 100% 0; } 50% { opacity: 1; background-position: 0 0; } }
 
     .bot-grid {
       grid-template-columns: repeat(auto-fill, minmax(300px, 360px));
@@ -4017,10 +4143,13 @@
       max-height: min(560px, 58vh);
       margin-top: 16px;
       padding-right: 3px;
+      display: grid;
+      gap: 8px;
       scrollbar-width: thin;
     }
 
     .replay-move {
+      display: block;
       min-height: 44px;
       padding: 10px 11px;
       border-color: #dfe7e1;
@@ -4028,6 +4157,8 @@
       color: #46564c;
       font-size: .78rem;
       line-height: 1.4;
+      white-space: normal;
+      overflow-wrap: anywhere;
     }
 
     .replay-move::before {
@@ -4074,19 +4205,53 @@
       box-sizing: border-box;
     }
     #replay-view .replay-header {
-      gap: 28px;
-      align-items: flex-end;
-      padding-bottom: 20px;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr);
+      gap: 18px;
+      align-items: stretch;
+      padding-bottom: 24px;
     }
     #replay-view .replay-result {
-      display: inline-flex;
+      display: flex;
       align-items: center;
-      min-width: min(290px, 100%);
-      max-width: 430px;
-      min-height: 42px;
-      padding: 10px 13px;
-      border-radius: 10px;
-      font-size: .82rem;
+      justify-content: center;
+      width: min(680px, 100%);
+      min-height: 66px;
+      margin: 2px auto 0;
+      padding: 16px 24px;
+      box-sizing: border-box;
+      border: 1px solid #cce4d4;
+      border-radius: 16px;
+      background: linear-gradient(135deg, #f2fbf5 0%, #ffffff 52%, #edf8f1 100%);
+      color: #145c3e;
+      font-size: clamp(.95rem, 1.5vw, 1.18rem);
+      font-weight: 800;
+      letter-spacing: .01em;
+      line-height: 1.35;
+      text-align: center;
+      box-shadow: 0 10px 28px rgba(23, 107, 80, .09), inset 0 1px 0 rgba(255,255,255,.9);
+      overflow-wrap: anywhere;
+      position: relative;
+    }
+
+    /* Replay đã hiển thị tỉ số ngay trong hai khung đội; chỉ live mới cần dòng trạng thái này. */
+    #replay-view:not(.live-match-view) #r-result-text {
+      display: none;
+    }
+
+    #replay-view .replay-detail:has(#r-winner),
+    #replay-view .replay-detail:has(#r-termination) {
+      display: none;
+    }
+    #replay-view .replay-result::before {
+      content: '';
+      width: 7px;
+      height: 7px;
+      margin-right: 10px;
+      flex: 0 0 7px;
+      border-radius: 50%;
+      background: #1d9b65;
+      box-shadow: 0 0 0 5px rgba(29, 155, 101, .12);
     }
     #replay-view .replay-layout {
       grid-template-columns: minmax(0, 1.9fr) minmax(320px, .82fr);
@@ -4209,6 +4374,11 @@
       font-variant-numeric: tabular-nums;
     }
     #replay-view .replay-details { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+    #replay-series-controls { display:flex; align-items:center; gap:8px; max-width:100%; margin:0 0 14px; padding:9px 11px; overflow-x:auto; border:1px solid #dfe8e1; border-radius:11px; background:#fbfdfb; scrollbar-width:thin; }
+    #replay-series-controls::before { content:'Các ván'; flex:0 0 auto; color:#7b8980; font-size:.7rem; font-weight:800; letter-spacing:.06em; text-transform:uppercase; }
+    #replay-series-controls .secondary-btn { width:auto; min-width:max-content; flex:0 0 auto; margin:0; padding:7px 10px; border:1px solid #d7e3da; border-radius:8px; background:#fff; color:#53645a; font-size:.74rem; white-space:nowrap; box-shadow:none; }
+    #replay-series-controls .secondary-btn:hover { border-color:#9fc7ab; background:#f3faf5; color:#176b50; }
+    #replay-series-controls .secondary-btn.active { border-color:#176b50; background:#e8f5ed; color:#176b50; font-weight:750; }
     #replay-view .replay-detail { min-width: 0; padding: 10px 11px; }
     #replay-view .replay-detail small { font-size: .68rem; text-transform: uppercase; letter-spacing: .04em; }
     #replay-view .replay-detail strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -4232,6 +4402,7 @@
       #replay-view .replay-player-identity { padding: 10px; }
       #replay-view .replay-player-name { font-size: .86rem; }
       #replay-view .replay-player-bot { font-size: .68rem; }
+      #replay-view .replay-player-score { min-width: 36px; height: 36px; font-size: 1.1rem; }
       #replay-view .replay-controls { flex-wrap: wrap; gap: 6px; }
       #replay-view .replay-control { flex-basis: 36px; min-width: 36px; padding: 7px; }
       #replay-view .replay-play { flex-basis: 78px; min-width: 78px; }
@@ -4721,6 +4892,7 @@
 
     .replay-player-identity {
       display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
       gap: 2px;
       min-width: 0;
       flex: 1;
@@ -4728,6 +4900,7 @@
 
     .replay-player-b-label {
       text-align: right;
+      grid-template-columns: auto minmax(0, 1fr);
     }
 
     .replay-player-name {
@@ -4744,6 +4917,40 @@
       font-size: .68rem;
       font-weight: 500;
       letter-spacing: 0;
+    }
+
+    .replay-player-score {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      align-self: center;
+      min-width: 42px;
+      height: 42px;
+      margin-left: 8px;
+      padding: 0 9px;
+      border: 1px solid #cce4d4;
+      border-radius: 12px;
+      background: #edf8f1;
+      color: #176b50;
+      font-size: 1.35rem;
+      font-weight: 850;
+      line-height: 1;
+      font-variant-numeric: tabular-nums;
+      grid-column: 2;
+      grid-row: 1 / span 3;
+    }
+
+    .replay-player-b-label .replay-player-score {
+      grid-column: 1;
+      order: -1;
+      margin-right: 8px;
+      margin-left: 0;
+    }
+
+    .replay-player-identity.is-leading .replay-player-score {
+      border-color: #74bd91;
+      background: #dff3e6;
+      box-shadow: 0 0 0 4px rgba(51, 157, 98, .1);
     }
 
     .replay-versus {
@@ -4979,8 +5186,8 @@
     }
 
     .tournament-meta-icon {
-      width: 17px;
-      height: 17px;
+      width: 25px;
+      height: 25px;
       flex: 0 0 auto;
       color: #789084;
       fill: none;
@@ -5324,12 +5531,13 @@
 
     #dashboard.dashboard-page .summary-grid {
       grid-template-columns: repeat(3, minmax(0, 1fr));
-      gap: 14px;
+      gap: 16px;
+      margin-top: 24px;
     }
 
     #dashboard.dashboard-page .summary-icon {
-      width: 22px;
-      height: 22px;
+      width: 24px;
+      height: 24px;
       color: #176B50;
       fill: none;
       stroke: currentColor;
@@ -5339,31 +5547,124 @@
     }
 
     #dashboard.dashboard-page .summary-card {
-      display: grid;
-      grid-template-columns: minmax(0, 1fr) auto;
-      grid-template-rows: auto auto;
-      align-items: start;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      min-height: 132px;
+      gap: 16px;
+      padding: 18px 20px;
+      border: 1px solid #dce8e0;
+      border-top-width: 1px;
+      border-radius: 14px;
+      box-shadow: 0 10px 28px rgba(30, 77, 55, .055);
     }
 
-    #dashboard.dashboard-page .summary-card > div {
-      display: contents;
+    #dashboard.dashboard-page .summary-card-main {
+      display: flex;
+      align-items: center;
+      min-width: 0;
+      gap: 17px;
     }
+
+    #dashboard.dashboard-page .summary-card-main .stat-card__header {
+      display: block;
+      min-width: 0;
+    }
+
+    #dashboard.dashboard-page .summary-card-visual {
+      display: inline-flex;
+      width: 64px;
+      height: 64px;
+      flex: 0 0 64px;
+      align-items: center;
+      justify-content: center;
+      border-radius: 50%;
+      background: #dcf3e5;
+      color: #08764f;
+    }
+
+    #dashboard.dashboard-page .summary-card-visual .summary-icon {
+      width: 31px;
+      height: 31px;
+      color: inherit;
+      stroke-width: 2.1;
+    }
+
+    #dashboard.dashboard-page .summary-card-chip {
+      display: inline-flex;
+      width: 40px;
+      height: 40px;
+      flex: 0 0 40px;
+      align-items: center;
+      justify-content: center;
+      border: 1px solid #dce8e0;
+      border-radius: 10px;
+      background: #fff;
+      color: #08764f;
+    }
+
+    #dashboard.dashboard-page .summary-card-chip .summary-icon {
+      width: 21px;
+      height: 21px;
+      color: inherit;
+    }
+
+    #dashboard.dashboard-page #dash-record-card .summary-card-visual {
+      background: #fff0cf;
+      color: #e49a00;
+    }
+
+    #dashboard.dashboard-page #dash-record-card .summary-card-chip { color: #ca8700; }
+
+    #dashboard.dashboard-page #dash-tourney-card .summary-card-visual {
+      background: #e3edff;
+      color: #2563df;
+    }
+
+    #dashboard.dashboard-page #dash-tourney-card .summary-card-chip { color: #176b4d; }
 
     #dashboard.dashboard-page .summary-card p {
-      grid-column: 1;
-      grid-row: 1;
-      align-self: center;
+      margin: 0 0 7px;
+      color: #435249;
+      font-size: .82rem;
+      font-weight: 700;
     }
 
     #dashboard.dashboard-page .summary-card strong {
-      grid-column: 1;
-      grid-row: 2;
-      margin-top: 8px;
+      margin: 0;
+      color: #0d1913;
+      font-size: 1.85rem;
+      line-height: 1;
     }
 
-    #dashboard.dashboard-page .summary-card > .summary-icon {
-      grid-column: 2;
-      grid-row: 1;
+    #dashboard.dashboard-page .summary-card-detail {
+      display: block;
+      margin-top: 8px;
+      color: #67756d;
+      font-size: .73rem;
+      font-weight: 500;
+      line-height: 1.35;
+    }
+
+    #dashboard.dashboard-page .dashboard-section {
+      margin-top: 32px;
+    }
+
+    #dashboard.dashboard-page .dashboard-section-title {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    #dashboard.dashboard-page .dashboard-section-title > .ui-icon {
+      width: 23px;
+      height: 23px;
+      color: #08764f;
+    }
+
+    #dashboard.dashboard-page .dashboard-section-title h3 {
+      margin: 0;
+      font-size: 1.18rem;
     }
 
     #dashboard.dashboard-page .section-header {
@@ -5395,17 +5696,20 @@
     .dashboard-bot-list {
       display: grid;
       grid-template-columns: repeat(3, minmax(0, 1fr));
-      gap: 10px;
+      gap: 14px;
     }
+
+    .dashboard-bots-section .section-header { margin-bottom: 10px; }
 
     .dashboard-bot-item {
       display: flex;
       align-items: center;
-      gap: 10px;
+      gap: 8px;
       min-width: 0;
-      padding: 13px 14px;
+      min-height: 72px;
+      padding: 12px 14px;
       border: 1px solid #dfe7e1;
-      border-radius: 10px;
+      border-radius: 12px;
       background: #fff;
       color: #17231d;
       text-align: left;
@@ -5420,8 +5724,8 @@
 
     .dashboard-bot-item-icon,
     .dashboard-bot-icon {
-      width: 20px;
-      height: 20px;
+      width: 19px;
+      height: 19px;
       flex: 0 0 auto;
       color: #176b4d;
       fill: none;
@@ -5429,10 +5733,17 @@
       stroke-width: 1.8;
     }
 
+    .dashboard-bot-item > .dashboard-bot-item-icon {
+      box-sizing: content-box;
+      padding: 8px;
+      border-radius: 9px;
+      background: #e5f5eb;
+    }
+
     .dashboard-bot-copy {
       display: grid;
       min-width: 0;
-      gap: 3px;
+      gap: 1px;
     }
 
     .dashboard-bot-copy strong,
@@ -5442,9 +5753,13 @@
       white-space: nowrap;
     }
 
-    .dashboard-bot-copy strong { font-size: .84rem; }
-    .dashboard-bot-copy small { color: #718078; font-size: .72rem; }
-    .dashboard-bot-arrow { width: 15px; height: 15px; margin-left: auto; color: #718078; }
+    .dashboard-bot-copy strong { font-size: .78rem; }
+    .dashboard-bot-copy small { color: #718078; font-size: .7rem; }
+    .dashboard-bot-arrow { width: 13px; height: 13px; margin-left: auto; color: #718078; }
+
+    @media (max-width: 1200px) {
+      .dashboard-bot-list { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    }
 
     .dashboard-bot-empty {
       display: grid;
@@ -5475,6 +5790,12 @@
     @media (max-width: 560px) {
       #dashboard.dashboard-page .summary-grid,
       .dashboard-bot-list { grid-template-columns: 1fr; }
+
+      #dashboard.dashboard-page .summary-card-visual {
+        width: 54px;
+        height: 54px;
+        flex-basis: 54px;
+      }
     }
 
     #auth-screen.page {
@@ -5565,19 +5886,20 @@
     }
 
     #auth-screen .form-message {
-      margin: 12px 0;
-      padding: 10px 12px;
-      border: 1px solid #e9b8b8;
-      border-radius: 8px;
-      background: #fff5f5;
+      margin: 10px 0 12px;
+      padding: 0;
+      border: 0;
+      border-radius: 0;
+      background: transparent;
       color: #a12d2d;
       font-size: .84rem;
       line-height: 1.45;
+      text-align: center;
     }
 
     #auth-screen .form-message[data-type="success"] {
-      border-color: #b9ddc4;
-      background: #f1faf3;
+      border: 0;
+      background: transparent;
       color: #17633a;
     }
 
@@ -5642,8 +5964,12 @@
     .tournament-detail-redesign .dialog-copy { color:#718078; margin-top:10px; font-size:.92rem; }
     .tournament-detail-redesign .tournament-actions { display:flex; align-items:center; justify-content:flex-end; gap:10px; flex-wrap:wrap; max-width:420px; }
     .tournament-detail-redesign .tournament-actions .tournament-action { width:auto; min-width:148px; padding:11px 16px; border-radius:9px; box-shadow:none; }
+    .tournament-detail-redesign .tournament-actions { flex-wrap:nowrap; max-width:none; }
+    .tournament-detail-redesign .tournament-actions .tournament-action { flex:0 0 auto; }
     .tournament-detail-redesign .tournament-actions .tournament-action-danger { color:#a23d3d; background:#fff; border:1px solid #e7caca; }
     .tournament-detail-redesign .tournament-actions .tournament-action-danger { min-width:0; padding:8px 10px; font-size:.72rem; }
+    .tournament-detail-redesign .tournament-actions .tournament-refresh-action { min-width:0; color:#176b50; background:#f3faf5; border:1px solid #cfe4d4; }
+    .tournament-detail-redesign .tournament-actions .tournament-refresh-action:hover { background:#e4f3e9; border-color:#b7d8c1; }
     .tournament-detail-redesign .tournament-action.is-loading { cursor:wait; opacity:.7; }
     .tournament-detail-redesign .execution-status { display:inline-flex; align-items:center; gap:5px; padding:5px 9px; border-radius:999px; font-size:.7rem; font-weight:700; }
     .tournament-detail-redesign .execution-status-ready { color:#5d6c63; background:#f1f5f2; }
@@ -5654,8 +5980,28 @@
     #replay-view.live-match-view .replay-scrubber-label,
     #replay-view.live-match-view #replay-scrubber,
     #replay-view.live-match-view .replay-controls,
-    #replay-view.live-match-view .replay-timeline-panel { display:none; }
+    #replay-view.live-match-view .replay-timeline-panel,
+    #replay-view.live-match-view #r-result-text { display:none; }
     #replay-view.live-match-view .replay-result { color:#176b50; }
+    #live-game-result-modal { position:fixed; inset:0; z-index:1200; display:grid; place-items:center; padding:20px; background:rgba(18,39,28,.42); opacity:0; pointer-events:none; transition:opacity .2s ease; }
+    #live-game-result-modal.is-visible { opacity:1; pointer-events:auto; }
+    #live-game-result-modal .live-game-result-card { width:min(94vw,520px); padding:30px; border:1px solid #d7e8dc; border-radius:22px; background:linear-gradient(145deg,#fff 0%,#f5fbf7 100%); box-shadow:0 24px 70px rgba(18,53,34,.24); text-align:center; animation:live-result-pop .32s cubic-bezier(.2,.8,.2,1); }
+    @keyframes live-result-pop { from { opacity:0; transform:translateY(14px) scale(.96); } to { opacity:1; transform:translateY(0) scale(1); } }
+    #live-game-result-modal .live-game-result-kicker { margin:0 0 9px; color:#176b50; font-size:.72rem; font-weight:800; letter-spacing:.12em; text-transform:uppercase; }
+    #live-game-result-title { margin:0; color:#173b2a; font-size:1.55rem; }
+    #live-game-result-winner { margin:7px 0 18px; color:#648071; font-size:.88rem; }
+    .live-game-scoreboard { display:grid; grid-template-columns:minmax(0,1fr) auto minmax(0,1fr); align-items:center; gap:12px; margin:20px 0; }
+    .live-game-score-player { min-width:0; padding:16px 10px 13px; border:1px solid #dbe9df; border-radius:14px; background:rgba(255,255,255,.8); }
+    .live-game-score-player.is-right { background:#f0f8f3; }
+    .live-game-score-player strong, .live-game-score-player small { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .live-game-score-player strong { color:#1b3d2b; font-size:.96rem; }
+    .live-game-score-player small { margin-top:4px; color:#789085; font-size:.7rem; }
+    .live-game-score-number { display:block; margin-top:10px; color:#315b46; font-size:2.15rem; line-height:1; font-weight:800; font-variant-numeric:tabular-nums; }
+    .live-game-score-number.is-leading { color:#176b50; text-shadow:0 0 18px rgba(23,107,80,.22); }
+    .live-game-score-vs { color:#a2b2a8; font-size:.76rem; font-weight:800; letter-spacing:.08em; }
+    #live-game-result-score { margin:0; color:#176b50; font-size:.78rem; font-weight:800; letter-spacing:.08em; text-transform:uppercase; }
+    #live-game-result-next { margin:8px 0 0; color:#68786f; font-size:.9rem; }
+    #live-game-result-close { margin-top:22px; min-width:96px; }
     .tournament-detail-redesign .tournament-lifecycle { margin:26px 0 20px; padding:0; display:grid; grid-template-columns:repeat(7,minmax(0,1fr)); list-style:none; position:relative; gap:0; }
     .tournament-detail-redesign .tournament-lifecycle::before, .tournament-detail-redesign .tournament-lifecycle::after { content:""; position:absolute; top:16px; left:7%; height:2px; border-radius:99px; z-index:0; }
     .tournament-detail-redesign .tournament-lifecycle::before { right:7%; background:#dce5de; }
@@ -5686,6 +6032,8 @@
     .panel-count { display:grid; place-items:center; min-width:30px; height:26px; padding:0 8px; border-radius:999px; background:#edf5ef; color:#176b50; font-size:.76rem; font-weight:700; }
     .panel-heading-icon { width:17px; height:17px; color:#176b50; }
     .tournament-detail-redesign .participant-list { display:grid; gap:8px; }
+    .tournament-detail-redesign #td-participants { max-height:360px; overflow-y:auto; padding-right:4px; }
+    .tournament-detail-redesign #td-participants:not(:has(.participant-empty)) { grid-template-columns:repeat(2,minmax(0,1fr)); align-content:start; }
     .tournament-detail-redesign .participant-list li:not(.participant-empty) { display:flex; align-items:center; justify-content:space-between; padding:11px 12px; border:1px solid #edf1ed; border-radius:8px; background:#fbfcfb; }
     .tournament-detail-redesign .participant-copy { display:grid; gap:3px; min-width:0; }
     .tournament-detail-redesign .participant-copy strong { color:#203329; font-size:.84rem; }
@@ -5703,6 +6051,21 @@
     .tournament-detail-redesign .request-section-title .td-icon { color:#176b50; }
     .tournament-detail-redesign .request-pending-count { padding:5px 9px; border-radius:999px; background:#fff4d6; color:#946200; font-size:.7rem; font-weight:700; white-space:nowrap; }
     .tournament-detail-redesign #td-request-list { display:grid; gap:9px; }
+    .tournament-detail-redesign #td-request-list { max-height:360px; overflow-y:auto; padding-right:4px; }
+    .tournament-detail-redesign #td-participants .is-viewer-participant {
+      position:relative; border-color:#6c8cff; background:#f3f6ff; box-shadow:0 0 0 2px rgba(108,140,255,.14);
+    }
+    .tournament-detail-redesign .viewer-marker {
+      position:absolute; top:10px; right:10px; border-radius:999px; padding:3px 8px;
+      background:#3857c8; color:#fff; font-size:11px; font-weight:800; letter-spacing:.02em;
+    }
+    .tournament-detail-redesign #td-standings tbody tr.is-viewer-standing,
+    .tournament-detail-redesign .schedule-match-row.is-viewer-match {
+      background:#f3f6ff; box-shadow:inset 3px 0 0 #3857c8;
+    }
+    .tournament-detail-redesign .schedule-match-card.is-viewer-match {
+      border-color:#6c8cff; background:#f3f6ff; box-shadow:0 0 0 2px rgba(108,140,255,.14);
+    }
     .tournament-detail-redesign .participant-request-row { display:flex; align-items:center; justify-content:space-between; gap:18px; padding:15px 16px; border:1px solid #dfe7e1; border-radius:10px; background:#fff; }
     .tournament-detail-redesign .request-identity { display:flex; align-items:center; gap:12px; min-width:0; }
     .tournament-detail-redesign .request-bot-icon { display:grid; place-items:center; flex:0 0 40px; width:40px; height:40px; border-radius:9px; background:#edf7f1; color:#176b50; }
@@ -5723,9 +6086,29 @@
     .tournament-detail-redesign .request-action-danger { color:#dc2626; background:#fff; border:1px solid #efb7b7; }
     .tournament-detail-redesign .request-action-danger:hover { background:#fff5f5; border-color:#dc2626; }
     .tournament-detail-redesign .request-action .td-icon { pointer-events:none; }
-    .tournament-detail-redesign .standings-table-scroll { max-height:230px; overflow:auto; }
+    .tournament-detail-redesign .standings-table-scroll { max-height:300px; overflow:auto; }
     .tournament-detail-redesign .data-table th { color:#88958c; font-size:.66rem; text-transform:uppercase; letter-spacing:.04em; background:#fbfcfb; }
     .tournament-detail-redesign .data-table td { color:#415148; font-size:.88rem; }
+    .tournament-detail-redesign .standings-heading { display:flex; align-items:center; gap:8px; }
+    .tournament-detail-redesign .standings-heading .td-icon { color:#176b50; }
+    .tournament-detail-redesign .standings-panel .standings-table-scroll { margin:0 -6px; padding:0 6px 4px; }
+    .tournament-detail-redesign #td-standings tbody tr { transition:background .18s ease, box-shadow .18s ease; }
+    .tournament-detail-redesign #td-standings tbody tr:hover { background:#f7fbf8; }
+    .tournament-detail-redesign #td-standings tbody tr.standing-top-1,
+    .tournament-detail-redesign #td-standings tbody tr.standing-top-2,
+    .tournament-detail-redesign #td-standings tbody tr.standing-top-3 { font-weight:650; }
+    .tournament-detail-redesign #td-standings tbody tr.standing-top-1 { background:linear-gradient(90deg, #fff9e8, #fffdf7); box-shadow:inset 4px 0 0 #e6ad24; }
+    .tournament-detail-redesign #td-standings tbody tr.standing-top-2 { background:linear-gradient(90deg, #f3f6f7, #fbfcfc); box-shadow:inset 4px 0 0 #9daab0; }
+    .tournament-detail-redesign #td-standings tbody tr.standing-top-3 { background:linear-gradient(90deg, #fff2e9, #fffaf7); box-shadow:inset 4px 0 0 #c87945; }
+    .tournament-detail-redesign #td-standings tbody tr.standing-top-1 td:nth-child(2),
+    .tournament-detail-redesign #td-standings tbody tr.standing-top-2 td:nth-child(2),
+    .tournament-detail-redesign #td-standings tbody tr.standing-top-3 td:nth-child(2) { color:#1e3026; font-weight:800; }
+    .tournament-detail-redesign .standing-rank-cell { width:58px; }
+    .tournament-detail-redesign .standing-rank-badge { display:inline-flex; width:30px; height:30px; align-items:center; justify-content:center; border-radius:50%; font-size:.78rem; font-weight:850; }
+    .tournament-detail-redesign .standing-top-1 .standing-rank-badge { background:#f6d875; color:#765306; box-shadow:0 0 0 4px rgba(230,173,36,.14); }
+    .tournament-detail-redesign .standing-top-2 .standing-rank-badge { background:#dce3e7; color:#52616a; box-shadow:0 0 0 4px rgba(157,170,176,.14); }
+    .tournament-detail-redesign .standing-top-3 .standing-rank-badge { background:#e7b28d; color:#75401f; box-shadow:0 0 0 4px rgba(200,121,69,.14); }
+    .tournament-detail-redesign #td-standings tbody tr.is-viewer-standing { outline:2px solid #3857c8; outline-offset:-2px; }
     .tournament-detail-redesign .tournament-schedule { margin-top:18px; padding:22px; }
     .schedule-heading { display:flex; align-items:flex-end; justify-content:space-between; gap:12px; margin-bottom:18px; }
     .schedule-caption { color:#89968e; font-size:.76rem; }
@@ -5738,7 +6121,7 @@
     .tournament-detail-redesign .detail-register { width:auto; margin-top:16px; }
     .tournament-detail-redesign .td-icon { display:inline-block; flex-shrink:0; fill:none; stroke:currentColor; stroke-width:2; stroke-linecap:round; stroke-linejoin:round; vertical-align:middle; }
     .tournament-detail-redesign .td-icon--sm { width:25px; height:25px; }
-    .tournament-detail-redesign .td-icon--md { width:20px; height:20px; }
+    .tournament-detail-redesign .td-icon--md { width:25px; height:25px; }
     .tournament-detail-redesign .td-icon--lg { width:32px; height:32px; }
     .tournament-detail-redesign .tournament-breadcrumb .td-icon { color:#66756c; }
     .tournament-detail-redesign .tournament-actions .td-icon { color:currentColor; }
@@ -5746,14 +6129,48 @@
     .tournament-detail-redesign .lifecycle-marker .td-icon { width:16px; height:16px; }
     .tournament-detail-redesign .schedule-round h4 { display:flex; align-items:center; gap:7px; }
     .tournament-detail-redesign .schedule-heading-icon { color:#66756c; }
+    .tournament-detail-redesign .schedule-table th:nth-child(5),
+    .tournament-detail-redesign .schedule-table td:nth-child(5) { width:92px; min-width:92px; padding-left:8px; padding-right:8px; text-align:center !important; vertical-align:middle; }
+    .tournament-detail-redesign .schedule-table { width:100%; min-width:958px; table-layout:fixed; }
+    .tournament-detail-redesign .schedule-table th:nth-child(1),
+    .tournament-detail-redesign .schedule-table td:nth-child(1) { width:76px; }
+    .tournament-detail-redesign .schedule-table th:nth-child(2),
+    .tournament-detail-redesign .schedule-table td:nth-child(2),
+    .tournament-detail-redesign .schedule-table th:nth-child(3),
+    .tournament-detail-redesign .schedule-table td:nth-child(3) { width:150px; }
+    .tournament-detail-redesign .schedule-table th:nth-child(4),
+    .tournament-detail-redesign .schedule-table td:nth-child(4) { width:118px; }
+    .tournament-detail-redesign .schedule-table th:nth-child(6),
+    .tournament-detail-redesign .schedule-table td:nth-child(6) { width:142px; }
+    .tournament-detail-redesign .schedule-table th:nth-child(7),
+    .tournament-detail-redesign .schedule-table td:nth-child(7) { width:230px; min-width:230px; }
+    .tournament-detail-redesign .schedule-action-cell { min-width:230px; width:230px; vertical-align:middle; }
+    .tournament-detail-redesign .schedule-action-cell .action-content { flex-wrap:nowrap; gap:6px; }
+    .tournament-detail-redesign .schedule-action-empty { display:block; width:100%; color:#a3afa7; text-align:center; font-weight:700; }
     .tournament-detail-redesign .next-step-icon .td-icon { color:#176b50; }
     .tournament-detail-redesign .tournament-next-step-cancelled .next-step-icon .td-icon { color:#a24c3d; }
     .tournament-detail-redesign .tournament-next-step-cancelled { background:#fff7f5; border-color:#f0d7d0; }
     .tournament-detail-redesign .tournament-next-step-cancelled .next-step-icon { background:#f9e3dc; color:#a24c3d; }
+    .tournament-detail-redesign .tournament-podium-panel { margin:0 0 20px; padding:22px; background:linear-gradient(135deg,#fffdf7 0%,#fff 48%,#f4fbf7 100%); border:1px solid #e4e0c8; border-radius:14px; box-shadow:0 5px 18px rgba(21,49,34,.06); }
+    .tournament-detail-redesign .podium-heading { display:flex; align-items:flex-start; justify-content:space-between; gap:16px; margin-bottom:18px; }
+    .tournament-detail-redesign .podium-heading-copy { display:grid; gap:4px; }
+    .tournament-detail-redesign .podium-heading-title { display:flex; align-items:center; gap:9px; color:#203329; font-size:1.08rem; font-weight:800; }
+    .tournament-detail-redesign .podium-heading-title .td-icon { color:#b27a0b; }
+    .tournament-detail-redesign .podium-heading-copy p { color:#718078; font-size:.78rem; }
+    .tournament-detail-redesign .podium-list { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; align-items:end; }
+    .tournament-detail-redesign .podium-card { position:relative; min-height:126px; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:5px; padding:18px 14px 15px; text-align:center; border:1px solid #e4ebe5; border-radius:11px; background:rgba(255,255,255,.86); }
+    .tournament-detail-redesign .podium-card:first-child { min-height:148px; border-color:#ead28a; background:linear-gradient(180deg,#fff8dc,#fff); box-shadow:0 7px 18px rgba(178,122,11,.12); }
+    .tournament-detail-redesign .podium-medal { display:grid; place-items:center; width:36px; height:36px; border-radius:50%; font-size:.82rem; font-weight:850; }
+    .tournament-detail-redesign .podium-card:first-child .podium-medal { width:44px; height:44px; background:#f6d875; color:#765306; box-shadow:0 0 0 5px rgba(230,173,36,.14); }
+    .tournament-detail-redesign .podium-card:nth-child(2) .podium-medal { background:#dce3e7; color:#52616a; }
+    .tournament-detail-redesign .podium-card:nth-child(3) .podium-medal { background:#e7b28d; color:#75401f; }
+    .tournament-detail-redesign .podium-place { color:#718078; font-size:.68rem; font-weight:750; text-transform:uppercase; letter-spacing:.04em; }
+    .tournament-detail-redesign .podium-name { max-width:100%; overflow:hidden; color:#203329; font-size:.98rem; font-weight:850; text-overflow:ellipsis; white-space:nowrap; }
+    .tournament-detail-redesign .podium-meta { color:#819087; font-size:.7rem; }
     @media (max-width: 820px) {
       .tournament-detail-redesign { width:100%; max-width:none !important; margin-left:0; padding:22px 16px 30px; }
       .tournament-detail-redesign .tournament-detail-hero { align-items:stretch; flex-direction:column; gap:18px; }
-      .tournament-detail-redesign .tournament-actions { justify-content:flex-start; max-width:none; }
+      .tournament-detail-redesign .tournament-actions { justify-content:flex-start; max-width:none; flex-wrap:wrap; }
       .tournament-detail-redesign .tournament-actions .tournament-action { flex:1 1 145px; }
       .tournament-detail-redesign .tournament-lifecycle { display:flex; overflow:visible; margin:20px 0 30px; padding:0 2px 3px; min-height:61px; }
       .tournament-detail-redesign .tournament-lifecycle::before, .tournament-detail-redesign .tournament-lifecycle::after { left:16px; right:16px; top:15px; width:auto; }
@@ -5768,7 +6185,10 @@
       .tournament-detail-redesign .tournament-lifecycle[data-cancelled="true"] + .lifecycle-mobile-count { color:#a24c3d; }
       .tournament-detail-redesign .tournament-lifecycle[data-cancelled="false"] + .tournament-next-step::before { content:"Bước " attr(data-current) "/ 7"; }
       .tournament-detail-redesign .tournament-overview { grid-template-columns:1fr; }
+      .tournament-detail-redesign .podium-list { grid-template-columns:1fr; }
+      .tournament-detail-redesign .podium-card, .tournament-detail-redesign .podium-card:first-child { min-height:108px; }
       .tournament-detail-redesign .participant-request-row { align-items:stretch; flex-direction:column; gap:13px; }
+      .tournament-detail-redesign #td-participants:not(:has(.participant-empty)) { grid-template-columns:1fr; }
       .tournament-detail-redesign .request-controls { justify-content:flex-start; flex-wrap:wrap; }
       .tournament-detail-redesign .request-status { margin-right:auto; }
       .tournament-detail-redesign .request-meta { white-space:normal; overflow-wrap:anywhere; }
@@ -5921,6 +6341,20 @@
       stroke-linecap: round;
       stroke-linejoin: round;
     }
+    #dashboard.player-dashboard {
+      min-height: calc(100vh - 68px);
+      background:
+        radial-gradient(circle at 24% 8%, rgba(222, 244, 231, .58), transparent 28%),
+        radial-gradient(circle at 84% 28%, rgba(231, 246, 237, .5), transparent 32%);
+    }
+    #dashboard.player-dashboard .dashboard-empty-icon {
+      box-sizing: content-box;
+      width: 34px;
+      height: 34px;
+      padding: 17px;
+      border-radius: 50%;
+      background: #e5f5eb;
+    }
     #dashboard.player-dashboard .dashboard-empty h3,
     #dashboard.player-dashboard .dashboard-bot-empty strong {
       margin: 0;
@@ -5959,7 +6393,7 @@
     #dashboard.dashboard-page:not(.player-dashboard) .dashboard-empty h3 { font-size: 1.12rem; }
     #dashboard.dashboard-page:not(.player-dashboard) .dashboard-empty p:not(.section-kicker) { font-size: .9rem; }
     #dashboard.player-dashboard .summary-grid {
-      grid-template-columns: repeat(2, minmax(0, 1fr));
+      grid-template-columns: repeat(3, minmax(0, 1fr));
       width: 100%;
     }
     #dashboard.player-dashboard #dash-queue-card { display: none; }
@@ -5983,6 +6417,9 @@
     }
     @media (max-width: 560px) {
       #dashboard.player-dashboard .summary-grid { grid-template-columns: 1fr; }
+    }
+    @media (min-width: 561px) and (max-width: 900px) {
+      #dashboard.player-dashboard .summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     }
     /* Full-width Bot Source Workspace */
     .bot-workspace-page {
@@ -6122,6 +6559,89 @@
       max-height: calc(100dvh - 360px);
       overflow-y: auto;
     }
+    /* Create/edit Bot workspace: compact layout aligned with the source editor reference. */
+    .bot-workspace-page .bot-source-workspace { position:relative; padding:52px 16px 16px; border-radius:10px; }
+    .bot-workspace-page .bot-workspace-breadcrumb { position:absolute; top:16px; left:16px; right:16px; z-index:2; justify-content:space-between; margin:0; }
+    .bot-workspace-page .bot-workspace-breadcrumb .breadcrumb-back { display:inline-flex; align-items:center; gap:5px; padding:5px 8px; border:1px solid #dfe7e1; border-radius:6px; background:#fff; color:#526259; font-size:.7rem; }
+    .bot-workspace-page .bot-workspace-breadcrumb > span:not(.source-workspace-status) { display:none; }
+    .bot-workspace-page .source-workspace-status { margin:0; padding:5px 9px; border-radius:999px; background:#f0f2f1; color:#425148; font-size:.67rem; font-weight:700; }
+    .bot-workspace-page .bot-source-header { display:flex; flex-direction:column; align-items:stretch; gap:10px; padding:0; }
+    .bot-workspace-page .bot-workspace-heading h2 { margin:0; font-size:clamp(1.35rem, 2.2vw, 1.75rem); line-height:1.15; letter-spacing:-.025em; }
+    .bot-workspace-page #bot-source-description { margin:6px 0 0; color:#65736a; font-size:.86rem; line-height:1.35; }
+    .bot-workspace-page #bot-sdk-description { display:none; }
+    .bot-workspace-page .bot-source-actions { order:2; align-self:flex-end; justify-content:flex-end; align-items:stretch; gap:6px; }
+    .bot-workspace-page .bot-source-actions button { width:auto; min-width:96px; height:34px; min-height:34px; padding:0 11px; border-radius:6px; font-size:.72rem; }
+    .bot-workspace-page .bot-workspace-info-row { grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:8px; margin-top:12px; padding:0; border:0; }
+    .bot-workspace-page .workspace-name-field,
+    .bot-workspace-page .bot-workspace-info-row .source-runtime-picker { width:auto; min-width:0; }
+    .bot-workspace-page .bot-workspace-info-row .source-runtime-picker { grid-column:2; grid-row:1; }
+    .bot-workspace-page .bot-source-grid { grid-template-columns:minmax(0,3fr) minmax(150px,1fr); gap:8px; margin-top:12px; padding-top:8px; border-top:1px solid #e4e8e5; }
+    .bot-workspace-page .bot-editor-panel { min-width:0; padding:0; }
+    .bot-workspace-page .bot-editor-panel .editor-panel-head { min-height:28px; margin:0; padding:8px 8px; border:1px solid #e1e7e2; border-bottom:0; border-radius:7px 7px 0 0; background:#fff; }
+    .bot-workspace-page .bot-editor-panel .editor-panel-head label { font-size:.75rem; }
+    .bot-workspace-page .bot-editor-panel .editor-filename { order:-1; color:#1b6f4f; font-size:.68rem; }
+    .bot-workspace-page .source-tools { display:flex; align-items:center; gap:5px; margin:6px 0; flex-wrap:wrap; }
+    .bot-workspace-page .source-tool-button { height:27px; padding:0 8px; border:1px solid #d7e1da; border-radius:5px; background:#fff; color:#526259; font-size:.64rem; cursor:pointer; }
+    .bot-workspace-page .source-tool-button:hover { border-color:#176f4f; color:#176f4f; background:#f3faf5; }
+    .bot-workspace-page .source-code-layer { position:relative; z-index:0; isolation:isolate; height:calc(100dvh - 365px); min-height:340px; overflow:hidden; background:#111c16; }
+    .bot-workspace-page .source-highlight { position:absolute; inset:0; z-index:1; box-sizing:border-box; width:max-content; min-width:100%; margin:0; padding:10px; overflow:visible; white-space:pre; color:#dceee1; background:#111c16; font: .72rem/1.5 ui-monospace, SFMono-Regular, Consolas, monospace; letter-spacing:normal; tab-size:2; pointer-events:none; }
+    .bot-workspace-page .source-editor { position:absolute; top:0; left:0; z-index:5; box-sizing:border-box; width:100%; height:100% !important; min-height:0; margin:0; padding:10px; overflow-x:auto !important; overflow-y:auto !important; scrollbar-gutter:stable; background:transparent; color:transparent; caret-color:#fff; font: .72rem/1.5 ui-monospace, SFMono-Regular, Consolas, monospace; letter-spacing:normal; tab-size:2; white-space:pre !important; pointer-events:auto; user-select:text; }
+    .bot-workspace-page .source-editor::selection { background:rgba(105,180,130,.35); }
+    .bot-workspace-page .source-editor-shell.is-light { border-color:#dbe7de; background:#f8fbf8; }
+    .bot-workspace-page .source-editor-shell.is-light .source-code-layer { background:#f8fbf8; }
+    .bot-workspace-page .source-editor-shell.is-light .source-highlight { color:#26382d; background:#f8fbf8; }
+    .bot-workspace-page .source-editor-shell.is-light .source-editor { color:transparent; caret-color:#176f4f; }
+    .source-highlight .code-keyword { color:#74c9ff; }
+    .source-highlight .code-string { color:#ffd58a; }
+    .source-highlight .code-comment { color:#91b99c; }
+    .source-highlight .code-number { color:#dfb2ff; }
+    .source-editor-shell.is-light .source-highlight .code-keyword { color:#1261a0; }
+    .source-editor-shell.is-light .source-highlight .code-string { color:#9b5410; }
+    .source-editor-shell.is-light .source-highlight .code-comment { color:#557d60; }
+    .source-editor-shell.is-light .source-highlight .code-number { color:#7542a8; }
+    .bot-workspace-page .source-editor-shell:not(.is-light) .source-line-numbers { border-color:#26392d; background:#16251c; color:#87a392; }
+    .bot-workspace-page .source-editor-shell.is-light .source-line-numbers { background:#eef5ef; color:#718278; }
+    .bot-workspace-page .source-editor-shell:not(.is-light) .source-editor { caret-color:#baf3c5; }
+    .bot-workspace-page .editor-footer { flex-wrap:wrap; }
+    .bot-workspace-page #source-syntax-status.is-invalid { color:#b42318; font-weight:700; }
+    .bot-workspace-page #source-syntax-status.is-valid { color:#176f4f; }
+    .bot-workspace-page .bot-editor-panel.is-expanded { position:fixed; inset:18px; z-index:50; padding:16px; border:1px solid #dfe8e1; border-radius:10px; background:#fff; box-shadow:0 20px 60px rgba(15,35,24,.25); }
+    .bot-workspace-page .bot-editor-panel.is-expanded .source-code-layer { height:calc(100dvh - 170px); }
+    .bot-workspace-page .bot-editor-panel.is-expanded .source-editor { height:100% !important; }
+    .bot-workspace-page .bot-editor-panel.is-expanded #source-expand { background:#176f4f; color:#fff; }
+    .bot-workspace-page .source-editor-shell { border-radius:0; }
+    .bot-workspace-page .source-editor { min-height:340px; height:calc(100dvh - 365px); padding:10px; border-radius:0; font-size:.72rem; line-height:1.5; }
+    .bot-workspace-page .source-line-numbers { padding:10px 7px; font-size:.68rem; line-height:1.5; }
+    .bot-workspace-page .editor-footer { margin:0; padding:5px 8px; border:1px solid #e1e7e2; border-top:0; border-radius:0 0 7px 7px; }
+    .bot-workspace-page .editor-footer .field-help,
+    .bot-workspace-page .editor-sandbox { font-size:.62rem; }
+    .bot-workspace-page .source-editor-actions { display:none; }
+    .bot-workspace-page .bot-revision-panel { padding:0 0 0 10px; border-left:1px solid #e1e7e2; }
+    .bot-workspace-page .bot-revision-heading { min-height:28px; margin:0; padding:0 8px; border:1px solid #e1e7e2; border-bottom:0; border-radius:7px 7px 0 0; }
+    .bot-workspace-page .bot-revision-heading h3 { font-size:.75rem; }
+    .bot-workspace-page .bot-revision-heading .bots-count { font-size:.67rem; }
+    .bot-workspace-page #bot-sdk-reference { display:none; }
+    .bot-workspace-page .bot-revision-list { min-height:340px; max-height:calc(100dvh - 365px); align-content:start; margin:0; padding:0 8px 8px; border:1px solid #e1e7e2; border-top:0; border-radius:0 0 7px 7px; }
+    .bot-workspace-page .bot-revision-empty { display:flex; min-height:300px; flex-direction:column; align-items:center; justify-content:center; gap:7px; color:#87938b; text-align:center; }
+    .bot-workspace-page .bot-revision-empty-icon { width:25px; height:25px; color:#9aa69e; fill:none; stroke:currentColor; stroke-width:1.7; }
+    .bot-workspace-page .bot-revision-empty strong { color:#394a40; font-size:.78rem; }
+    .bot-workspace-page .bot-revision-empty span { max-width:130px; color:#8b968f; font-size:.68rem; line-height:1.4; }
+    .bot-workspace-page .bot-revision-item { align-self:start; gap:4px; padding:7px 8px; border-radius:7px; }
+    .bot-workspace-page .bot-revision-meta { gap:5px; font-size:.67rem; line-height:1.25; }
+    .bot-workspace-page .bot-revision-meta strong { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .bot-workspace-page .bot-revision-meta span { flex:0 0 auto; color:#87938b; font-size:.6rem; white-space:nowrap; }
+    .bot-workspace-page .bot-revision-technical { font-size:.62rem; line-height:1.3; }
+    .bot-workspace-page .bot-revision-technical summary { font-size:.64rem; }
+    .bot-workspace-page .bot-revision-technical[open] summary { margin-bottom:3px; }
+    .bot-workspace-page .bot-revision-digest { font-size:.58rem; }
+    .bot-workspace-page .bot-revision-actions { align-items:center; gap:4px; }
+    .bot-workspace-page .bot-revision-actions .bot-action { min-height:26px; padding:4px 7px; border-radius:5px; font-size:.62rem; }
+    @media (max-width:680px) {
+      .bot-workspace-page .bot-source-grid { grid-template-columns:1fr; }
+      .bot-workspace-page .bot-revision-panel { padding:12px 0 0; border-top:1px solid #e1e7e2; border-left:0; }
+      .bot-workspace-page .bot-revision-list { max-height:420px; }
+      .bot-workspace-page .source-editor { height:420px; }
+    }
     @media (max-width: 900px) {
       .bot-workspace-page {
         width: 100%;
@@ -6143,30 +6663,83 @@
     }
     @media (max-width: 560px) {
       .bot-workspace-page { padding: 16px 16px 24px; }
-      .bot-workspace-page .bot-source-workspace { padding: 18px 16px; }
+      .bot-workspace-page .bot-source-workspace { padding: 52px 16px 18px; }
       .bot-source-header .workspace-save-action { width: 100%; }
-      .bot-source-actions { width: 100%; flex-direction: column-reverse; align-items: stretch; }
-      .bot-source-actions button { width: 100%; }
+      .bot-source-actions { width: 100%; align-self:stretch; flex-direction: column-reverse; align-items: stretch; }
+      .bot-workspace-page .bot-source-actions button { width: 100%; }
       .bot-workspace-page .source-editor { min-height: 360px; height: 420px; }
+    }
+    @media (min-width: 561px) and (max-width: 900px) {
+      .bot-workspace-page .bot-source-workspace { padding:52px 20px 20px; }
+      .bot-workspace-page .bot-workspace-info-row { grid-template-columns:minmax(0,1fr) minmax(0,1fr); }
+      .bot-workspace-page .bot-workspace-info-row .source-runtime-picker { grid-column:2; grid-row:1; }
+      .bot-workspace-page .bot-source-grid { grid-template-columns:minmax(0,3fr) minmax(150px,1fr); }
+      .bot-workspace-page .bot-revision-panel { padding:0 0 0 10px; border-top:0; border-left:1px solid #e1e7e2; }
+      .bot-workspace-page .bot-revision-list { max-height:calc(100dvh - 365px); }
+      .bot-workspace-page .source-editor { height:calc(100dvh - 365px); }
     }
     /* Test Run Modal: scoped layout corrections. */
     .practice-dialog {
-      width: min(520px, calc(100vw - 32px));
+      width: min(620px, calc(100vw - 32px));
       max-width: none;
       box-sizing: border-box;
-      padding: 26px;
-      border-radius: 12px;
+      padding: 24px;
+      border: 1px solid #dbe9df;
+      border-radius: 18px;
+      background: linear-gradient(145deg, #ffffff 0%, #f5faf7 100%);
+      box-shadow: 0 24px 70px rgba(25, 65, 43, .18);
       max-height: calc(100dvh - 32px);
       overflow-x: hidden;
       overflow-y: auto;
+    }
+    .practice-dialog .modal-head {
+      align-items: flex-start;
+      margin-bottom: 4px;
+    }
+    .practice-dialog .modal-head h4 {
+      margin: 0;
+      font-size: 1.35rem;
+      letter-spacing: -.02em;
+    }
+    .practice-dialog #practice-description {
+      max-width: 500px;
+      margin: 0 0 16px;
+      color: #718179;
+      font-size: .84rem;
+      line-height: 1.55;
+    }
+    .practice-dialog .practice-revision-meta {
+      display: block;
+      margin: 0;
+      padding: 13px 15px;
+      border: 1px solid #cfe5d6;
+      border-radius: 12px;
+      background: #edf8f1;
+      color: #176b50;
+      font-size: .78rem;
+      font-weight: 700;
+      line-height: 1.5;
+      overflow-wrap: anywhere;
+    }
+    .practice-dialog .practice-revision-meta::before {
+      content: 'PHIÊN BẢN ĐANG KIỂM TRA';
+      display: block;
+      margin-bottom: 3px;
+      color: #6d8d7a;
+      font-size: .63rem;
+      font-weight: 850;
+      letter-spacing: .1em;
     }
     .practice-dialog .practice-toolbar {
       display: block;
       width: 100%;
       min-width: 0;
-      margin: 18px 0 14px;
-      padding: 14px;
+      margin: 12px 0 14px;
+      padding: 16px;
       box-sizing: border-box;
+      border: 1px solid #e0e9e3;
+      border-radius: 14px;
+      background: rgba(255, 255, 255, .78);
     }
     .practice-dialog .practice-opponent {
       display: flex;
@@ -6211,6 +6784,36 @@
       font-size: .76rem;
       line-height: 1.45;
       overflow-wrap: anywhere;
+    }
+    .practice-dialog .practice-opponent::after {
+      content: 'SANDBOX';
+      align-self: flex-start;
+      padding: 5px 8px;
+      border-radius: 999px;
+      background: #e8f4ec;
+      color: #176b50;
+      font-size: .6rem;
+      font-weight: 850;
+      letter-spacing: .08em;
+    }
+    .practice-dialog .practice-status {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-height: 22px;
+      margin: 12px 2px 0;
+      color: #5f7067;
+      font-size: .8rem;
+      font-weight: 650;
+    }
+    .practice-dialog .practice-status::before {
+      content: '';
+      width: 8px;
+      height: 8px;
+      flex: 0 0 8px;
+      border-radius: 50%;
+      background: #e3a62b;
+      box-shadow: 0 0 0 4px rgba(227, 166, 43, .14);
     }
     .practice-dialog .practice-actions {
       display: flex;
@@ -6292,6 +6895,407 @@
       .practice-dialog .practice-replay-toolbar { grid-template-columns: 1fr; }
       .practice-dialog .practice-replay-controls { justify-content: center; }
       .practice-dialog .practice-replay-speed { justify-self: start; }
+    }
+
+    /* Replay workspace: compact match summary with balanced board/history panels. */
+    #replay-view:not(.live-match-view) {
+      padding-top: 26px;
+      background: radial-gradient(circle at 28% 4%, rgba(226, 244, 233, .48), transparent 30%);
+    }
+    #replay-view .replay-match-header {
+      display: block;
+      padding: 18px 20px;
+      border: 1px solid #dce6df;
+      border-radius: 13px;
+      background: #fff;
+      box-shadow: 0 8px 24px rgba(23, 35, 29, .035);
+    }
+    #replay-view .replay-heading-row,
+    #replay-view .replay-header-subline {
+      display: flex;
+      flex-direction: row;
+      align-items: center;
+      justify-content: space-between;
+      min-width: 0;
+      gap: 16px;
+    }
+    #replay-view .replay-heading-row > div {
+      display: block;
+      min-width: 0;
+    }
+    #replay-view .replay-heading-row .section-kicker {
+      margin: 0 0 7px;
+      color: #7a8880;
+      font-size: .66rem;
+      font-weight: 750;
+      letter-spacing: .08em;
+    }
+    #replay-view .replay-heading-row h2 {
+      margin: 0;
+      font-size: 1.32rem;
+      letter-spacing: -.025em;
+    }
+    #replay-view .replay-status-badge {
+      display: inline-flex;
+      min-height: 25px;
+      align-items: center;
+      padding: 5px 10px;
+      border-radius: 999px;
+      background: #def4e6;
+      color: #137348;
+      font-size: .69rem;
+      font-weight: 750;
+      white-space: nowrap;
+    }
+    #replay-view .replay-header-subline {
+      margin-top: 14px;
+      color: #6c7971;
+      font-size: .73rem;
+    }
+    #replay-view .replay-back-link {
+      display: inline-flex;
+      width: auto;
+      min-height: 0;
+      align-items: center;
+      gap: 6px;
+      margin: 0;
+      padding: 0;
+      border: 0;
+      background: transparent;
+      color: #526159;
+      font: inherit;
+      cursor: pointer;
+    }
+    #replay-view .replay-back-link:hover { color: #176b4d; }
+    #replay-view .replay-back-link .ui-icon { width: 25px; height: 25px; }
+
+    /* Shared back navigation: keep workspace, tournament and replay exits
+       visually consistent while leaving modal close buttons untouched. */
+    .bot-workspace-page .bot-workspace-breadcrumb .breadcrumb-back,
+    #bot-workspace-back,
+    #back-to-tournaments,
+    #replay-view .replay-back-link {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 7px;
+      min-height: 34px;
+      width: auto;
+      margin: 0;
+      padding: 7px 11px;
+      border: 1px solid #d7e4da;
+      border-radius: 9px;
+      background: #fff;
+      color: #526159;
+      font: inherit;
+      font-size: .76rem;
+      font-weight: 700;
+      line-height: 1.2;
+      text-decoration: none;
+      cursor: pointer;
+      transition: border-color .15s ease, background .15s ease, color .15s ease, box-shadow .15s ease;
+    }
+    .bot-workspace-page .bot-workspace-breadcrumb .breadcrumb-back:hover,
+    #bot-workspace-back:hover,
+    #back-to-tournaments:hover,
+    #replay-view .replay-back-link:hover {
+      border-color: #9fc7ab;
+      background: #f1faf4;
+      color: #176b50;
+      box-shadow: 0 3px 10px rgba(23, 107, 80, .08);
+    }
+    .bot-workspace-page .bot-workspace-breadcrumb .breadcrumb-back:focus-visible,
+    #bot-workspace-back:focus-visible,
+    #back-to-tournaments:focus-visible,
+    #replay-view .replay-back-link:focus-visible {
+      outline: 3px solid rgba(22, 128, 60, .18);
+      outline-offset: 2px;
+    }
+    .bot-workspace-page .bot-workspace-breadcrumb .breadcrumb-back .workspace-inline-icon,
+    #bot-workspace-back .workspace-inline-icon,
+    #back-to-tournaments .td-icon,
+    #replay-view .replay-back-link .ui-icon {
+      width: 25px;
+      height: 25px;
+      flex: 0 0 17px;
+    }
+    #back-to-tournaments .breadcrumb-separator,
+    #back-to-tournaments #td-breadcrumb-name {
+      display: none;
+    }
+
+    /* Keep the source workspace breadcrumb in normal flow so the back button
+       can never cover the workspace heading. */
+    .bot-workspace-page .bot-source-workspace {
+      padding: 16px;
+    }
+    .bot-workspace-page .bot-workspace-breadcrumb {
+      position: static;
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin: 0 0 18px;
+    }
+    .bot-workspace-page .bot-workspace-breadcrumb > span:not(.source-workspace-status) {
+      display: inline;
+      color: #a0ada5;
+      font-size: .78rem;
+    }
+    .bot-workspace-page .bot-workspace-breadcrumb .source-workspace-status {
+      margin-left: auto;
+    }
+    #replay-view .replay-series-card {
+      margin-top: 14px;
+      padding: 14px 18px 12px;
+      border: 1px solid #dce6df;
+      border-radius: 12px;
+      background: #fff;
+      box-shadow: 0 7px 20px rgba(23, 35, 29, .03);
+    }
+    #replay-view .replay-series-card .replay-players {
+      display: flex;
+      width: min(100%, 560px);
+      align-items: center;
+      justify-content: center;
+      gap: 12px;
+      margin: 0 auto;
+      padding: 0;
+      border: 0;
+    }
+    #replay-view .replay-series-card .replay-player-identity {
+      display: grid;
+      flex: 1 1 0;
+      min-width: 0;
+      padding: 6px 10px;
+      border: 0;
+      background: transparent;
+      box-shadow: none;
+    }
+    #replay-view .replay-series-card .replay-player-a-label {
+      border: 2px solid #dce6df;
+      border-left-width: 4px;
+      border-radius: 10px;
+      background: #fbfdfb;
+    }
+    #replay-view .replay-series-card .replay-player-b-label {
+      border: 2px solid #dce6df;
+      border-right-width: 4px;
+      border-radius: 10px;
+      background: #fbfdfb;
+    }
+    #replay-view .replay-series-card .replay-player-identity.is-current-side-a {
+      border-color: var(--color-player-a);
+      background: rgba(29, 78, 216, .045);
+    }
+    #replay-view .replay-series-card .replay-player-identity.is-current-side-b {
+      border-color: var(--color-player-b);
+      background: rgba(194, 65, 12, .045);
+    }
+    #replay-view .replay-series-card .replay-player-name {
+      font-size: .9rem;
+      font-weight: 750;
+    }
+    #replay-view .replay-series-card .replay-player-score {
+      min-width: 38px;
+      height: 38px;
+      border: 0;
+      border-radius: 9px;
+      background: #f2f6f3;
+      box-shadow: none;
+      font-size: 1.18rem;
+    }
+    #replay-view .replay-series-card .replay-versus {
+      color: #25342c;
+      font-size: 1rem;
+      font-weight: 800;
+    }
+    #replay-series-slot:empty { display: none; }
+    #replay-series-slot #replay-series-controls {
+      justify-content: center;
+      width: fit-content;
+      max-width: 100%;
+      margin: 10px auto 0;
+      padding: 0;
+      border: 0;
+      background: transparent;
+    }
+    #replay-series-slot #replay-series-controls::before { display: none; }
+    #replay-series-slot #replay-series-controls .secondary-btn {
+      min-width: 62px;
+      padding: 8px 12px;
+      text-align: center;
+    }
+    #replay-view .replay-layout {
+      grid-template-columns: minmax(0, 1.55fr) minmax(280px, .65fr);
+      gap: 16px;
+      margin-top: 14px;
+      align-items: stretch;
+    }
+    #replay-view .replay-board-panel,
+    #replay-view .replay-timeline-panel {
+      padding: 16px;
+      border: 1px solid #dce6df;
+      border-radius: 12px;
+      background: #fff;
+      box-shadow: 0 7px 20px rgba(23, 35, 29, .03);
+    }
+    #replay-view .replay-panel-heading {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 12px;
+    }
+    #replay-view .replay-panel-heading h3 {
+      margin: 0;
+      color: #1b2921;
+      font-size: .95rem;
+      letter-spacing: -.01em;
+    }
+    #replay-view .replay-panel-count {
+      display: inline-flex;
+      min-height: 24px;
+      align-items: center;
+      padding: 4px 9px;
+      border-radius: 999px;
+      background: #f0f3f1;
+      color: #3f4d45;
+      font-size: .68rem;
+      font-weight: 700;
+      white-space: nowrap;
+    }
+    #replay-view .replay-board-wrap {
+      width: min(100%, 520px);
+      max-width: 520px;
+      margin: 0 auto 10px;
+    }
+    #replay-view .replay-current-move {
+      min-height: 0;
+      margin: 8px 0 4px;
+      padding: 7px 10px;
+      border-left: 3px solid #b8c8bc;
+      border-radius: 5px;
+      background: #f7faf8;
+      color: #68766e;
+      font-size: .72rem;
+    }
+    #replay-view .replay-current-move-a {
+      border-left-color: #7eaef0;
+      background: #f1f6ff;
+      color: #245fae;
+    }
+    #replay-view .replay-current-move-b {
+      border-left-color: #ed9a75;
+      background: #fff5ef;
+      color: #a7431c;
+    }
+    #replay-view .replay-scrubber-label { margin-top: 8px; }
+    #replay-view .replay-controls {
+      position: relative;
+      justify-content: center;
+      padding-top: 12px;
+    }
+    #replay-view .replay-play {
+      flex-basis: 40px;
+      min-width: 40px;
+    }
+    #replay-view .replay-play .replay-control-label { display: none; }
+    #replay-view .replay-speed-label {
+      position: absolute;
+      right: 0;
+      margin-left: 0;
+    }
+    #replay-view .replay-timeline-panel h3::after { display: none; content: none; }
+    #replay-view:not(.live-match-view) .replay-selected-move { display: none; }
+    #replay-view .replay-timeline {
+      max-height: 430px;
+      margin-top: 0;
+      gap: 9px;
+    }
+    #replay-view .replay-move {
+      display: grid;
+      grid-template-columns: auto auto minmax(0, 1fr);
+      align-items: center;
+      gap: 8px;
+      min-height: 48px;
+      padding: 12px;
+      border: 1px solid #dfe6e1;
+      border-radius: 8px;
+      background: #fff;
+    }
+    #replay-view .replay-move::before { display: none; }
+    #replay-view .replay-move-number {
+      color: #7d8982;
+      font-size: .68rem;
+      font-variant-numeric: tabular-nums;
+    }
+    #replay-view .replay-move-player {
+      max-width: 132px;
+      overflow: hidden;
+      padding: 4px 8px;
+      border-radius: 999px;
+      font-size: .68rem;
+      font-weight: 750;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    #replay-view .replay-move-player-a {
+      background: #e5f0ff;
+      color: #2563c7;
+    }
+    #replay-view .replay-move-player-b {
+      background: #ffebe2;
+      color: #c34b1b;
+    }
+    #replay-view .replay-move-path {
+      min-width: 0;
+      overflow: hidden;
+      color: #27362e;
+      font-size: .76rem;
+      font-variant-numeric: tabular-nums;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    #replay-view .replay-move-side-a { border-left: 3px solid #7eaef0; }
+    #replay-view .replay-move-side-b { border-left: 3px solid #ed9a75; }
+    #replay-view .replay-details {
+      grid-template-columns: 1fr;
+      gap: 2px;
+      margin-top: 16px;
+      padding-top: 14px;
+      border-top: 1px solid #e4ebe6;
+    }
+    #replay-view .replay-detail {
+      display: grid;
+      grid-template-columns: 88px minmax(0, 1fr);
+      align-items: center;
+      gap: 12px;
+      padding: 8px 0;
+      border: 0;
+      background: transparent;
+    }
+    #replay-view .replay-detail small {
+      margin: 0;
+      text-transform: none;
+      letter-spacing: 0;
+    }
+    @media (max-width: 900px) {
+      #replay-view .replay-layout { grid-template-columns: 1fr; }
+      #replay-view .replay-board-wrap { width: min(100%, 580px); max-width: 580px; }
+    }
+    @media (max-width: 600px) {
+      #replay-view .replay-heading-row,
+      #replay-view .replay-header-subline { align-items: flex-start; }
+      #replay-view .replay-series-card .replay-players { gap: 4px; }
+      #replay-view .replay-series-card .replay-player-identity { padding: 5px; }
+      #replay-view .replay-series-card .replay-player-bot,
+      #replay-view .replay-series-card .replay-player-pieces { display: none; }
+      #replay-view .replay-speed-label {
+        position: static;
+        width: 100%;
+        margin: 4px 0 0;
+      }
     }
   </style>
 </head>
@@ -6548,7 +7552,7 @@
             thủ</span>. Quản lý Bot và giải đấu của bạn.</p>
       </div>
       <div class="dashboard-actions">
-        <button class="primary-btn dashboard-action" id="dashboard-create-bot" type="button"><svg class="ui-icon" aria-hidden="true"><use href="#icon-plus"></use></svg>Tạo Bot</button>
+        <button class="primary-btn dashboard-action" id="dashboard-create-bot" type="button"><svg class="ui-icon" aria-hidden="true"><use href="#icon-plus"></use></svg><span id="dashboard-create-bot-label">Tạo Bot</span></button>
         <button class="primary-btn dashboard-action" id="dashboard-create-tournament" type="button"><svg class="ui-icon" aria-hidden="true"><use href="#icon-plus"></use></svg>Tạo giải
           đấu</button>
       </div>
@@ -6556,29 +7560,47 @@
 
     <section class="summary-grid" aria-label="Tóm tắt không gian làm việc">
       <article class="summary-card" id="dash-bot-card">
-        <div class="stat-card__header">
-          <p id="dash-bot-label">Mở đăng ký</p><strong id="dash-bot-count">—</strong>
+        <div class="summary-card-main">
+          <span class="summary-card-visual"><svg class="summary-icon" aria-hidden="true"><use id="dash-bot-icon-main" href="#icon-bot"></use></svg></span>
+          <div class="stat-card__header">
+            <p id="dash-bot-label">Mở đăng ký</p><strong id="dash-bot-count">—</strong><small id="dash-bot-detail" class="summary-card-detail">Không gian chiến thuật</small>
+          </div>
         </div>
-        <svg class="summary-icon" aria-hidden="true"><use id="dash-bot-icon" href="#icon-bot"></use></svg>
+        <span class="summary-card-chip"><svg class="summary-icon" aria-hidden="true"><use id="dash-bot-icon" href="#icon-bot"></use></svg></span>
+      </article>
+      <article class="summary-card" id="dash-record-card" hidden>
+        <div class="summary-card-main">
+          <span class="summary-card-visual"><svg class="summary-icon" aria-hidden="true"><use href="#icon-percent"></use></svg></span>
+          <div class="stat-card__header">
+            <p>Tỉ lệ thắng</p><strong id="dash-record-rate">—</strong><small id="dash-record-matches" class="summary-card-detail">— trận tham gia</small>
+          </div>
+        </div>
+        <span class="summary-card-chip"><svg class="summary-icon" aria-hidden="true"><use href="#icon-activity"></use></svg></span>
       </article>
       <article class="summary-card" id="dash-tourney-card">
-        <div class="stat-card__header">
-          <p id="dash-tourney-label">Giải đấu quản lý</p><strong id="dash-tourney-count">—</strong>
+        <div class="summary-card-main">
+          <span class="summary-card-visual"><svg class="summary-icon" aria-hidden="true"><use id="dash-tourney-icon-main" href="#icon-users"></use></svg></span>
+          <div class="stat-card__header">
+            <p id="dash-tourney-label">Giải đấu quản lý</p><strong id="dash-tourney-count">—</strong><small id="dash-tourney-detail" class="summary-card-detail">Giải đấu hiện tại</small>
+          </div>
         </div>
-        <svg class="summary-icon" aria-hidden="true"><use id="dash-tourney-icon" href="#icon-trophy"></use></svg>
+        <span class="summary-card-chip"><svg class="summary-icon" aria-hidden="true"><use id="dash-tourney-icon" href="#icon-calendar"></use></svg></span>
       </article>
       <article class="summary-card" id="dash-queue-card">
-        <div class="stat-card__header">
-          <p id="dash-queue-label">Hàng chờ xử lý</p><strong id="dash-queue-value">—</strong>
+        <div class="summary-card-main">
+          <span class="summary-card-visual"><svg class="summary-icon" aria-hidden="true"><use id="dash-queue-icon-main" href="#icon-activity"></use></svg></span>
+          <div class="stat-card__header">
+            <p id="dash-queue-label">Đang diễn ra</p><strong id="dash-queue-value">—</strong><small class="summary-card-detail">Trạng thái thực thi</small>
+          </div>
         </div>
-        <svg class="summary-icon" aria-hidden="true"><use id="dash-queue-icon" href="#icon-activity"></use></svg>
+        <span class="summary-card-chip"><svg class="summary-icon" aria-hidden="true"><use id="dash-queue-icon" href="#icon-activity"></use></svg></span>
       </article>
     </section>
 
     <section class="dashboard-section" aria-labelledby="recent-tournaments-title">
       <div class="section-header" id="dashboard-activity-header">
         <div>
-          <h3 id="recent-tournaments-title">Giải đấu đang mở đăng ký</h3>
+          <div class="dashboard-section-title"><svg class="ui-icon" aria-hidden="true"><use href="#icon-trophy"></use></svg><h3 id="recent-tournaments-title">Giải đấu đang mở đăng ký</h3></div>
           <p class="section-description" id="dashboard-activity-copy">Các giải đấu bạn có thể gửi yêu cầu tham gia.</p>
         </div>
         <button class="text-button dashboard-section-link" id="dashboard-open-tournaments" type="button">Xem tất cả <svg class="ui-icon" aria-hidden="true"><use href="#icon-arrow-right"></use></svg></button>
@@ -6613,7 +7635,7 @@
     <section class="dashboard-section dashboard-bots-section" id="dash-bots-section" aria-labelledby="dashboard-bots-title" hidden>
       <div class="section-header">
         <div>
-          <h3 id="dashboard-bots-title">Bot của tôi</h3>
+          <div class="dashboard-section-title"><svg class="ui-icon" aria-hidden="true"><use href="#icon-code-2"></use></svg><h3 id="dashboard-bots-title">Bot của tôi</h3></div>
           <p class="section-description">Truy cập nhanh các Bot đã tạo.</p>
         </div>
         <button class="text-button dashboard-section-link" id="dashboard-open-bots" type="button">Xem tất cả <svg class="ui-icon" aria-hidden="true"><use href="#icon-arrow-right"></use></svg></button>
@@ -6644,7 +7666,6 @@
     <section id="bot-source-workspace" class="bot-source-workspace" aria-labelledby="bot-source-title">
       <nav class="bot-workspace-breadcrumb" aria-label="Điều hướng Bot">
         <button id="bot-workspace-back" class="breadcrumb-back" type="button">← <span>Bot của tôi</span></button>
-        <span aria-hidden="true">/</span><span id="bot-workspace-breadcrumb-current">Tạo Bot mới</span>
         <span id="bot-source-status" class="source-workspace-status" role="status" aria-live="polite">Bản nháp
           mới</span>
       </nav>
@@ -6671,18 +7692,22 @@
           </select></label>
       </div>
       <div class="bot-source-grid">
-        <div class="bot-editor-panel">
+          <div class="bot-editor-panel">
           <div class="editor-panel-head"><label for="bot-source-editor">Mã nguồn</label><span id="bot-source-mode"
               class="source-mode-label">Chưa có phiên bản</span><span id="bot-source-filename"
               class="editor-filename">main.cpp</span></div>
+          <div class="source-tools" role="toolbar" aria-label="Công cụ mã nguồn">
+            <button type="button" class="source-tool-button" id="source-format" title="Định dạng mã nguồn">Định dạng</button>
+            <button type="button" class="source-tool-button" id="source-theme" title="Đổi giao diện mã nguồn">Sáng</button>
+            <button type="button" class="source-tool-button" id="source-expand" title="Phóng to khung mã nguồn">Phóng to</button>
+          </div>
           <div class="source-editor-shell">
-            <pre id="bot-source-lines" class="source-line-numbers" aria-hidden="true">1</pre><textarea
+            <pre id="bot-source-lines" class="source-line-numbers" aria-hidden="true">1</pre><div class="source-code-layer"><pre id="bot-source-highlight" class="source-highlight" aria-hidden="true"></pre><textarea
               id="bot-source-editor" class="source-editor" spellcheck="false" rows="24" wrap="off"
               aria-describedby="bot-source-help bot-source-error"
-              placeholder="// Viết mã nguồn Bot của bạn ở đây"></textarea>
+              placeholder="// Viết mã nguồn Bot của bạn ở đây"></textarea></div>
           </div>
-          <div class="editor-footer"><span id="bot-source-help" class="field-help">C++17 · UTF-8 · Tối đa 64
-              KiB</span><span class="editor-sandbox">Docker Sandbox</span></div>
+          <div class="editor-footer"><span id="bot-source-help" class="field-help">C++17 · UTF-8 · Tối đa 64 KiB</span><span id="source-cursor-position" class="field-help">Dòng 1, cột 1</span><span id="source-byte-count" class="field-help">0 / 64 KiB</span><span id="source-syntax-status" class="field-help">Cú pháp hợp lệ</span><span class="editor-sandbox">Docker Sandbox</span></div>
           <p id="bot-source-error" class="form-error" role="alert" hidden></p>
           <div class="source-editor-actions"><span class="workspace-save-hint">Mỗi lần lưu tạo một phiên bản bất biến mới.</span></div>
         </div>
@@ -6733,6 +7758,15 @@
     </div>
     <ol id="td-lifecycle" class="tournament-lifecycle" aria-label="Tiến trình giải đấu"></ol><span class="lifecycle-mobile-count" id="td-lifecycle-count" aria-hidden="true"></span>
     <section class="tournament-next-step" id="td-next-step" aria-live="polite"></section>
+    <section class="tournament-podium-panel" id="td-podium-panel" hidden aria-labelledby="td-podium-title">
+      <div class="podium-heading">
+        <div class="podium-heading-copy">
+          <div class="podium-heading-title"><svg class="td-icon td-icon--md" aria-hidden="true"><use href="#td-icon-trophy"></use></svg><span id="td-podium-title">Vinh danh kết quả chung cuộc</span></div>
+          <p>Ba vị trí dẫn đầu của giải đấu</p>
+        </div>
+      </div>
+      <div class="podium-list" id="td-podium-list"></div>
+    </section>
     <section class="tournament-panel" id="td-requests" hidden aria-labelledby="td-requests-title">
       <div class="tournament-panel-head">
         <div><h3><svg class="td-icon td-icon--md panel-heading-icon" aria-hidden="true"><use href="#td-icon-clipboard-list"></use></svg><span id="td-requests-title">Yêu cầu tham gia</span></h3></div>
@@ -6750,7 +7784,7 @@
       </section>
       <section class="tournament-panel standings-panel">
         <div class="tournament-panel-head">
-          <div><p class="panel-kicker">Bảng xếp hạng</p></div><span id="td-execution-status" class="bots-count" role="status"
+          <div class="standings-heading"><svg class="td-icon td-icon--md" aria-hidden="true"><use href="#td-icon-trophy"></use></svg><p class="panel-kicker">Bảng xếp hạng</p></div><span id="td-execution-status" class="bots-count" role="status"
             aria-live="polite"></span><span id="td-stats" class="bots-count"></span>
         </div>
         <div id="td-standings-empty" class="detail-empty" role="status" hidden></div>
@@ -6782,9 +7816,16 @@
   <!-- REPLAY VIEWER -->
   <div id="replay-view" class="page">
     <div class="replay-header replay-match-header">
-      <div><button class="secondary-btn tournament-view-btn" id="close-replay" type="button"><svg class="ui-icon" aria-hidden="true"><use href="#icon-arrow-left"></use></svg>Quay lại giải đấu</button>
-        <p class="section-kicker" id="replay-view-kicker">XEM LẠI TRẬN ĐẤU</p>
-        <h2 id="replay-view-title">Diễn biến từng nước</h2>
+      <div class="replay-heading-row">
+        <div>
+          <p class="section-kicker" id="replay-view-kicker">XEM LẠI TRẬN ĐẤU</p>
+          <h2 id="replay-view-title">Diễn biến từng nước</h2>
+        </div>
+        <span class="replay-status-badge" id="replay-status-badge">Đã hoàn thành</span>
+      </div>
+      <div class="replay-header-subline">
+        <button class="tournament-view-btn replay-back-link" id="close-replay" type="button"><svg class="ui-icon" aria-hidden="true"><use href="#icon-arrow-left"></use></svg>Quay lại giải đấu</button>
+        <span id="replay-context-note">Bản ghi trận đấu</span>
       </div>
       <p id="r-result-text" class="replay-result" aria-live="polite"></p>
     </div>
@@ -6792,18 +7833,24 @@
       đấu…</div>
     <div id="replay-error" class="replay-error-panel" role="alert" hidden><span id="replay-error-message"></span><button
         id="replay-retry" class="secondary-btn" type="button">Thử lại</button></div>
+    <section class="replay-series-card" id="replay-series-card" hidden aria-label="Tỷ số trận đấu">
+      <div class="replay-players" aria-label="Hai người chơi">
+        <div class="replay-player-a-label replay-player-identity"><span class="replay-player-name"
+            id="r-p1-name">Người chơi A</span><span class="replay-player-bot" id="r-p1-bot"></span><span
+            class="replay-player-pieces" id="r-p1-pieces"></span><span class="replay-player-score" id="r-p1-score">0</span></div>
+        <span class="replay-versus" aria-hidden="true">—</span>
+        <div class="replay-player-b-label replay-player-identity"><span class="replay-player-name"
+            id="r-p2-name">Người chơi B</span><span class="replay-player-bot" id="r-p2-bot"></span><span
+            class="replay-player-pieces" id="r-p2-pieces"></span><span class="replay-player-score" id="r-p2-score">0</span></div>
+      </div>
+      <div id="replay-series-slot"></div>
+    </section>
     <div id="replay-content" class="replay-layout" hidden>
       <section class="replay-board-panel" aria-label="Bàn cờ trận đấu">
-        <div class="replay-players" aria-label="Hai người chơi">
-          <div class="replay-player-a-label replay-player-identity"><span class="replay-player-name"
-              id="r-p1-name">Người chơi A</span><span class="replay-player-bot" id="r-p1-bot"></span><span
-              class="replay-player-pieces" id="r-p1-pieces"></span></div>
-          <span class="replay-versus" aria-hidden="true">vs</span>
-          <div class="replay-player-b-label replay-player-identity"><span class="replay-player-name"
-              id="r-p2-name">Người chơi B</span><span class="replay-player-bot" id="r-p2-bot"></span><span
-              class="replay-player-pieces" id="r-p2-pieces"></span></div>
+        <div class="replay-panel-heading">
+          <h3 id="replay-board-title">Ván 1 · Diễn biến</h3>
+          <span id="r-turn-display" class="replay-panel-count" aria-live="polite">0 / 0 lượt</span>
         </div>
-        <p id="r-current-move" class="replay-current-move" aria-live="polite">Vị trí ban đầu</p>
         <div class="replay-board-wrap">
           <div class="coord-header" id="coord-header"></div>
           <div class="replay-board-row">
@@ -6811,6 +7858,7 @@
             <div class="replay-board" id="r-board" role="grid" aria-label="Bàn cờ xem lại 9 x 9"></div>
           </div>
         </div>
+        <p id="r-current-move" class="replay-current-move" aria-live="polite">Vị trí ban đầu</p>
         <label class="replay-scrubber-label" for="replay-scrubber">Vị trí xem lại</label>
         <input id="replay-scrubber" type="range" min="-1" value="-1" step="1" aria-label="Chọn vị trí xem lại">
         <div class="replay-controls" aria-label="Điều khiển xem lại"><button class="icon-btn replay-control" id="btn-replay-start"
@@ -6818,15 +7866,14 @@
             aria-label="Lùi một nước" title="Lùi một nước"><svg class="ui-icon" aria-hidden="true"><use href="#icon-step-back"></use></svg></button><button class="primary-btn replay-play replay-control" id="btn-replay-play"
             type="button" aria-label="Phát" title="Phát" aria-pressed="false"><svg class="ui-icon" aria-hidden="true"><use href="#icon-play"></use></svg><span class="replay-control-label">Phát</span></button><button class="icon-btn replay-control" id="btn-replay-next" type="button"
             aria-label="Tiến một nước" title="Tiến một nước"><svg class="ui-icon" aria-hidden="true"><use href="#icon-step-forward"></use></svg></button><button class="icon-btn replay-control" id="btn-replay-end" type="button"
-            aria-label="Đến cuối" title="Đến cuối"><svg class="ui-icon" aria-hidden="true"><use href="#icon-skip-forward"></use></svg></button><span id="r-turn-display" class="replay-step" aria-live="polite">0 /
-            0</span><label class="replay-speed-label" for="replay-speed">Tốc độ phát<select id="replay-speed">
+            aria-label="Đến cuối" title="Đến cuối"><svg class="ui-icon" aria-hidden="true"><use href="#icon-skip-forward"></use></svg></button><label class="replay-speed-label" for="replay-speed">Tốc độ phát<select id="replay-speed">
               <option value="1200">Chậm</option>
               <option value="800" selected>Bình thường</option>
               <option value="400">Nhanh</option>
             </select></label></div>
       </section>
       <aside class="replay-timeline-panel">
-        <h3 id="replay-history-title">Lịch sử nước đi</h3>
+        <div class="replay-panel-heading"><h3 id="replay-history-title">Lịch sử nước đi</h3><span id="replay-history-count" class="replay-panel-count">0 lượt</span></div>
         <p id="r-selected-move" class="replay-selected-move" aria-live="polite">Vá»‹ trÃ­ ban Ä‘áº§u</p>
         <div id="replay-timeline" class="replay-timeline" aria-live="polite"></div>
         <div class="replay-details" aria-label="Thông tin trận đấu">
@@ -6841,6 +7888,21 @@
 
 
   <!-- MODALS -->
+  <div class="live-game-result-modal" id="live-game-result-modal" role="status" aria-live="polite" aria-hidden="true">
+    <div class="live-game-result-card">
+      <p class="live-game-result-kicker">Kết quả ván đấu</p>
+      <h2 id="live-game-result-title">Ván đấu đã kết thúc</h2>
+      <p id="live-game-result-winner">Kết quả ván đã được ghi nhận</p>
+      <div class="live-game-scoreboard" aria-label="Tỉ số hai đội">
+        <div class="live-game-score-player"><strong id="live-game-player-a">Đội A</strong><small id="live-game-bot-a">Đội A</small><span id="live-game-score-a" class="live-game-score-number">0</span></div>
+        <span class="live-game-score-vs">VS</span>
+        <div class="live-game-score-player is-right"><strong id="live-game-player-b">Đội B</strong><small id="live-game-bot-b">Đội B</small><span id="live-game-score-b" class="live-game-score-number">0</span></div>
+      </div>
+      <p id="live-game-result-score">Tỷ số 0-0</p>
+      <p id="live-game-result-next">Đang chuẩn bị ván tiếp theo</p>
+      <button id="live-game-result-close" class="secondary-btn" type="button" hidden>Đóng</button>
+    </div>
+  </div>
   <div class="modal-overlay" id="bot-guide-modal" role="dialog" aria-modal="true" aria-labelledby="bot-guide-title"
     aria-describedby="bot-guide-description">
     <div class="modal-box bot-guide-modal">
@@ -6885,7 +7947,7 @@ def choose_move(state: GameState, legal_moves: list[Move]) -&gt; Move:
         </section>
         <section class="bot-guide-section">
           <h3>Luật bàn cờ cần biết</h3>
-          <ul class="bot-guide-list"><li>Bàn cờ 9×9, cột <code>a</code> đến <code>i</code>, hàng <code>1</code> đến <code>9</code>.</li><li>Mỗi quân đi một ô theo 8 hướng.</li><li>Loại quân: <code>dam</code> (Búa), <code>la</code> (Bao), <code>keo</code> (Kéo).</li><li>Quan hệ bắt quân: <code>dam</code> bắt <code>keo</code>, <code>keo</code> bắt <code>la</code>, <code>la</code> bắt <code>dam</code>. Không bắt được quân cùng loại, quân của mình hoặc quân không khắc chế.</li><li>Người chơi A hướng tới <code>i9</code>; người chơi B hướng tới <code>a1</code>. Đưa quân tới ô đích sẽ thắng.</li><li>Engine kiểm tra loại quân còn lại, giới hạn mặc định 200 lượt, lặp vị trí và trạng thái không đủ vật liệu để xác định kết quả.</li><li>Mỗi lượt Bot có thời gian mặc định 2 giây; lỗi timeout, crash hoặc output không hợp lệ làm lượt đấu thất bại.</li><li><code>legalMoves</code>/<code>legal_moves</code> đã được hệ thống tạo theo đúng luật và không nên tự sửa thứ tự.</li></ul>
+          <ul class="bot-guide-list"><li>Bàn cờ 9×9, cột <code>a</code> đến <code>i</code>, hàng <code>1</code> đến <code>9</code>.</li><li>Mỗi quân đi một ô theo 8 hướng.</li><li>Loại quân: <code>dam</code> (Búa), <code>la</code> (Bao), <code>keo</code> (Kéo).</li><li>Quan hệ bắt quân: <code>dam</code> bắt <code>keo</code>, <code>keo</code> bắt <code>la</code>, <code>la</code> bắt <code>dam</code>. Không bắt được quân cùng loại, quân của mình hoặc quân không khắc chế.</li><li>Người chơi A hướng tới <code>i9</code>; người chơi B hướng tới <code>a1</code>. Đưa quân tới ô đích sẽ thắng.</li><li>Bộ máy kiểm tra loại quân còn lại, giới hạn mặc định 200 lượt, lặp vị trí và trạng thái không đủ vật liệu để xác định kết quả.</li><li>Mỗi lượt Bot có thời gian mặc định 2 giây; lỗi quá thời gian, dừng đột ngột hoặc đầu ra không hợp lệ làm lượt đấu thất bại.</li><li><code>legalMoves</code>/<code>legal_moves</code> đã được hệ thống tạo theo đúng luật và không nên tự sửa thứ tự.</li></ul>
         </section>
         <section class="bot-guide-section">
           <h3>Một số cách viết chiến thuật</h3>
@@ -6907,22 +7969,22 @@ return legal_moves[0]</pre>
         </section>
         <section class="bot-guide-section">
           <h3>Điều kiện mã nguồn hợp lệ</h3>
-          <ul class="bot-guide-list"><li>Phải có đúng hàm <code>chooseMove</code> (C++) hoặc <code>choose_move</code> (Python).</li><li>Phải trả về một nước đi có trong danh sách hợp lệ.</li><li>Không trả về <code>null</code>, <code>None</code> hoặc tự tạo nước đi không hợp lệ.</li><li>Lỗi biên dịch, runtime hoặc quá thời gian sẽ làm lượt đấu thất bại.</li></ul>
-          <p class="bot-guide-note">Quy trình nên dùng: viết mã nguồn → Chạy thử → sửa lỗi → lưu revision → chọn revision đó khi đăng ký giải đấu. Revision đã ghim sẽ không thay đổi khi bạn chỉnh sửa mã nguồn sau này.</p>
+          <ul class="bot-guide-list"><li>Phải có đúng hàm <code>chooseMove</code> (C++) hoặc <code>choose_move</code> (Python).</li><li>Phải trả về một nước đi có trong danh sách hợp lệ.</li><li>Không trả về <code>null</code>, <code>None</code> hoặc tự tạo nước đi không hợp lệ.</li><li>Lỗi biên dịch, môi trường chạy hoặc quá thời gian sẽ làm lượt đấu thất bại.</li></ul>
+          <p class="bot-guide-note">Quy trình nên dùng: viết mã nguồn → Chạy thử → sửa lỗi → lưu phiên bản → chọn phiên bản đó khi đăng ký giải đấu. Phiên bản đã ghim sẽ không thay đổi khi bạn chỉnh sửa mã nguồn sau này.</p>
         </section>
         <section class="bot-guide-section">
           <h3>Lỗi thường gặp</h3>
-          <ul class="bot-guide-list"><li>Sai tên hoặc chữ ký hàm: C++ phải là <code>chooseMove</code>, Python phải là <code>choose_move</code>.</li><li>Thiếu include/import cần thiết hoặc dùng sai tên field của SDK sẽ gây lỗi biên dịch/runtime.</li><li>Trả về nước đi không có trong danh sách hợp lệ sẽ bị hệ thống từ chối và lượt đấu kết thúc với lỗi Bot.</li><li>Lỗi biên dịch, chương trình crash, output không hợp lệ, output rỗng hoặc quá thời gian đều làm lượt đấu của Bot thất bại.</li><li>Không tự xử lý JSON hay in kết quả ra stdout; Strategy SDK đã làm phần này.</li></ul>
+          <ul class="bot-guide-list"><li>Sai tên hoặc chữ ký hàm: C++ phải là <code>chooseMove</code>, Python phải là <code>choose_move</code>.</li><li>Thiếu include/import cần thiết hoặc dùng sai tên trường của SDK sẽ gây lỗi biên dịch/môi trường chạy.</li><li>Trả về nước đi không có trong danh sách hợp lệ sẽ bị hệ thống từ chối và lượt đấu kết thúc với lỗi Bot.</li><li>Lỗi biên dịch, chương trình dừng đột ngột, đầu ra không hợp lệ, đầu ra rỗng hoặc quá thời gian đều làm lượt đấu của Bot thất bại.</li><li>Không tự xử lý JSON hay in kết quả ra stdout; Strategy SDK đã làm phần này.</li></ul>
         </section>
         <section class="bot-guide-section">
           <h3>Cách kiểm tra Bot</h3>
           <p>Trong Không gian mã nguồn, nhập hoặc sửa mã rồi chọn <strong>Chạy thử</strong>. Hệ thống chạy Bot hiện tại đấu với Bot hệ thống cố định trong môi trường sandbox. Khi chạy xong, bạn được chuyển sang trang <strong>Xem lại trận đấu</strong> để xem bàn cờ, nước đi và kết quả.</p>
-          <p class="bot-guide-help">Trận thử không lưu kết quả vào giải đấu và không tạo thay đổi cho revision đã lưu.</p>
+          <p class="bot-guide-help">Trận thử không lưu kết quả vào giải đấu và không tạo thay đổi cho phiên bản đã lưu.</p>
         </section>
         <section class="bot-guide-section">
-          <h3>Lưu revision và tham gia giải đấu</h3>
-          <p>Chọn <strong>Tạo Bot</strong> cho Bot mới hoặc <strong>Lưu phiên bản</strong> để tạo revision bất biến mới. Mỗi revision giữ nguyên mã nguồn, runtime và thông tin SDK tại thời điểm lưu.</p>
-          <p class="bot-guide-note">Khi đăng ký giải đấu, hệ thống ghim đúng Bot ID và revision bạn chọn. Nếu sau đó lưu R2, revision R1 đã đăng ký vẫn giữ nguyên và không tự chuyển sang R2.</p>
+          <h3>Lưu phiên bản và tham gia giải đấu</h3>
+          <p>Chọn <strong>Tạo Bot</strong> cho Bot mới hoặc <strong>Lưu phiên bản</strong> để tạo phiên bản bất biến mới. Mỗi phiên bản giữ nguyên mã nguồn, môi trường chạy và thông tin SDK tại thời điểm lưu.</p>
+          <p class="bot-guide-note">Khi đăng ký giải đấu, hệ thống ghim đúng Bot ID và phiên bản bạn chọn. Nếu sau đó lưu R2, phiên bản R1 đã đăng ký vẫn giữ nguyên và không tự chuyển sang R2.</p>
         </section>
       </div>
       <div class="modal-footer"><button class="secondary-btn" type="button" data-close-modal="bot-guide-modal">Đã hiểu</button></div>
@@ -6937,7 +7999,7 @@ return legal_moves[0]</pre>
           data-close-modal="practice-modal" aria-label="Đóng cửa sổ chạy thử"><svg class="ui-icon" aria-hidden="true"><use href="#icon-x"></use></svg></button>
       </div>
       <p class="dialog-copy" id="practice-description">Kiểm tra chiến thuật trong Docker sandbox trước khi tham gia giải đấu.</p>
-      <p class="practice-revision-meta" id="practice-revision-meta">Chưa chọn revision</p>
+      <p class="practice-revision-meta" id="practice-revision-meta">Chưa chọn phiên bản</p>
       <div class="practice-toolbar">
         <div class="practice-opponent"><svg class="practice-opponent-icon" aria-hidden="true"><use href="#icon-bot"></use></svg><div class="practice-opponent-copy"><span class="field-label">ĐỐI THỦ</span><strong>Bot hệ thống cố định</strong><span>Trận thử không lưu kết quả giải đấu.</span></div></div>
         <select id="practice-scenario" hidden aria-hidden="true">
@@ -7013,12 +8075,28 @@ return legal_moves[0]</pre>
       </div>
       <p class="delete-bot-message">Bạn có chắc muốn xóa Bot «<strong id="delete-bot-name"></strong>»?</p>
       <p class="dialog-copy" id="delete-bot-support">Chỉ Bot chưa có phiên bản mã nguồn bất biến và chưa được giải đấu
-        tham chiếu mới có thể bị xóa. Các Bot đã có revision cần được giữ lại để bảo toàn lịch sử và kết quả thi đấu.
+        tham chiếu mới có thể bị xóa. Các Bot đã có phiên bản cần được giữ lại để bảo toàn lịch sử và kết quả thi đấu.
       </p>
       <p id="delete-bot-error" class="form-error" role="alert" hidden></p>
       <div class="dialog-actions"><button class="secondary-btn" type="button"
           data-close-modal="delete-bot-modal">Hủy</button><button class="danger-btn" id="confirm-delete-bot"
           type="button">Xóa Bot</button></div>
+    </div>
+  </div>
+
+  <div class="modal-overlay" id="delete-revision-modal" role="dialog" aria-modal="true" aria-labelledby="delete-revision-title"
+    aria-describedby="delete-revision-support" aria-hidden="true">
+    <div class="modal-box confirmation-dialog">
+      <div class="modal-head">
+        <h4 id="delete-revision-title">Xóa phiên bản</h4><button class="modal-close" type="button"
+          data-close-modal="delete-revision-modal" aria-label="Đóng xác nhận xóa">×</button>
+      </div>
+      <p class="delete-bot-message">Bạn có chắc muốn xóa phiên bản «<strong id="delete-revision-name"></strong>»?</p>
+      <p class="dialog-copy" id="delete-revision-support">Phiên bản đã xóa không thể khôi phục. Nếu đây là phiên bản đang chọn, hệ thống sẽ chuyển sang phiên bản khác trước khi xóa.</p>
+      <p id="delete-revision-error" class="form-error" role="alert" hidden></p>
+      <div class="dialog-actions"><button class="secondary-btn" type="button"
+          data-close-modal="delete-revision-modal">Hủy</button><button class="danger-btn" id="confirm-delete-revision"
+          type="button">Xóa phiên bản</button></div>
     </div>
   </div>
 
@@ -7034,14 +8112,6 @@ return legal_moves[0]</pre>
       <div class="form-group"><label for="new-tourney-name">Tên giải đấu</label><input type="text" id="new-tourney-name"
           class="input-shell" maxlength="100" style="width: 100%" placeholder="Ví dụ: Giải đấu mùa hè"
           autocomplete="off" aria-describedby="tournament-form-error"></div>
-      <div class="form-group"><label for="new-tourney-visibility">Quyền hiển thị</label><select
-          id="new-tourney-visibility" class="input-shell" aria-describedby="tourney-visibility-help">
-          <option value="private">Riêng tư — chỉ người tổ chức quản lý</option>
-          <option value="public">Công khai — xuất hiện trong danh sách khám phá</option>
-        </select>
-        <p id="tourney-visibility-help" class="field-help">Giải đấu công khai sẽ xuất hiện trong danh sách khám phá của
-          người chơi.</p>
-      </div>
       <p id="tournament-form-error" class="form-error" role="alert" hidden></p>
       <div class="dialog-actions"><button class="secondary-btn" type="button"
           data-close-modal="add-tourney-modal">Hủy</button><button class="primary-btn" id="submit-tournament"
@@ -7186,6 +8256,18 @@ return legal_moves[0]</pre>
        <g id="icon-activity">
          <path d="M3 12h4l3-8 4 16 3-8h4" />
        </g>
+       <g id="icon-calendar">
+         <rect x="3" y="5" width="18" height="16" rx="2" />
+         <path d="M16 3v4M8 3v4M3 10h18M8 14h.01M12 14h.01M16 14h.01M8 18h.01M12 18h.01" />
+       </g>
+       <g id="icon-chevron-down">
+         <path d="m6 9 6 6 6-6" />
+       </g>
+       <g id="icon-percent">
+         <circle cx="7.5" cy="7.5" r="2.5" />
+         <circle cx="16.5" cy="16.5" r="2.5" />
+         <path d="m6 18 12-12" />
+       </g>
        <g id="icon-git-branch">
          <circle cx="6" cy="6" r="2" />
          <circle cx="18" cy="6" r="2" />
@@ -7277,7 +8359,7 @@ return legal_moves[0]</pre>
     </defs>
   </svg>
 
-  <script src="app.js"></script>
+  <script src="app.js?v=retry-flow-5"></script>
 </body>
 
 </html>

@@ -65,6 +65,22 @@ interface RunningProcess {
   termination: Promise<void> | null;
 }
 
+interface PreparedRevisionArtifact {
+  key: string;
+  scopeId: string;
+  sourceDigest: string;
+  runtimeId: 'cpp' | 'python3';
+  executionMode: 'raw' | 'strategy';
+  sdkVersion?: string;
+  sdkDigest?: string;
+  root: string;
+  sourceDir: string;
+  sdkDir: string;
+  outputDir: string;
+  volumeWorkspace?: EphemeralVolumeWorkspace;
+  artifactDigest?: string;
+}
+
 const NON_ROOT_USER = '65532:65532';
 const SOURCE_DIR = '/app/source';
 const OUTPUT_DIR = '/app/output';
@@ -228,6 +244,8 @@ export function buildStrategyPythonRuntimeDockerArgs(
 export class RevisionDockerExecutor {
   private readonly config: RevisionDockerExecutorConfig;
   private readonly running = new Map<string, RunningProcess>();
+  private readonly preparedArtifacts = new Map<string, PreparedRevisionArtifact>();
+  private readonly warmContainers = new Map<string, string>();
   private available = false;
 
   constructor(config: RevisionDockerExecutorConfig) {
@@ -272,6 +290,28 @@ export class RevisionDockerExecutor {
     }
   }
 
+  async releaseRevisionScope(scopeId: string): Promise<boolean> {
+    const artifacts = [...this.preparedArtifacts.values()].filter(artifact => artifact.scopeId === scopeId);
+    let success = true;
+    for (const artifact of artifacts) {
+      const containerName = this.warmContainers.get(artifact.key);
+      if (containerName) {
+        success = await this.stopWarmContainer(containerName) && success;
+        this.warmContainers.delete(artifact.key);
+      }
+    }
+    for (const artifact of artifacts) this.preparedArtifacts.delete(artifact.key);
+    for (const artifact of artifacts) {
+      if (artifact.volumeWorkspace) success = (await this.cleanupVolumeWorkspace(artifact.volumeWorkspace)) && success;
+      await fs.rm(artifact.root, { recursive: true, force: true }).catch(() => { success = false; });
+    }
+    return success;
+  }
+
+  private preparedArtifactKey(scopeId: string, execution: SourceRevisionExecution): string {
+    return [scopeId, execution.competitorId, execution.botId, execution.revisionId].join(':');
+  }
+
   async executeRevision(
     context: ExecutionContext,
     revision: RevisionSource,
@@ -284,7 +324,7 @@ export class RevisionDockerExecutor {
       runtimeStartupMs: null, botExecutionMs: null, cleanupMs: 0, cleanupSucceeded: true,
       totalMs: 0, preparationBudgetMs: this.config.defaultPreparationTimeoutMs ?? 10_000,
       compileBudgetMs: this.config.defaultCompileTimeoutMs ?? 30_000,
-      runtimeBudgetMs: this.config.defaultTimeoutMs ?? 2_000, timeoutPhase: null,
+      runtimeBudgetMs: context.timeoutMs ?? this.config.defaultTimeoutMs ?? 2_000, timeoutPhase: null,
     };
     const provenance: RevisionExecutionProvenance = {
       compilationBackend: this.activeBackend(revision.execution),
@@ -324,13 +364,37 @@ export class RevisionDockerExecutor {
     timings.imageReadinessMs = Math.round(performance.now() - readinessStarted);
     if (!available) return this.error('EXECUTOR_ERROR', 'Docker source runtime is unavailable', null, '', '', false, 'docker_infrastructure');
 
+    const artifactKey = context.revisionScopeId
+      ? this.preparedArtifactKey(context.revisionScopeId, revision.execution)
+      : null;
+    const prepared = artifactKey ? this.preparedArtifacts.get(artifactKey) : undefined;
+    if (prepared) {
+      const identityMatches = prepared.sourceDigest === revision.execution.sourceDigest
+        && prepared.runtimeId === revision.execution.runtimeId
+        && prepared.executionMode === (revision.execution.executionMode ?? 'raw')
+        && prepared.sdkVersion === revision.execution.sdkVersion
+        && prepared.sdkDigest === revision.execution.sdkDigest;
+      if (!identityMatches) {
+        return this.error('SECURITY_VIOLATION', 'Prepared revision identity does not match the pinned revision', null, '', '', false, 'source_integrity');
+      }
+      if (prepared.artifactDigest) provenance.artifactDigest = prepared.artifactDigest;
+      return this.executePreparedRuntime(context, revision, request, prepared, timings);
+    }
+
     const root = path.join(this.config.workingDirBase!, 'source-exec', context.executionId);
     const sourceDir = path.join(root, 'source');
     const sdkDir = path.join(root, 'sdk');
     const outputDir = path.join(root, 'output');
     const sourceName = revision.execution.runtimeId === 'cpp' ? 'main.cpp' : 'main.py';
     let volumeWorkspace: EphemeralVolumeWorkspace | undefined;
+    let retainArtifact = false;
     try {
+      // A previous attempt can be interrupted after the warm container is
+      // created but before the artifact is registered in this process. Stop
+      // only the deterministic container for this exact revision scope, then
+      // remove its old read-only workspace before writing SDK files again.
+      if (artifactKey) await this.recoverStaleWarmContainer(artifactKey);
+      await this.removeWorkspace(root);
       await fs.mkdir(sourceDir, { recursive: true, mode: 0o700 });
       await fs.mkdir(outputDir, { recursive: true, mode: 0o700 });
       const strategy = revision.execution.executionMode === 'strategy';
@@ -403,42 +467,67 @@ export class RevisionDockerExecutor {
           timings.artifactValidationMs = Math.round(performance.now() - validationStarted);
         }
       }
-      const args = revision.execution.runtimeId === 'cpp'
-        ? volumeWorkspace
-          ? buildCppVolumeRuntimeDockerArgs(this.config, context.executionId, volumeWorkspace.outputVolume, volumeWorkspace.marker)
-          : buildCppRuntimeDockerArgs(this.config, context.executionId, outputDir)
-        : buildPythonRuntimeDockerArgs(this.config, context.executionId, sourceDir);
-      const strategyArgs = strategy
-        ? revision.execution.runtimeId === 'cpp'
-          ? volumeWorkspace
-            ? buildCppVolumeRuntimeDockerArgs(this.config, context.executionId, volumeWorkspace.outputVolume, volumeWorkspace.marker)
-            : buildCppRuntimeDockerArgs(this.config, context.executionId, outputDir)
-          : buildStrategyPythonRuntimeDockerArgs(this.config, context.executionId, sourceDir, sdkDir)
-        : args;
-      const timeoutMs = this.config.defaultTimeoutMs ?? 2_000;
-      const runtimeStarted = performance.now();
-      const result = await this.runContainer(context.executionId, strategyArgs, JSON.stringify(request), timeoutMs, context.signal);
-      timings.runtimeContainerMs = result.elapsedMs ?? Math.round(performance.now() - runtimeStarted);
-      timings.cleanupMs += result.cleanupMs ?? 0;
-      timings.cleanupSucceeded &&= result.cleanupSucceeded !== false;
-      if (result.timedOut) timings.timeoutPhase = 'runtime';
-      if (result.cancelled) throw new ExecutionCancelledError();
-      if (result.timedOut) return this.error('RUNTIME_TIMEOUT', `Bot runtime timed out after ${timeoutMs}ms`, result.code, result.stdout, result.stderr, true, 'runtime_timeout');
-      if (result.killed) return this.error('RESOURCE_LIMIT_EXCEEDED', 'Bot container exceeded a resource limit', result.code, result.stdout, result.stderr, false, 'resource_limit');
-      if (result.code === -1 && result.stderr.includes('Docker error:')) return this.error('EXECUTOR_ERROR', 'Docker runtime failed before the Bot process completed', result.code, result.stdout, result.stderr, false, 'docker_infrastructure');
-      if (result.code !== 0) return this.error('PROCESS_CRASHED', `Bot container exited with code ${result.code}`, result.code, result.stdout, result.stderr, false, 'runtime_startup');
-      return parseRevisionBotResult(result.stdout, result.stderr, result.code);
-    } finally {
-      // The compiled binary and source are test/job-scoped and never reused.
-      // Cleanup is best effort but never occurs before the Docker process exits.
-      const cleanupStarted = performance.now();
-      if (volumeWorkspace) {
-        const volumeCleanup = await this.cleanupVolumeWorkspace(volumeWorkspace);
-        timings.cleanupSucceeded &&= volumeCleanup;
+      const artifact: PreparedRevisionArtifact = {
+        key: artifactKey ?? '',
+        scopeId: context.revisionScopeId ?? '',
+        sourceDigest: revision.execution.sourceDigest,
+        runtimeId: revision.execution.runtimeId,
+        executionMode: revision.execution.executionMode ?? 'raw',
+        sdkVersion: revision.execution.sdkVersion,
+        sdkDigest: revision.execution.sdkDigest,
+        root, sourceDir, sdkDir, outputDir, volumeWorkspace,
+        artifactDigest: provenance.artifactDigest,
+      };
+      if (artifactKey && context.revisionScopeId) {
+        this.preparedArtifacts.set(artifactKey, artifact);
+        retainArtifact = true;
       }
-      await fs.rm(root, { recursive: true, force: true }).catch(() => { timings.cleanupSucceeded = false; });
-      timings.cleanupMs += Math.round(performance.now() - cleanupStarted);
+      return this.executePreparedRuntime(context, revision, request, artifact, timings);
+    } finally {
+      // A match-scoped artifact is released by releaseRevisionScope once the
+      // match finishes; one-off executions retain the original eager cleanup.
+      if (!retainArtifact) {
+        const cleanupStarted = performance.now();
+        if (volumeWorkspace) {
+          const volumeCleanup = await this.cleanupVolumeWorkspace(volumeWorkspace);
+          timings.cleanupSucceeded &&= volumeCleanup;
+        }
+        await this.removeWorkspace(root).catch(() => { timings.cleanupSucceeded = false; });
+        timings.cleanupMs += Math.round(performance.now() - cleanupStarted);
+      }
     }
+  }
+
+  private async executePreparedRuntime(
+    context: ExecutionContext,
+    revision: RevisionSource,
+    request: BotRequestMessage,
+    artifact: PreparedRevisionArtifact,
+    timings: RevisionExecutionTimings,
+  ): Promise<BotExecutionResult> {
+    const args = revision.execution.runtimeId === 'cpp'
+      ? artifact.volumeWorkspace
+        ? buildCppVolumeRuntimeDockerArgs(this.config, context.executionId, artifact.volumeWorkspace.outputVolume, artifact.volumeWorkspace.marker)
+        : buildCppRuntimeDockerArgs(this.config, context.executionId, artifact.outputDir)
+      : buildPythonRuntimeDockerArgs(this.config, context.executionId, artifact.sourceDir);
+    const strategyArgs = revision.execution.executionMode === 'strategy'
+      ? revision.execution.runtimeId === 'cpp'
+        ? args
+        : buildStrategyPythonRuntimeDockerArgs(this.config, context.executionId, artifact.sourceDir, artifact.sdkDir)
+      : args;
+    const timeoutMs = context.timeoutMs ?? this.config.defaultTimeoutMs ?? 2_000;
+    const runtimeStarted = performance.now();
+    const result = await this.runWarmContainer(artifact.key, strategyArgs, JSON.stringify(request), timeoutMs, context.signal);
+    timings.runtimeContainerMs = result.elapsedMs ?? Math.round(performance.now() - runtimeStarted);
+    timings.cleanupMs += result.cleanupMs ?? 0;
+    timings.cleanupSucceeded &&= result.cleanupSucceeded !== false;
+    if (result.timedOut) timings.timeoutPhase = 'runtime';
+    if (result.cancelled) throw new ExecutionCancelledError();
+    if (result.timedOut) return this.error('RUNTIME_TIMEOUT', `Bot runtime timed out after ${timeoutMs}ms`, result.code, result.stdout, result.stderr, true, 'runtime_timeout');
+    if (result.killed) return this.error('RESOURCE_LIMIT_EXCEEDED', 'Bot container exceeded a resource limit', result.code, result.stdout, result.stderr, false, 'resource_limit');
+    if (result.code === -1 && result.stderr.includes('Docker error:')) return this.error('EXECUTOR_ERROR', 'Docker runtime failed before the Bot process completed', result.code, result.stdout, result.stderr, false, 'docker_infrastructure');
+    if (result.code !== 0) return this.error('PROCESS_CRASHED', `Bot container exited with code ${result.code}`, result.code, result.stdout, result.stderr, false, 'runtime_startup');
+    return parseRevisionBotResult(result.stdout, result.stderr, result.code);
   }
 
   private activeBackend(execution: SourceRevisionExecution): CppCompilationBackend {
@@ -631,6 +720,111 @@ export class RevisionDockerExecutor {
   async terminate(executionId: string): Promise<void> {
     const running = this.running.get(executionId);
     if (running) await this.terminateRunning(running);
+  }
+
+  private warmContainerName(key: string): string {
+    return `ott-warm-${createHash('sha256').update(key).digest('hex').slice(0, 24)}`;
+  }
+
+  private async ensureWarmContainer(key: string, runtimeArgs: string[]): Promise<{ name: string; command: string[] }> {
+    const imageIndex = runtimeArgs.findIndex((value, index) => index > 0 && value === this.config.imageRegistry.cppRuntimeImage || value === this.config.imageRegistry.python3RuntimeImage);
+    if (imageIndex < 0) throw new Error('Runtime image could not be resolved');
+    const name = this.warmContainerName(key);
+    const image = runtimeArgs[imageIndex]!;
+    const command = runtimeArgs.slice(imageIndex + 1);
+    const existing = this.warmContainers.get(key);
+    if (existing) return { name: existing, command };
+
+    const startArgs = runtimeArgs.slice(0, imageIndex + 1);
+    const nameIndex = startArgs.indexOf('--name');
+    if (nameIndex >= 0 && nameIndex + 1 < startArgs.length) startArgs[nameIndex + 1] = name;
+    startArgs.splice(1, 0, '-d');
+    startArgs.push('tail', '-f', '/dev/null');
+    try {
+      await this.dockerCommand(startArgs);
+    } catch (error) {
+      // A previous server can leave a warm container behind after an abrupt
+      // shutdown. Reuse is unsafe because its mounted artifact may belong to
+      // an older attempt, so remove only the exact deterministic container
+      // when Docker confirms it uses the runtime image requested here.
+      if (!this.isContainerNameConflict(error)) throw error;
+      const inspected = await this.dockerCommand(['inspect', '--format', '{{.Config.Image}}', name]).catch(() => '');
+      if (inspected.trim() !== image) throw error;
+      await this.stopWarmContainer(name);
+      await this.dockerCommand(startArgs);
+    }
+    this.warmContainers.set(key, name);
+    return { name, command };
+  }
+
+  private isContainerNameConflict(error: unknown): boolean {
+    return error instanceof Error && /name .* is already in use|already in use/i.test(error.message);
+  }
+
+  private async recoverStaleWarmContainer(key: string): Promise<void> {
+    const name = this.warmContainerName(key);
+    const image = await this.dockerCommand(['inspect', '--format', '{{.Config.Image}}', name]).catch(() => '');
+    if (!image.trim()) return;
+    if (![this.config.imageRegistry.cppRuntimeImage, this.config.imageRegistry.python3RuntimeImage].includes(image.trim())) return;
+    await this.stopWarmContainer(name);
+  }
+
+  private async removeWorkspace(root: string): Promise<void> {
+    try {
+      const entries = await fs.readdir(root, { withFileTypes: true });
+      for (const entry of entries) {
+        const entryPath = path.join(root, entry.name);
+        if (entry.isDirectory()) await this.removeWorkspace(entryPath);
+        else await fs.chmod(entryPath, 0o600).catch(() => {});
+      }
+      await fs.chmod(root, 0o700).catch(() => {});
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    }
+    await fs.rm(root, { recursive: true, force: true });
+  }
+
+  private async stopWarmContainer(name: string): Promise<boolean> {
+    await this.dockerCommand(['kill', name]).catch(() => {});
+    try {
+      await this.dockerCommand(['rm', '--force', name]);
+      return true;
+    } catch (error) {
+      return error instanceof Error && /No such container/i.test(error.message);
+    }
+  }
+
+  private async runWarmContainer(
+    key: string,
+    runtimeArgs: string[],
+    input: string,
+    timeoutMs: number,
+    signal?: AbortSignal,
+  ): Promise<{ code: number | null; stdout: string; stderr: string; timedOut: boolean; killed: boolean; cancelled: boolean; elapsedMs: number; cleanupMs: number; cleanupSucceeded: boolean }> {
+    const warm = await this.ensureWarmContainer(key, runtimeArgs);
+    const started = performance.now();
+    const proc = spawn(this.config.dockerBinary!, ['exec', '-i', warm.name, ...warm.command], { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true } as SpawnOptionsWithoutStdio);
+    let stdout = '';
+    let stderr = '';
+    let timedOut = false;
+    let cancelled = false;
+    const timer = setTimeout(() => { timedOut = true; proc.kill(); void this.stopWarmContainer(warm.name); }, timeoutMs);
+    const onAbort = () => { cancelled = true; proc.kill(); void this.stopWarmContainer(warm.name); };
+    signal?.addEventListener('abort', onAbort, { once: true });
+    proc.stdout?.on('data', chunk => { stdout += Buffer.from(chunk).toString('utf8').slice(0, 1024 * 1024 - stdout.length); });
+    proc.stderr?.on('data', chunk => { stderr += Buffer.from(chunk).toString('utf8').slice(0, 10 * 1024 * 1024 - stderr.length); });
+    proc.stdin?.write(input);
+    proc.stdin?.end();
+    const code = await new Promise<number | null>(resolve => {
+      proc.once('error', error => { stderr += `Docker error: ${error.message}\n`; resolve(-1); });
+      proc.once('close', resolve);
+    });
+    clearTimeout(timer);
+    signal?.removeEventListener('abort', onAbort);
+    const cleanupStarted = performance.now();
+    const cleanupSucceeded = timedOut || cancelled ? await this.stopWarmContainer(warm.name) : true;
+    if (timedOut || cancelled) this.warmContainers.delete(key);
+    return { code, stdout, stderr, timedOut, killed: timedOut, cancelled, elapsedMs: Math.round(performance.now() - started), cleanupMs: Math.round(performance.now() - cleanupStarted), cleanupSucceeded };
   }
 
   private async runContainer(

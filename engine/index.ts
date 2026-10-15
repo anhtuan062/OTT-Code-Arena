@@ -8,6 +8,8 @@ export * from './state.js';
 export * from './moves.js';
 export * from './apply.js';
 export * from './win.js';
+export * from './system-opponent.js';
+export * from './initial-layout.js';
 
 import { GameState, GameConfig, MoveOption, ApplyResult, ValidationResult, DEFAULT_CONFIG } from './types.js';
 import { createInitialState, validateState, algebraicToPos, algebraicToPosSafe, posToAlgebraic, getPieceById } from './state.js';

@@ -95,8 +95,10 @@ describe('Match Runner', () => {
         sourceDigest: 'a'.repeat(64),
       };
       const calls: Array<{ revisionId: string; source: Buffer }> = [];
+      const releasedScopes: string[] = [];
       const revisionExecutor: SourceRevisionExecutor = {
-        async executeRevision(_context, revision, request) {
+        async executeRevision(context, revision, request) {
+          expect(context.revisionScopeId).toBe('test-match');
           calls.push(revision);
           const move = request.legal_moves[0]!;
           return {
@@ -109,6 +111,7 @@ describe('Match Runner', () => {
             durationMs: 1,
           };
         },
+        async releaseRevisionScope(scopeId) { releasedScopes.push(scopeId); return true; },
       };
       const legacyExecutor: BotExecutor = {
         async execute() { throw new Error('legacy executor must not receive source revisions'); },
@@ -128,6 +131,7 @@ describe('Match Runner', () => {
       expect(result.status).toBe('finished');
       expect(calls.length).toBe(1);
       expect(calls[0]!.execution.revisionId).toBe('revision-a');
+      expect(releasedScopes).toEqual(['test-match']);
       expect(result.metadata?.sourceRevisions).toEqual([expect.objectContaining({ revisionId: 'revision-a', runtimeId: 'python3' })]);
       expect(result.metadata?.executionDiagnostics).toEqual(expect.arrayContaining([
         expect.objectContaining({ player: 'A', runtimeId: 'python3', executionMode: 'raw', engineAcceptedMove: true }),
@@ -267,6 +271,7 @@ describe('Match Runner', () => {
       const result = await runner.run();
 
       expect(result.terminationReason).toBe('turn_limit');
+      expect(result.winner).toBe('draw');
       expect(result.turnCount).toBeLessThanOrEqual(2);
     });
 

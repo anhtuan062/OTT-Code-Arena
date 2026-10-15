@@ -16,7 +16,7 @@ describe('UX.2 role-aware navigation and dashboard', () => {
     const app = await source('app.js');
     expect(app).toContain("document.querySelectorAll('.role-nav')");
     expect(app).toContain('link.dataset.scope === state.tournamentScope');
-    expect(app).toContain("window.addEventListener('popstate'");
+    expect(app).toContain("on(window, 'popstate'");
     expect(app).toContain('canLeaveBotWorkspace()');
   });
   it('uses role-specific dashboard API data and safe DOM rendering', async () => {

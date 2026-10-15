@@ -96,9 +96,12 @@ try {
       document.querySelector('#practice-scenario').value = ${JSON.stringify(scenarioId)};
       document.querySelector('#practice-status').textContent = 'Đã chấp nhận nước đi · Người chơi ' + data.state.currentPlayer;
       document.querySelector('#practice-output').hidden = false;
-      document.querySelector('#practice-capture-legend').hidden = !data.capture;
       renderPracticeBoard(data.state, data.move, data.capture);
       renderPracticeResult(data);
+      if (innerWidth < 641) {
+        const dialog = document.querySelector('.practice-dialog');
+        dialog.scrollTop = dialog.scrollHeight;
+      }
       return {
         cells: document.querySelectorAll('#practice-board .replay-cell').length,
         first: document.querySelector('#practice-board .replay-cell')?.getAttribute('aria-label'),
@@ -107,12 +110,17 @@ try {
         board: document.querySelector('#practice-board').getBoundingClientRect().toJSON(),
         modal: document.querySelector('.practice-dialog').getBoundingClientRect().toJSON(),
         runButton: document.querySelector('#practice-run').getBoundingClientRect().toJSON(),
+        captureLegend: Boolean(document.querySelector('.practice-legend')),
+        captureLegendMark: Boolean(document.querySelector('.practice-legend .practice-legend-mark.capture')),
+        captureCells: document.querySelectorAll('#practice-board .practice-capture').length,
       };
     })()`;
     const response = await command('Runtime.evaluate', { expression, returnByValue: true });
     if (response.exceptionDetails) throw new Error(response.exceptionDetails.text);
     const metrics = response.result.value;
-    if (metrics.cells !== 81 || metrics.overflow || Math.abs(metrics.board.width - metrics.board.height) > 2
+    if (metrics.cells !== 81 || !metrics.captureLegend || !metrics.captureLegendMark
+      || (scenarioId === 'capture' && metrics.captureCells < 1)
+      || metrics.overflow || Math.abs(metrics.board.width - metrics.board.height) > 2
       || metrics.runButton.bottom > height || metrics.runButton.left < 0 || metrics.runButton.right > width) {
       throw new Error(`Invalid browser layout: ${JSON.stringify(metrics)}`);
     }
@@ -122,7 +130,7 @@ try {
     await writeFile(file, Buffer.from(image.data, 'base64'));
     if (width < 641) {
       const scroll = await command('Runtime.evaluate', {
-        expression: `(() => { const modal = document.querySelector('.practice-dialog'); modal.scrollTop = modal.scrollHeight; return { lastResultBottom: document.querySelector('#practice-result-details dd:last-child').getBoundingClientRect().bottom, footerTop: document.querySelector('.practice-dialog .dialog-actions').getBoundingClientRect().top }; })()`,
+        expression: `(() => { const modal = document.querySelector('.practice-dialog'); modal.scrollTop = modal.scrollHeight; return { lastResultBottom: document.querySelector('#practice-result-details dd:last-child').getBoundingClientRect().bottom, footerTop: document.querySelector('.practice-dialog .practice-actions').getBoundingClientRect().top }; })()`,
         returnByValue: true,
       });
       if (scroll.result.value.lastResultBottom > scroll.result.value.footerTop) {

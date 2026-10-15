@@ -2,7 +2,7 @@
  * Match Runner - Types
  */
 
-import type { GameState, GameConfig, MoveOption, ApplyResult, WinReason, Piece } from '@engine/types.js';
+import type { GameState, GameConfig, InitialPieceConfig, MoveOption, ApplyResult, WinReason, Piece } from '@engine/types.js';
 import type { BotProcessConfig } from '@bot-runner/types.js';
 import type { BotRequest, BotResponse, BotMoveOption, BotPiece, BotError } from '@bot-protocol/types.js';
 import type { BotFailureStage } from '@bot-executor/types.js';
@@ -61,7 +61,7 @@ export interface ExecutionDiagnostic {
 export type MatchStatus = 'pending' | 'in_progress' | 'finished' | 'error';
 
 export type TerminationReason =
-  | 'type_elimination'
+  | 'all_pieces_captured'
   | 'goal_reached'
   | 'turn_limit'
   | 'repetition'
@@ -87,6 +87,8 @@ export interface MatchConfig {
   logRequests: boolean;
   logResponses: boolean;
   logStates: boolean;
+  /** Optional deterministic opening layout for this match/game. */
+  initialPieces?: InitialPieceConfig[];
 }
 
 export interface BotDefinition {
@@ -167,12 +169,31 @@ export interface MatchReplay {
     A?: ReplayParticipantIdentity;
     B?: ReplayParticipantIdentity;
   };
+  /** BO3 envelope; absent on historical BO1 replays. */
+  series?: {
+    format: 'bo3';
+    bestOf: 3;
+    seed: string;
+    winsA: number;
+    winsB: number;
+    winner: Player | 'draw';
+    games: Array<{
+      gameNumber: 1 | 2 | 3;
+      participantA: string;
+      participantB: string;
+      winner: Player | 'draw' | null;
+      winnerParticipantId: string | null;
+      replay: MatchReplay;
+    }>;
+  };
 }
 
 export type LiveMatchStatus = 'in_progress' | 'finished' | 'failed' | 'cancelled';
 
 export interface LiveMatchSnapshot {
   matchId: string;
+  /** BO3 game represented by this snapshot; absent for legacy BO1 snapshots. */
+  gameNumber?: 1 | 2 | 3;
   status: LiveMatchStatus;
   sequence: number;
   turn: number;

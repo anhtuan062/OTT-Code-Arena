@@ -1,163 +1,100 @@
-# Data Model
+# Mô hình dữ liệu
 
-## Entities
+Hệ thống dùng hai lớp persistence: SQLite cho tài khoản/bot và filesystem cho tournament/result/replay.
 
-### User / Contestant
-```typescript
-interface Contestant {
-  id: string;           // UUID
-  name: string;         // Display name
-  email: string;        // Contact
-  team_id: string | null;
-  created_at: string;   // ISO 8601
-}
+## SQLite
+
+Schema hiện tại được quản lý theo version trong `server/db.ts`.
+
+### User
+
+- `id`, `username`, `password_hash`;
+- `role`: `competitor` hoặc `organizer`;
+- thời gian tạo và đăng nhập gần nhất.
+
+### Session
+
+- token đã băm/định danh session;
+- user ID, CSRF token;
+- thời gian tạo và hết hạn.
+
+### Bot
+
+- bot ID, owner ID và tên;
+- metadata legacy command để tương thích;
+- `current_revision_id` trỏ tới phiên bản đang chọn.
+
+### Bot revision
+
+- revision ID, bot ID và owner ID;
+- source digest, storage reference và source size;
+- runtime `cpp` hoặc `python3`;
+- label, thời gian tạo và execution mode;
+- SDK version/digest với strategy revision.
+
+Source thực tế nằm trong `data/tournaments/bot-revisions/<bot-id>/`.
+
+### Rate limit
+
+Lưu key, số lần thử và cửa sổ thời gian cho các endpoint cần giới hạn.
+
+## Tournament filesystem
+
+`Tournament` gồm:
+
+- ID, tên, owner metadata và trạng thái;
+- format `single_round_robin`;
+- participants và participation requests;
+- match config, scoring config;
+- rounds, pairings và standings;
+- thời điểm đăng ký, bắt đầu, hoàn thành và công bố.
+
+Trạng thái tournament:
+
+```text
+draft → registration_open → registration_closed → running → completed
+  └────────────────────────────────────────────────────────→ cancelled
 ```
 
-### Team
-```typescript
-interface Team {
-  id: string;           // UUID
-  name: string;
-  members: string[];    // Contestant IDs
-  created_at: string;
-}
-```
+Một số transition quay lại `draft` được hỗ trợ trước khi giải chạy.
 
-### Bot Submission
-```typescript
-interface BotSubmission {
-  id: string;                    // UUID
-  team_id: string;
-  version: number;               // Incrementing
-  language: string;              // e.g., "python3", "nodejs"
-  source_hash: string;           // SHA256 of source
-  executable_path: string;       // Path to runnable
-  protocol_version: string;      // e.g., "0.1.0"
-  status: "pending" | "approved" | "rejected";
-  submitted_at: string;
-  approved_at: string | null;
-}
-```
+## Pairing
 
-### Tournament
-```typescript
-interface Tournament {
-  id: string;                    // UUID
-  name: string;
-  format: "round_robin" | "swiss" | "elimination";
-  status: "draft" | "registration" | "running" | "completed";
-  rules_version: string;         // Game rules version
-  engine_version: string;        // Engine version
-  bot_protocol_version: string;
-  max_turns: number;
-  turn_timeout_ms: number;
-  created_at: string;
-  started_at: string | null;
-  completed_at: string | null;
-}
-```
+`TournamentPairing` chứa participant A/B, round, status, match ID, result và lỗi an toàn để hiển thị. `participantB = null` nghĩa là miễn đấu.
 
-### Match
-```typescript
-interface Match {
-  id: string;                    // UUID
-  tournament_id: string;
-  round: number;
-  board: number;                 // For arena mode
-  player_a_bot_id: string;
-  player_b_bot_id: string;
-  status: "pending" | "running" | "completed" | "failed" | "cancelled";
-  result: MatchResult | null;
-  started_at: string | null;
-  completed_at: string | null;
-}
-```
+Status:
 
-### Match Result
-```typescript
-interface MatchResult {
-  winner: "A" | "B" | "draw";
-  reason: "type_elimination" | "goal_reached" | "timeout" | "crash" | "invalid_move" | "turn_limit" | "repetition" | "agreed_draw";
-  turns: number;
-  final_state: GameState;        // Full board state
-  log: TurnLog[];                // Complete move history
-  player_a: PlayerMatchStats;
-  player_b: PlayerMatchStats;
-}
+- `scheduled`;
+- `in_progress`;
+- `completed`;
+- `failed`;
+- `cancelled`;
+- `skipped`.
 
-interface PlayerMatchStats {
-  bot_id: string;
-  time_used_ms: number;
-  max_turn_time_ms: number;
-  errors: string[];
-}
-```
+Pairing BO3 có `seriesProgress`: seed, ván tiếp theo, điểm hai participant và danh sách game đã commit.
 
-### Turn Log
-```typescript
-interface TurnLog {
-  turn: number;
-  player: "A" | "B";
-  move: {
-    piece_id: string;
-    from: string;
-    to: string;
-    captures: string | null;
-  };
-  state_after: GameState;        // Optional: full state or diff
-  duration_ms: number;
-  bot_stdout: string;
-  bot_stderr: string;
-  bot_exit_code: number;
-}
-```
+## Match result và replay
 
-### Game State (Engine)
-```typescript
-interface GameState {
-  board_size: 9;
-  current_player: "A" | "B";
-  turn: number;
-  pieces: Piece[];
-  status: "playing" | "finished";
-  winner: "A" | "B" | null;
-  win_reason: string | null;
-}
+Aggregate match record là đơn vị dùng cho bảng xếp hạng. Game record nội bộ của BO3 có `seriesGameOf` và không được tính riêng vào standings.
 
-interface Piece {
-  id: string;
-  type: "dam" | "la" | "keo";
-  player: "A" | "B";
-  row: number;    // 0-8
-  col: number;    // 0-8
-}
-```
+Replay lưu:
 
-### Tournament Standing
-```typescript
-interface Standing {
-  tournament_id: string;
-  team_id: string;
-  bot_id: string;
-  matches_played: number;
-  wins: number;
-  draws: number;
-  losses: number;
-  points: number;           // Win=3, Draw=1, Loss=0 (configurable)
-  buchholz: number;         // Tie-break: sum of opponents' points
-  sonneborn_berger: number; // Tie-break
-  rank: number | null;
-}
-```
+- initial/final state;
+- move list;
+- winner và termination reason;
+- participant identity;
+- source provenance giới hạn;
+- envelope series và nested game replay với BO3.
 
-## Relationships
-- Tournament 1:N Match
-- Match 2:1 BotSubmission (player A, player B)
-- BotSubmission N:1 Team
-- Team 1:N Contestant
-- Tournament 1:N Standing
+## Live data
 
-## Persistence
-- MVP: JSON files in `data/` directory
-- Production: PostgreSQL with Prisma/Drizzle
-- All match logs stored for replay
+Live snapshot chỉ tồn tại cho luồng đang chạy và được đánh số bằng `gameNumber` + `sequence`. Spectator API chiếu snapshot thành DTO an toàn; live history bị giới hạn và không thay thế replay bền vững.
+
+## Điểm số
+
+- thắng: 3 điểm;
+- hòa: 1 điểm;
+- thua: 0 điểm;
+- miễn đấu: 0 điểm.
+
+Standings được tính lại từ aggregate match records để tránh cộng điểm lặp khi retry hoặc recovery.

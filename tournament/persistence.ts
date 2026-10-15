@@ -36,6 +36,7 @@ export interface TournamentRepository {
     result: TournamentMatchRecord,
     replay: object
   ): Promise<void>;
+  deleteMatchResult(tournamentId: string, matchId: string): Promise<void>;
   loadMatchResult(tournamentId: string, matchId: string): Promise<TournamentMatchRecord | null>;
   loadReplay(tournamentId: string, matchId: string): Promise<MatchReplay | null>;
   listMatchResults(tournamentId: string): Promise<TournamentMatchRecord[]>;
@@ -285,6 +286,18 @@ export class FileTournamentRepository implements TournamentRepository {
       this.saveMatchResultUnlocked(tournamentId, matchId, result, replay));
   }
 
+  async deleteMatchResult(tournamentId: string, matchId: string): Promise<void> {
+    this.assertSafeId(tournamentId, 'tournament');
+    this.assertSafeId(matchId, 'match');
+    await this.withWriteLock(`match:${tournamentId}:${matchId}`, async () => {
+      await Promise.all([
+        fs.rm(this.getMatchResultFile(tournamentId, matchId), { force: true }),
+        fs.rm(this.getReplayFile(tournamentId, matchId), { force: true }),
+        fs.rm(this.getMatchCommitFile(tournamentId, matchId), { force: true }),
+      ]);
+    });
+  }
+
   private async saveMatchResultUnlocked(
     tournamentId: string,
     matchId: string,
@@ -415,14 +428,11 @@ export class FileTournamentRepository implements TournamentRepository {
     const result = JSON.parse(resultData) as TournamentMatchRecord;
     const replay = JSON.parse(replayData) as MatchReplay;
     if (commitData === null) {
-      // Explicit legacy compatibility: markerless pairs are accepted only
-      // when both JSON documents identify the same match. They cannot provide
-      // the hash-based protection of new writes and should be migrated before
-      // multi-writer operation is ever supported.
-      if (result.matchId !== matchId || replay.matchId !== matchId || result.replayRef !== matchId) {
-        throw new Error(`Inconsistent legacy persisted match ${matchId}`);
-      }
-      return { result, replay };
+      // A markerless pair is ambiguous: it may be a genuine historical
+      // artifact, or a modern write interrupted after both payloads but before
+      // the commit marker. Normal loading must fail closed; any legacy
+      // recovery requires a separately authorized, verified workflow.
+      throw new Error(`Uncommitted persisted match ${matchId}: commit marker is required`);
     }
     const commit = JSON.parse(commitData) as {
       matchId?: string;
@@ -460,9 +470,11 @@ export class FileTournamentRepository implements TournamentRepository {
       }
 
       const results: TournamentMatchRecord[] = [];
-      for (const matchId of matchIds) {
+        for (const matchId of matchIds) {
         const pair = await this.loadCommittedMatch(tournamentId, matchId);
-        if (pair) results.push(pair.result);
+          // BO3 per-game artifacts are committed independently for recovery,
+          // but only the aggregate series record contributes to standings.
+          if (pair && !pair.result.seriesGameOf) results.push(pair.result);
       }
       return results;
     } catch (error) {

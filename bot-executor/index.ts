@@ -26,7 +26,12 @@ export async function createExecutor(config: ExecutorFactoryConfig = {}): Promis
   clearExecutorCache();
 
   const { type = 'auto', childProcessConfig, dockerConfig } = config;
-  const policy = childProcessConfig?.executionPolicy ?? dockerConfig?.executionPolicy ?? 'development';
+  const requestedPolicy = childProcessConfig?.executionPolicy ?? dockerConfig?.executionPolicy;
+  const production = process.env.NODE_ENV?.trim().toLowerCase() === 'production';
+  if (production && requestedPolicy !== 'sandbox-required') {
+    throw new Error('Production requires sandbox-required execution policy');
+  }
+  const policy = requestedPolicy ?? (production ? 'sandbox-required' : 'development');
   if (type === 'child-process') {
     if (policy === 'sandbox-required') throw new Error('Sandbox-required policy does not allow child-process executor');
     cachedExecutor = createChildProcessExecutor(childProcessConfig);
@@ -36,10 +41,7 @@ export async function createExecutor(config: ExecutorFactoryConfig = {}): Promis
   }
   const image = dockerConfig?.image ?? process.env.BOT_DOCKER_IMAGE;
   if (!image && type === 'auto' && policy === 'development') {
-    cachedExecutor = createChildProcessExecutor(childProcessConfig);
-    cachedExecutorType = 'child-process';
-    cachedPolicy = policy;
-    return cachedExecutor;
+    throw new Error('Docker image is not configured; explicitly select child-process for local development only');
   }
   const resolvedDockerConfig = {
     ...dockerConfig,
@@ -70,16 +72,12 @@ export async function createExecutor(config: ExecutorFactoryConfig = {}): Promis
     return cachedExecutor;
   }
 
-  // Docker not available - check policy
+  // Docker is unavailable. Host execution is never an automatic recovery path;
+  // local development must explicitly select type: 'child-process'.
   if (policy === 'sandbox-required') {
     throw new Error('Sandbox-required policy but Docker is not available');
   }
-
-  // Fallback to child process (development mode only)
-  cachedExecutor = createChildProcessExecutor(childProcessConfig);
-  cachedExecutorType = 'child-process';
-  cachedPolicy = policy;
-  return cachedExecutor;
+  throw new Error('Docker executor is unavailable; explicitly select child-process for local development only');
 }
 
 export function getCachedExecutor(): BotExecutor | null {

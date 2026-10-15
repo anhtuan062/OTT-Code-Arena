@@ -9,21 +9,24 @@ import { createExecutionQueue } from '../bot-executor/execution-queue.js';
 import * as fs from 'fs/promises';
 import { existsSync } from 'node:fs';
 import bcrypt from 'bcryptjs';
-import { randomBytes, randomUUID } from 'crypto';
+import { createHash, randomBytes, randomUUID } from 'crypto';
 import { closeSharedDatabase, initializeDatabase, setSharedDatabase } from './db.js';
 import { SqlBotRepository, type BotRecord } from './repositories/bot-repository.js';
 import { SqlBotRevisionRepository, SUPPORTED_SOURCE_RUNTIMES, MAX_SOURCE_BYTES, isSupportedSourceRuntime } from './repositories/bot-revision-repository.js';
 import { isUserRole, SqlUserRepository, type UserRole } from './repositories/user-repository.js';
 import { SqlSessionRepository } from './repositories/session-repository.js';
 import { SqlRateLimitRepository } from './repositories/rate-limit-repository.js';
+import { projectSpectatorLive, projectSpectatorReplay } from './spectator.js';
 import type { ExecutionPolicy } from '../bot-executor/types.js';
 import type { SourceRevisionExecutor } from '../bot-executor/types.js';
+import { ExecutionCancelledError } from '../bot-executor/types.js';
 import { getStrategySdkIdentity } from '../bot-executor/strategy-sdk.js';
 import type { Tournament, TournamentBot, ParticipationRequest, SourceRevisionExecution } from '../tournament/types.js';
 import type { Server } from 'node:http';
 import { BotProtocol } from '../bot-protocol/index.js';
-import { createEngine, posToAlgebraic } from '../engine/index.js';
+import { chooseSystemOpponentMove, createEngine, posToAlgebraic } from '../engine/index.js';
 import { createPracticeScenario, serializePracticeLegalMoves } from '../practice/scenarios.js';
+import { getSeriesSides } from '../tournament/series.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -114,7 +117,11 @@ export async function initServer(storageDir?: string) {
       executionPolicy,
       workingDirBase: process.env.BOT_EXECUTION_WORKDIR ?? path.join(dir, '.source-execution'),
       defaultTimeoutMs: 2000,
-      defaultCompileTimeoutMs: 30000,
+      // Strategy C++ revisions are compiled with a static toolchain inside
+      // Docker. Cold image/filesystem startup can exceed 30s even when the
+      // bot itself is fast. Keep the per-turn runtime budget at 2s, but give
+      // the one-time match-scoped compilation enough time to finish.
+      defaultCompileTimeoutMs: Math.max(30_000, Number(process.env.BOT_CPP_COMPILE_TIMEOUT_MS ?? 120_000)),
       defaultPreparationTimeoutMs: 10000,
       cppCompilationBackend,
     });
@@ -155,6 +162,8 @@ export async function initServer(storageDir?: string) {
     sessionRepository = new SqlSessionRepository(db, SESSION_TTL_MS);
     rateLimitRepository = new SqlRateLimitRepository(db);
     sessionRepository.deleteExpired();
+    const recoveredTournaments = await manager.recoverInterruptedTournaments();
+    if (recoveredTournaments > 0) console.log(`Recovered ${recoveredTournaments} interrupted tournament(s)`);
     console.log(`Tournament Manager initialized with ${executionPolicy} policy`);
   } catch (error) {
     manager?.close();
@@ -413,6 +422,24 @@ app.post('/api/bots/:id/revisions/:revisionId/select', requireAuth, requireRole(
   res.json(apiRevision(revision));
 });
 
+app.delete('/api/bots/:id/revisions/:revisionId', requireAuth, requireRole('competitor'), requireCsrf, async (req, res) => {
+  const botId = routeParam(req, 'id');
+  const revisionId = routeParam(req, 'revisionId');
+  const bot = botRepository.findById(botId);
+  if (!bot || bot.owner_id !== req.auth!.id) return res.status(404).json({ error: 'Bot not found' });
+  const tournaments = await manager.listTournaments();
+  if (tournaments.some(tournament => JSON.stringify(tournament).includes(revisionId))) {
+    return res.status(409).json({ error: 'Cannot delete a revision referenced by a tournament' });
+  }
+  if (bot.current_revision_id === revisionId) {
+    const fallback = botRevisionRepository.listForOwner(botId, req.auth!.id).find(revision => revision.revision_id !== revisionId);
+    if (!fallback) return res.status(409).json({ error: 'Cannot delete the only revision' });
+    if (!botRevisionRepository.select(botId, fallback.revision_id, req.auth!.id)) return res.status(409).json({ error: 'Unable to select a replacement revision' });
+  }
+  if (!await botRevisionRepository.delete(botId, revisionId, req.auth!.id)) return res.status(404).json({ error: 'Source revision not found' });
+  res.status(204).end();
+});
+
 // Execute one deterministic opening position through the configured source
 // sandbox. This does not create a match or mutate tournament state.
 app.post('/api/bots/:id/revisions/:revisionId/test', requireAuth, requireRole('competitor'), requireCsrf, async (req, res) => {
@@ -561,6 +588,12 @@ const fixedPracticeMatchHandler = async (req: express.Request, res: express.Resp
   const practiceKey = `${req.auth!.id}:${revision.revision_id}:match`;
   if (activePracticeExecutions.has(practiceKey)) return res.status(409).json({ error: 'This revision is already being tested' });
   activePracticeExecutions.add(practiceKey);
+  const revisionScopeId = `practice-match-${randomUUID()}`;
+  const controller = new AbortController();
+  const abortOnDisconnect = () => { if (!res.writableEnded) controller.abort(); };
+  req.once('aborted', abortOnDisconnect);
+  res.once('close', abortOnDisconnect);
+  const matchDeadline = setTimeout(() => controller.abort(), 120_000);
   try {
     const source = draft?.source || Buffer.from(await botRevisionRepository.readSource(revision), 'utf8');
     const engine = createEngine();
@@ -568,16 +601,17 @@ const fixedPracticeMatchHandler = async (req: express.Request, res: express.Resp
     const moves: Array<{ player: 'A' | 'B'; turn: number; pieceId: string; from: string; to: string; captures: string | null }> = [];
     let executionCount = 0;
     while (!engine.isFinished() && executionCount < 200) {
+      if (controller.signal.aborted) throw new ExecutionCancelledError('Practice match cancelled');
       const state = engine.getState();
       const legalMoves = engine.getLegalMoves();
       if (!legalMoves.length) break;
       let selected = state.currentPlayer === 'A'
         ? null
-        : [...legalMoves].sort((left, right) => `${left.pieceId}:${posToAlgebraic(left.to)}`.localeCompare(`${right.pieceId}:${posToAlgebraic(right.to)}`))[0]!;
+        : chooseSystemOpponentMove(state, legalMoves);
       if (state.currentPlayer === 'A') {
         const executionId = `revision-practice-match-${randomUUID()}`;
         const result = await sourceRevisionExecutor.executeRevision(
-          { executionId, matchId: 'practice-fixed-opponent', turn: state.turn, player: 'A' },
+          { executionId, matchId: 'practice-fixed-opponent', turn: state.turn, player: 'A', revisionScopeId, signal: controller.signal },
           { execution: { kind: 'source-revision', competitorId: req.auth!.id, botId: revision.bot_id, revisionId: revision.revision_id, runtimeId: revision.runtime_id, sourceDigest: revision.source_digest, executionMode: revision.execution_mode, sdkVersion: revision.sdk_version ?? undefined, sdkDigest: revision.sdk_digest ?? undefined }, source },
           BotProtocol.createRequest(executionId, state, legalMoves),
         );
@@ -600,6 +634,10 @@ const fixedPracticeMatchHandler = async (req: express.Request, res: express.Resp
   } catch (error) {
     return res.status(503).json({ error: error instanceof Error ? error.message : 'Không thể chạy trận thử với Bot hệ thống.' });
   } finally {
+    clearTimeout(matchDeadline);
+    req.off('aborted', abortOnDisconnect);
+    res.off('close', abortOnDisconnect);
+    await sourceRevisionExecutor.releaseRevisionScope?.(revisionScopeId).catch(() => false);
     activePracticeExecutions.delete(practiceKey);
   }
 };
@@ -649,8 +687,14 @@ function organizerParticipationRequest(request: ParticipationRequest) {
 }
 
 function discoverableTournament(tournament: Awaited<ReturnType<typeof manager.loadTournament>>['data'] | null) {
-  if (!tournament || tournament.metadata?.access !== 'public' ||
-      (tournament.status !== 'registration_open' && !(tournament.status === 'completed' && tournament.resultsPublishedAt))) return null;
+  if (!tournament) return null;
+  // Registration-open tournaments must have an owner. Older test/legacy
+  // records without ownership metadata are orphaned and must not appear as
+  // joinable tournaments to every authenticated user.
+  if (tournament.status === 'registration_open') {
+    const ownerId = tournament.metadata?.ownerId;
+    if (typeof ownerId !== 'string' || userRepository.findById(ownerId)?.role !== 'organizer') return null;
+  }
   return {
     tournamentId: tournament.tournamentId,
     name: tournament.name,
@@ -658,13 +702,12 @@ function discoverableTournament(tournament: Awaited<ReturnType<typeof manager.lo
     status: tournament.status,
     registrationOpenedAt: tournament.registrationOpenedAt,
     participantCount: tournament.participants.length,
-    resultsPublishedAt: tournament.resultsPublishedAt ?? null,
+    resultsPublishedAt: tournament.status === 'completed' && tournament.resultsPublishedAt ? tournament.resultsPublishedAt : null,
   };
 }
 
-function isPublishedPublic(tournament: Tournament): boolean {
-  return tournament.metadata?.access === 'public' &&
-    tournament.status === 'completed' && Boolean(tournament.resultsPublishedAt);
+function isPublishedTournament(tournament: Tournament): boolean {
+  return tournament.status === 'completed' && Boolean(tournament.resultsPublishedAt);
 }
 
 function safePublishedTournament(tournament: Tournament) {
@@ -688,19 +731,83 @@ function safePublishedTournament(tournament: Tournament) {
   };
 }
 
-async function canViewTournamentResults(req: express.Request, tournament: Tournament): Promise<boolean> {
-  if (req.auth?.role === 'organizer') return tournament.metadata?.ownerId === req.auth.id;
-  return req.auth?.role === 'competitor' && isPublishedPublic(tournament);
+function safeSpectatorTournament(tournament: Tournament, viewerId?: string) {
+  const viewerBotIds = new Set((tournament.participationRequests ?? [])
+    .filter(request => request.competitorId === viewerId && request.status === 'approved')
+    .map(request => request.botId));
+  const viewerParticipantIds = viewerId
+    ? tournament.participants.filter(participant => viewerBotIds.has(participant.bot.botId)).map(participant => participant.participantId)
+    : [];
+  const participantName = (participantId: string | null) => participantId
+    ? tournament.participants.find(item => item.participantId === participantId)?.name ?? participantId
+    : 'Miễn đấu';
+  return {
+    tournamentId: tournament.tournamentId,
+    name: tournament.name,
+    format: tournament.format,
+    status: tournament.status,
+    spectatorAccess: tournament.status === 'running',
+    viewerParticipantIds,
+    participantCount: tournament.participants.length,
+    participants: tournament.participants.map(participant => ({ participantId: participant.participantId, name: participant.name })),
+    rounds: tournament.rounds.map(round => ({
+      roundNumber: round.roundNumber,
+      pairings: round.pairings.map(pairing => ({
+        pairingId: pairing.pairingId,
+        roundNumber: pairing.roundNumber,
+        participantA: pairing.participantA,
+        participantB: pairing.participantB,
+        status: pairing.status,
+        matchId: pairing.matchId,
+        startedAt: pairing.startedAt,
+        completedAt: pairing.completedAt,
+        seriesProgress: pairing.seriesProgress ? {
+          format: pairing.seriesProgress.format,
+          bestOf: pairing.seriesProgress.bestOf,
+          nextGame: pairing.seriesProgress.nextGame,
+          winsA: pairing.seriesProgress.winsA,
+          winsB: pairing.seriesProgress.winsB,
+          games: pairing.seriesProgress.games.map(game => ({ gameNumber: game.gameNumber, winner: game.winner, winnerParticipantId: game.winnerParticipantId })),
+        } : null,
+        matchResult: pairing.matchResult && isPublishedTournament(tournament) ? {
+          winner: pairing.matchResult.winner,
+          terminationReason: pairing.matchResult.terminationReason,
+          completedAt: pairing.matchResult.completedAt,
+          series: pairing.matchResult.series ? {
+            winsA: pairing.matchResult.series.winsA,
+            winsB: pairing.matchResult.series.winsB,
+            winner: pairing.matchResult.series.winner,
+            games: pairing.matchResult.series.games.map(game => ({ gameNumber: game.gameNumber, winner: game.winner, winnerParticipantId: game.winnerParticipantId })),
+          } : undefined,
+        } : null,
+        participantNames: { A: participantName(pairing.participantA), B: participantName(pairing.participantB) },
+      })),
+    })),
+    standings: tournament.standings.map(standing => ({ ...standing })),
+    createdAt: tournament.createdAt,
+    startedAt: tournament.startedAt,
+    completedAt: tournament.completedAt,
+    resultsPublishedAt: tournament.resultsPublishedAt ?? null,
+  };
 }
 
-app.get('/api/tournaments/discoverable', requireAuth, requireRole('competitor'), async (req, res) => {
+async function canViewTournamentResults(req: express.Request, tournament: Tournament): Promise<boolean> {
+  if (req.auth?.role === 'organizer') return tournament.metadata?.ownerId === req.auth.id;
+  return Boolean(req.auth && isPublishedTournament(tournament));
+}
+
+app.get('/api/tournaments/discoverable', requireAuth, async (req, res) => {
   try {
     const tournaments = await manager.listTournaments();
     const visible = tournaments
       .map(tournament => ({ source: tournament, projection: discoverableTournament(tournament) }))
-      .filter((entry): entry is { source: Tournament; projection: NonNullable<ReturnType<typeof discoverableTournament>> } => entry.projection !== null);
+      .filter((entry): entry is { source: Tournament; projection: NonNullable<ReturnType<typeof discoverableTournament>> } => {
+        return entry.projection !== null;
+      });
     const projections = await Promise.all(visible.map(async ({ source, projection }) => {
-      const requests = await manager.listMyParticipationRequests(source.tournamentId, req.auth!.id);
+      const requests = req.auth!.role === 'competitor'
+        ? await manager.listMyParticipationRequests(source.tournamentId, req.auth!.id)
+        : { success: true, data: [] as ParticipationRequest[] };
       const mine = requests.success && requests.data?.length ? requests.data[requests.data.length - 1] : null;
       return { ...projection, myRequestStatus: mine?.status ?? null };
     }));
@@ -774,9 +881,6 @@ app.get('/api/tournaments/:id/participation-requests/mine', requireAuth, require
     // A competitor may continue tracking their own request after registration
     // closes, but private tournaments and unrelated IDs must not become a
     // discovery oracle.
-    if (tournamentResult.data.metadata?.access !== 'public' && !result.data?.length) {
-      return res.status(404).json({ error: 'Tournament not found' });
-    }
     res.json(result.data?.map(request => safeParticipationRequest(request, false)) ?? []);
   } catch (error) {
     console.error('Participation request lookup failed:', error);
@@ -794,13 +898,13 @@ app.get('/api/my/tournaments', requireAuth, requireRole('competitor'), async (re
       const latest = requests.at(-1);
       if (!latest) return [];
       const participant = tournament.participants.find(item => item.bot.botId === latest.botId);
-      const publicResults = isPublishedPublic(tournament);
+      const publicResults = isPublishedTournament(tournament);
       return [{
         tournamentId: tournament.tournamentId,
         name: tournament.name,
-        access: tournament.metadata?.access === 'public' ? 'public' : 'private',
         status: tournament.status,
         registrationOpen: tournament.status === 'registration_open',
+        participantCount: tournament.participants.length,
         request: safeParticipationRequest(latest),
         participantId: participant?.participantId ?? null,
         resultsPublished: publicResults,
@@ -811,6 +915,44 @@ app.get('/api/my/tournaments', requireAuth, requireRole('competitor'), async (re
   } catch (error) {
     console.error('Competitor tournament projection failed:', error);
     res.status(500).json({ error: 'Unable to load your tournaments' });
+  }
+});
+
+app.get('/api/my/bot-stats', requireAuth, requireRole('competitor'), async (req, res) => {
+  try {
+    const ownedBots = botRepository.listByOwner(req.auth!.id);
+    const stats = new Map(ownedBots.map(bot => [bot.id, {
+      botId: bot.id,
+      botName: bot.name,
+      matches: 0,
+      wins: 0,
+      draws: 0,
+      losses: 0,
+    }]));
+    const tournaments = await manager.listTournaments();
+    for (const tournament of tournaments) {
+      for (const participant of tournament.participants) {
+        const botStats = stats.get(participant.bot.botId);
+        if (!botStats) continue;
+        const standing = tournament.standings.find(item => item.participantId === participant.participantId);
+        if (!standing) continue;
+        botStats.matches += Number(standing.matchesPlayed) || 0;
+        botStats.wins += Number(standing.wins) || 0;
+        botStats.draws += Number(standing.draws) || 0;
+        botStats.losses += Number(standing.losses) || 0;
+      }
+    }
+    const values = [...stats.values()];
+    res.json({
+      totalMatches: values.reduce((sum, item) => sum + item.matches, 0),
+      wins: values.reduce((sum, item) => sum + item.wins, 0),
+      draws: values.reduce((sum, item) => sum + item.draws, 0),
+      losses: values.reduce((sum, item) => sum + item.losses, 0),
+      bots: values,
+    });
+  } catch (error) {
+    console.error('Competitor bot statistics lookup failed:', error);
+    res.status(500).json({ error: 'Unable to load Bot statistics' });
   }
 });
 
@@ -826,20 +968,18 @@ app.get('/api/tournaments', requireAuth, requireRole('organizer'), async (req, r
 
 app.post('/api/tournaments', requireAuth, requireRole('organizer'), requireCsrf, async (req, res) => {
   try {
-    const { name, format, visibility } = req.body;
+    const { name, format } = req.body;
     if (!name || typeof name !== 'string' || name.length > 100 ||
-        (format !== undefined && format !== 'single_round_robin') ||
-        (visibility !== undefined && visibility !== 'private' && visibility !== 'public')) {
+        (format !== undefined && format !== 'single_round_robin')) {
       return res.status(400).json({ error: 'Invalid tournament name' });
     }
 
     const id = `t-${randomUUID()}`;
-    const result = await manager.createTournament(id, name, format || 'single_round_robin');
+    const result = await manager.createTournament(id, name, format || 'single_round_robin', { bestOf: 3 });
 
     if (!result.success || !result.data) return res.status(400).json({ error: 'Unable to create tournament' });
     const metadataResult = await manager.updateMetadata(result.data.tournamentId, {
       ownerId: req.auth!.id,
-      access: visibility ?? 'private',
     });
     if (!metadataResult.success || !metadataResult.data) return res.status(500).json({ error: 'Unable to persist tournament ownership' });
     result.data = metadataResult.data;
@@ -867,12 +1007,11 @@ app.patch('/api/tournaments/:id', requireAuth, requireRole('organizer'), require
   try {
     const tournamentId = routeParam(req, 'id');
     if (!await ownedTournament(tournamentId, req.auth!.id)) return res.status(404).json({ error: 'Tournament not found' });
-    const { name, visibility } = req.body;
-    if (typeof name !== 'string' || !name.trim() || name.trim().length > 100 ||
-        (visibility !== 'private' && visibility !== 'public')) {
+    const { name } = req.body;
+    if (typeof name !== 'string' || !name.trim() || name.trim().length > 100) {
       return res.status(400).json({ error: 'Invalid tournament details' });
     }
-    const result = await manager.updateTournamentDetails(tournamentId, name.trim(), visibility);
+    const result = await manager.updateTournamentDetails(tournamentId, name.trim());
     if (!result.success || !result.data) return res.status(409).json({ error: String(result.error) });
     res.json(result.data);
   } catch (error) {
@@ -943,8 +1082,9 @@ app.get('/api/tournaments/:id', requireAuth, async (req, res) => {
       return res.json(tournament);
     }
     const result = await manager.loadTournament(routeParam(req, 'id'));
-    if (!result.success || !result.data || !isPublishedPublic(result.data)) return res.status(403).json({ error: 'Tournament results are not published' });
-    res.json(safePublishedTournament(result.data));
+    if (!result.success || !result.data) return res.status(404).json({ error: 'Tournament not found' });
+    if (isPublishedTournament(result.data)) return res.json(safeSpectatorTournament(result.data, req.auth!.id));
+    return res.json(safeSpectatorTournament(result.data, req.auth!.id));
   } catch (error) {
     console.error('Tournament lookup failed:', error);
     res.status(500).json({ error: 'Unable to load tournament' });
@@ -981,9 +1121,10 @@ function queueStatsForOrganizer(ownerId: string) {
 
 app.post('/api/tournaments/:id/action', requireAuth, requireRole('organizer'), requireCsrf, async (req, res) => {
   try {
-    const { action } = req.body;
+    const { action, pairingId } = req.body;
     const tournamentId = routeParam(req, 'id');
-    if (!await ownedTournament(tournamentId, req.auth!.id)) return res.status(404).json({ error: 'Tournament not found' });
+    const tournament = await ownedTournament(tournamentId, req.auth!.id);
+    if (!tournament) return res.status(404).json({ error: 'Tournament not found' });
     let result;
 
     switch (action) {
@@ -1030,6 +1171,33 @@ app.post('/api/tournaments/:id/action', requireAuth, requireRole('organizer'), r
         });
 
         return res.json({ message: 'Match execution started in background' });
+      case 'retry_match':
+      case 'retry_pairing':
+      case 'run_pairing':
+        if (typeof pairingId !== 'string' || !pairingId.trim()) return res.status(400).json({ error: 'Pairing ID is required' });
+        {
+          const requestedPairing = tournament.rounds.flatMap(round => round.pairings).find(pairing => pairing.pairingId === pairingId.trim());
+          if (!requestedPairing) return res.status(404).json({ error: 'Pairing not found' });
+          if (requestedPairing.status !== 'failed') return res.status(409).json({ error: `Pairing cannot be retried (current: ${requestedPairing.status})` });
+        }
+        if (activeTournamentRuns.has(tournamentId)) return res.status(409).json({ error: 'Tournament is already running' });
+        activeTournamentRuns.add(tournamentId);
+        const pairingTaskId = `run_pairing_${tournamentId}_${pairingId}`;
+        tournamentRunOwners.set(pairingTaskId, req.auth!.id);
+        executionQueue.submit(pairingTaskId, async () => {
+          try {
+            const executionResult = await manager.retryPairingById(tournamentId, pairingId.trim());
+            if (!executionResult.success) throw new Error(executionResult.error ?? 'Pairing retry failed');
+          } finally {
+            activeTournamentRuns.delete(tournamentId);
+            tournamentRunOwners.delete(pairingTaskId);
+          }
+        }).catch(err => {
+          tournamentRunOwners.delete(pairingTaskId);
+          activeTournamentRuns.delete(tournamentId);
+          console.error(`Pairing retry queue error for ${tournamentId}/${pairingId}:`, err);
+        });
+        return res.json({ message: 'Match retry started in background' });
       case 'cancel':
         executionQueue.cancel(`run_all_${tournamentId}`);
         activeTournamentRuns.delete(tournamentId);
@@ -1044,6 +1212,48 @@ app.post('/api/tournaments/:id/action', requireAuth, requireRole('organizer'), r
   } catch (error) {
     console.error('Tournament action failed:', error);
     res.status(500).json({ error: 'Unable to perform tournament action' });
+  }
+});
+
+// Dedicated retry endpoint. This keeps match retry independent from the
+// tournament lifecycle action dispatcher and avoids stale clients sending an
+// unsupported action name.
+app.post('/api/tournaments/:id/pairings/:pairingId/retry', requireAuth, requireRole('organizer'), requireCsrf, async (req, res) => {
+  try {
+    const tournamentId = routeParam(req, 'id');
+    const pairingId = routeParam(req, 'pairingId');
+    const tournament = await ownedTournament(tournamentId, req.auth!.id);
+    if (!tournament) return res.status(404).json({ error: 'Tournament not found' });
+    const pairing = tournament?.rounds.flatMap(round => round.pairings).find(item => item.pairingId === pairingId);
+    if (!pairing) return res.status(404).json({ error: 'Pairing not found' });
+    if (pairing.status !== 'failed') return res.status(409).json({ error: `Pairing cannot be retried (current: ${pairing.status})` });
+    const taskId = `retry_pairing_${tournamentId}_${pairingId}`;
+    const existingTask = executionQueue.getStatus(taskId);
+    if (existingTask === 'queued' || existingTask === 'active') {
+      return res.json({ message: 'Match retry is already queued' });
+    }
+    if (activeTournamentRuns.has(tournamentId)) return res.status(409).json({ error: 'Tournament is already running' });
+    const prepared = await manager.preparePairingRetry(tournamentId, pairingId);
+    if (!prepared.success) return res.status(409).json({ error: prepared.error ?? 'Pairing cannot be retried' });
+    activeTournamentRuns.add(tournamentId);
+    tournamentRunOwners.set(taskId, req.auth!.id);
+    executionQueue.submit(taskId, async () => {
+      try {
+        const result = await manager.runPairingById(tournamentId, pairingId);
+        if (!result.success) throw new Error(result.error ?? 'Pairing retry failed');
+      } finally {
+        activeTournamentRuns.delete(tournamentId);
+        tournamentRunOwners.delete(taskId);
+      }
+    }).catch(error => {
+      activeTournamentRuns.delete(tournamentId);
+      tournamentRunOwners.delete(taskId);
+      console.error(`Dedicated pairing retry failed for ${tournamentId}/${pairingId}:`, error);
+    });
+    return res.json({ message: 'Match retry started in background' });
+  } catch (error) {
+    console.error('Dedicated pairing retry request failed:', error);
+    return res.status(500).json({ error: 'Unable to retry match' });
   }
 });
 
@@ -1084,18 +1294,75 @@ app.get('/api/tournaments/:id/matches/:matchId/live', requireAuth, requireRole('
     const matchId = routeParam(req, 'matchId');
     const tournament = await ownedTournament(tournamentId, req.auth!.id);
     if (!tournament) return res.status(404).json({ error: 'Tournament not found' });
-    const pairing = tournament.rounds.flatMap(round => round.pairings).find(item => item.matchId === matchId);
-    if (!pairing) return res.status(404).json({ error: 'Match does not belong to this tournament' });
-    const snapshot = manager.getLiveMatchSnapshot(tournamentId, matchId);
+    const resolved = resolveLivePairing(tournament, matchId);
+    if (!resolved) return res.status(404).json({ error: 'Match does not belong to this tournament' });
+    const { pairing, matchId: liveMatchId } = resolved;
+    const snapshot = manager.getLiveMatchSnapshot(tournamentId, liveMatchId);
     if (!snapshot) return res.json({ matchId, tournamentId, status: 'unavailable' });
     const participantA = tournament.participants.find(item => item.participantId === pairing.participantA);
     const participantB = pairing.participantB ? tournament.participants.find(item => item.participantId === pairing.participantB) : undefined;
+    const progress = pairing.seriesProgress;
+    const seriesComplete = Boolean(progress && (
+      progress.games.length >= progress.bestOf || progress.winsA >= 2 || progress.winsB >= 2
+    ));
+    const completedWinner = pairing.matchResult?.winner;
+    const currentGame = progress
+      ? (snapshot.gameNumber ?? (pairing.status === 'in_progress'
+        ? Math.min(progress.games.length + 1, progress.bestOf)
+        : Math.max(progress.games.length, 1))) as 1 | 2 | 3
+      : 1;
+    const currentSides = progress && participantA && participantB
+      ? getSeriesSides(progress.seed, currentGame, participantA.participantId, participantB.participantId)
+      : { playerA: pairing.participantA, playerB: pairing.participantB };
+    const sideParticipantA = tournament.participants.find(item => item.participantId === currentSides.playerA);
+    const sideParticipantB = currentSides.playerB
+      ? tournament.participants.find(item => item.participantId === currentSides.playerB)
+      : undefined;
+    const liveParticipant = (participant: typeof sideParticipantA) => {
+      if (!participant) return null;
+      const botRecord = botRepository.findById(participant.bot.botId);
+      return {
+        participantId: participant.participantId,
+        participantName: participant.name,
+        botId: participant.bot.botId,
+        ...(botRecord?.name ? { botName: botRecord.name } : {}),
+        ...(participant.bot.execution?.kind === 'source-revision' ? {
+          runtimeId: participant.bot.execution.runtimeId,
+          revisionId: participant.bot.execution.revisionId,
+        } : {}),
+      };
+    };
+    const series = progress ? {
+      format: progress.format,
+      bestOf: progress.bestOf,
+      // A completed game can briefly remain the latest snapshot while the
+      // next BO3 game is starting. Durable pairing state identifies the
+      // actual current game during that transition.
+      currentGame,
+      nextGame: Math.min(progress.games.length + 1, progress.bestOf),
+      winsA: progress.winsA,
+      winsB: progress.winsB,
+      gamesPlayed: progress.games.length,
+      active: pairing.status === 'in_progress' && !seriesComplete,
+    } : {
+      format: 'bo1' as const,
+      bestOf: 1,
+      currentGame: 1,
+      winsA: completedWinner === 'A' ? 1 : 0,
+      winsB: completedWinner === 'B' ? 1 : 0,
+      gamesPlayed: snapshot.status === 'finished' ? 1 : 0,
+      active: false,
+      nextGame: 1,
+    };
     return res.json({
       ...snapshot,
+      matchId: liveMatchId,
       tournamentId,
+      history: manager.getLiveMatchHistory(tournamentId, liveMatchId),
+      series,
       participants: {
-        A: participantA ? { participantName: participantA.name, botId: participantA.bot.botId } : null,
-        B: participantB ? { participantName: participantB.name, botId: participantB.bot.botId } : null,
+        A: liveParticipant(sideParticipantA),
+        B: liveParticipant(sideParticipantB),
       },
     });
   } catch (error) {
@@ -1113,10 +1380,11 @@ app.get('/api/tournaments/:id/results/:matchId', requireAuth, async (req, res) =
     const tournamentResult = await manager.loadTournament(tournamentId);
     if (!tournamentResult.success || !tournamentResult.data || !await canViewTournamentResults(req, tournamentResult.data)) return res.status(404).json({ error: 'Tournament not found' });
     const matchId = routeParam(req, 'matchId');
-    if (!tournamentResult.data.rounds.some(round => round.pairings.some(pairing => pairing.matchId === matchId))) {
+    const resolved = resolveLivePairing(tournamentResult.data, matchId);
+    if (!resolved) {
       return res.status(404).json({ error: 'Match does not belong to this tournament' });
     }
-    const result = await manager.getMatchResult(tournamentId, matchId);
+    const result = await manager.getMatchResult(tournamentId, resolved.matchId);
     if (!result.success || !result.data) return res.status(404).json({ error: 'Match result not found' });
     if (req.auth!.role === 'organizer') {
       res.json(result.data);
@@ -1127,6 +1395,151 @@ app.get('/api/tournaments/:id/results/:matchId', requireAuth, async (req, res) =
   } catch (error) {
     console.error('Match result lookup failed:', error);
     res.status(500).json({ error: 'Unable to load match result' });
+  }
+});
+
+function spectatorRateLimit(req: express.Request, res: express.Response, tournamentId: string, matchId: string): boolean {
+  const configured = Number(process.env.SPECTATOR_MAX_REQUESTS_PER_WINDOW ?? 900);
+  const maxRequests = Number.isFinite(configured) && configured > 0 ? Math.max(60, Math.floor(configured)) : 900;
+  const result = rateLimitRepository.recordAttempt(`spectator:${req.auth!.id}:${req.ip}:${tournamentId}:${matchId}`, maxRequests, 10_000);
+  if (result.allowed) return true;
+  const retryAfter = result.lockedUntil ? Math.max(1, Math.ceil((new Date(result.lockedUntil).getTime() - Date.now()) / 1000)) : 10;
+  res.set('Retry-After', String(retryAfter));
+  res.status(429).json({ error: 'Spectator polling rate limit exceeded', retryAfterMs: retryAfter * 1000 });
+  return false;
+}
+
+function findPairing(tournament: Tournament, matchId: string) {
+  return tournament.rounds.flatMap(round => round.pairings).find(pairing => pairing.matchId === matchId) ?? null;
+}
+
+function stablePairingMatchId(tournamentId: string, pairingId: string): string {
+  const candidate = `${tournamentId}-${pairingId}`;
+  return /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(candidate)
+    ? candidate
+    : `m-${createHash('sha256').update(candidate).digest('hex')}`;
+}
+
+function resolveLivePairing(tournament: Tournament, requestedId: string) {
+  const pairing = tournament.rounds.flatMap(round => round.pairings).find(item =>
+    item.matchId === requestedId || item.pairingId === requestedId
+      || stablePairingMatchId(tournament.tournamentId, item.pairingId) === requestedId,
+  ) ?? null;
+  return pairing ? { pairing, matchId: pairing.matchId ?? stablePairingMatchId(tournament.tournamentId, pairing.pairingId) } : null;
+}
+
+async function authorizedSpectatorTournament(req: express.Request, tournamentId: string) {
+  const result = await manager.loadTournament(tournamentId);
+  if (!result.success || !result.data) return null;
+  return result.data;
+}
+
+app.get('/api/tournaments/:id/spectator/matches/:matchId/live', requireAuth, async (req, res) => {
+  res.set('Cache-Control', 'no-store, private');
+  try {
+    const tournamentId = routeParam(req, 'id');
+    const matchId = routeParam(req, 'matchId');
+    if (!spectatorRateLimit(req, res, tournamentId, matchId)) return;
+    const tournament = await authorizedSpectatorTournament(req, tournamentId);
+    if (!tournament) return res.status(404).json({ error: 'Tournament not found' });
+    if (tournament.status !== 'running') return res.json({ tournamentId, matchId, status: 'unavailable', reason: 'tournament_not_running' });
+    const resolved = resolveLivePairing(tournament, matchId);
+    if (!resolved) return res.status(404).json({ error: 'Tournament not found' });
+    const { pairing, matchId: liveMatchId } = resolved;
+    const snapshot = manager.getLiveMatchSnapshot(tournamentId, liveMatchId);
+    const history = manager.getLiveMatchHistory(tournamentId, liveMatchId);
+    const replay = await manager.getReplay(tournamentId, liveMatchId);
+    const replayAvailable = replay.success;
+    res.json(projectSpectatorLive({
+      tournament, pairing, snapshot, history, replayAvailable,
+    }));
+  } catch (error) {
+    console.error('Spectator live lookup failed:', error);
+    res.status(500).json({ error: 'Unable to load spectator data' });
+  }
+});
+
+// One server-timed live stream per match. All spectators receive the same
+// ordered snapshots instead of independently advancing local polling queues.
+app.get('/api/tournaments/:id/spectator/matches/:matchId/live/stream', requireAuth, async (req, res) => {
+  const tournamentId = routeParam(req, 'id');
+  const matchId = routeParam(req, 'matchId');
+  if (!spectatorRateLimit(req, res, tournamentId, matchId)) return;
+  const tournament = await authorizedSpectatorTournament(req, tournamentId);
+  if (!tournament) return res.status(404).json({ error: 'Tournament not found' });
+  if (tournament.status !== 'running') {
+    return res.status(200).json({ tournamentId, matchId, status: 'unavailable', reason: 'tournament_not_running' });
+  }
+  const initialResolved = resolveLivePairing(tournament, matchId);
+  if (!initialResolved) return res.status(404).json({ error: 'Tournament not found' });
+  const liveMatchId = initialResolved.matchId;
+
+  res.status(200);
+  res.set({
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache, no-store, private',
+    Connection: 'keep-alive',
+    'X-Accel-Buffering': 'no',
+  });
+  res.flushHeaders();
+  const write = (payload: unknown) => {
+    if (!res.writableEnded) res.write(`data: ${JSON.stringify(payload)}\n\n`);
+  };
+  const emitSnapshot = async (snapshot: NonNullable<ReturnType<typeof manager.getLiveMatchSnapshot>>) => {
+    const current = await authorizedSpectatorTournament(req, tournamentId);
+    const resolved = current ? resolveLivePairing(current, liveMatchId) : null;
+    const pairing = resolved?.pairing ?? null;
+    if (!current || !pairing) return;
+    const replay = await manager.getReplay(tournamentId, liveMatchId);
+    write(projectSpectatorLive({
+      tournament: current,
+      pairing,
+      snapshot,
+      history: manager.getLiveMatchHistory(tournamentId, liveMatchId),
+      replayAvailable: replay.success,
+    }));
+  };
+  let emitChain = Promise.resolve();
+  const enqueueSnapshot = (snapshot: NonNullable<ReturnType<typeof manager.getLiveMatchSnapshot>>) => {
+    emitChain = emitChain.then(() => emitSnapshot(snapshot)).catch(() => undefined);
+  };
+  const unsubscribe = manager.subscribeLiveMatch(tournamentId, liveMatchId, enqueueSnapshot);
+  const heartbeat = setInterval(() => {
+    if (res.writableEnded) return;
+    res.write(': heartbeat\n\n');
+  }, 15_000);
+  req.on('close', () => {
+    clearInterval(heartbeat);
+    unsubscribe();
+  });
+  const snapshot = manager.getLiveMatchSnapshot(tournamentId, liveMatchId);
+  if (snapshot) {
+    enqueueSnapshot(snapshot);
+    await emitChain;
+  }
+  else write({ tournamentId, matchId, status: 'unavailable' });
+});
+
+app.get('/api/tournaments/:id/spectator/matches/:matchId/replay', requireAuth, async (req, res) => {
+  res.set('Cache-Control', 'no-store, private');
+  try {
+    const tournamentId = routeParam(req, 'id');
+    const matchId = routeParam(req, 'matchId');
+    const tournament = await authorizedSpectatorTournament(req, tournamentId);
+    if (!tournament) return res.status(404).json({ error: 'Tournament not found' });
+    const resolved = resolveLivePairing(tournament, matchId);
+    const pairing = resolved?.pairing ?? null;
+    if (!pairing || pairing.status !== 'completed') return res.status(404).json({ error: 'Replay not found' });
+    const isOwner = tournament.metadata?.ownerId === req.auth!.id;
+    if (!isOwner && (!tournament.resultsPublishedAt || tournament.status !== 'completed')) {
+      return res.status(404).json({ error: 'Replay not found' });
+    }
+    const result = await manager.getReplay(tournamentId, resolved!.matchId);
+    if (!result.success || !result.data) return res.status(404).json({ error: 'Replay not found' });
+    res.json(projectSpectatorReplay(result.data));
+  } catch (error) {
+    console.error('Spectator replay lookup failed:', error);
+    res.status(404).json({ error: 'Replay not found' });
   }
 });
 
@@ -1141,12 +1554,12 @@ app.get('/api/tournaments/:id/replays/:matchId', requireAuth, async (req, res) =
     }
     const tournament = tournamentResult.data;
 
-    const matchExists = tournament.rounds.some(r => r.pairings.some(p => p.matchId === matchId));
-    if (!matchExists) {
+    const resolved = resolveLivePairing(tournament, matchId);
+    if (!resolved) {
       return res.status(404).json({ error: 'Match does not belong to this tournament' });
     }
 
-    const result = await manager.getReplay(tournamentId, matchId);
+    const result = await manager.getReplay(tournamentId, resolved.matchId);
     if (!result.success) return res.status(404).json({ error: 'Replay not found' });
     const replay = result.data;
     if (replay && req.auth?.role !== 'organizer' && replay.metadata?.executionDiagnostics) {

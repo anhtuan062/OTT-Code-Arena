@@ -122,7 +122,7 @@ describe('Tournament Scoring', () => {
       expect(result).not.toBeNull();
       expect(result?.isBye).toBe(true);
       expect(result?.result).toBe('bye');
-      expect(result?.points).toBe(3); // byePoints default = winPoints
+      expect(result?.points).toBe(0); // A bye advances without awarding points.
     });
 
     it('should return null for participant not in match', () => {
@@ -192,6 +192,49 @@ describe('Tournament Scoring', () => {
   });
 
   describe('computeStandings', () => {
+    it('awards 18 aggregate points for six decisive completed matches', () => {
+      const participants = createParticipants(['P1', 'P2', 'P3', 'P4']);
+      const matches: TournamentMatchRecord[] = [
+        createMatchRecord({ matchId: 'm1', pairingId: 'p1', participantA: 'P1', participantB: 'P2', winner: 'A' }),
+        createMatchRecord({ matchId: 'm2', pairingId: 'p2', participantA: 'P1', participantB: 'P3', winner: 'B' }),
+        createMatchRecord({ matchId: 'm3', pairingId: 'p3', participantA: 'P1', participantB: 'P4', winner: 'A' }),
+        createMatchRecord({ matchId: 'm4', pairingId: 'p4', participantA: 'P2', participantB: 'P3', winner: 'A' }),
+        createMatchRecord({ matchId: 'm5', pairingId: 'p5', participantA: 'P2', participantB: 'P4', winner: 'B' }),
+        createMatchRecord({ matchId: 'm6', pairingId: 'p6', participantA: 'P3', participantB: 'P4', winner: 'A' }),
+      ];
+      expect(computeStandings(participants, matches).reduce((sum, standing) => sum + standing.points, 0)).toBe(18);
+    });
+
+    it('scores a six-match mix of four legitimate draws and two decisive results', () => {
+      const participants = createParticipants(['P1', 'P2', 'P3', 'P4']);
+      const matches: TournamentMatchRecord[] = [
+        createMatchRecord({ matchId: 'm1', pairingId: 'p1', participantA: 'P1', participantB: 'P2', winner: 'draw', terminationReason: 'turn_limit' }),
+        createMatchRecord({ matchId: 'm2', pairingId: 'p2', participantA: 'P1', participantB: 'P3', winner: 'B' }),
+        createMatchRecord({ matchId: 'm3', pairingId: 'p3', participantA: 'P1', participantB: 'P4', winner: 'draw', terminationReason: 'turn_limit' }),
+        createMatchRecord({ matchId: 'm4', pairingId: 'p4', participantA: 'P2', participantB: 'P3', winner: 'A' }),
+        createMatchRecord({ matchId: 'm5', pairingId: 'p5', participantA: 'P2', participantB: 'P4', winner: 'draw', terminationReason: 'repetition' }),
+        createMatchRecord({ matchId: 'm6', pairingId: 'p6', participantA: 'P3', participantB: 'P4', winner: 'draw', terminationReason: 'insufficient_material' }),
+      ];
+      const standings = computeStandings(participants, matches);
+      expect(standings.reduce((sum, standing) => sum + standing.points, 0)).toBe(14);
+      expect(standings.reduce((sum, standing) => sum + standing.draws, 0)).toBe(8);
+    });
+
+    it('awards two aggregate points for every all-drawn match', () => {
+      const participants = createParticipants(['P1', 'P2', 'P3', 'P4']);
+      const matches: TournamentMatchRecord[] = [
+        createMatchRecord({ matchId: 'm1', pairingId: 'p1', participantA: 'P1', participantB: 'P2', winner: 'draw', terminationReason: 'turn_limit' }),
+        createMatchRecord({ matchId: 'm2', pairingId: 'p2', participantA: 'P1', participantB: 'P3', winner: 'draw', terminationReason: 'turn_limit' }),
+        createMatchRecord({ matchId: 'm3', pairingId: 'p3', participantA: 'P1', participantB: 'P4', winner: 'draw', terminationReason: 'turn_limit' }),
+        createMatchRecord({ matchId: 'm4', pairingId: 'p4', participantA: 'P2', participantB: 'P3', winner: 'draw', terminationReason: 'turn_limit' }),
+        createMatchRecord({ matchId: 'm5', pairingId: 'p5', participantA: 'P2', participantB: 'P4', winner: 'draw', terminationReason: 'turn_limit' }),
+        createMatchRecord({ matchId: 'm6', pairingId: 'p6', participantA: 'P3', participantB: 'P4', winner: 'draw', terminationReason: 'turn_limit' }),
+      ];
+      const standings = computeStandings(participants, matches);
+      expect(standings.reduce((sum, standing) => sum + standing.points, 0)).toBe(12);
+      expect(standings.every(standing => standing.draws === 3 && standing.points === 3)).toBe(true);
+    });
+
     it('should compute standings for round-robin with clear winner', () => {
       const participants = createParticipants(['P1', 'P2', 'P3']);
       const matches: TournamentMatchRecord[] = [

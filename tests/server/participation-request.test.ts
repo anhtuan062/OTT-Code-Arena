@@ -80,7 +80,7 @@ describe('tournament participation requests', () => {
     return { botId: response.body.id as string, revisionId: revision.body.revisionId as string, sdkDigest: revision.body.sdkDigest as string };
   }
 
-  it('exposes only public open tournaments and accepts an owned Bot request', async () => {
+  it('exposes all tournaments and accepts an owned Bot request', async () => {
     const publicId = await createPublicTournament();
     const privateResponse = await organizer.post('/api/tournaments')
       .set('x-csrf-token', organizerCsrf)
@@ -91,7 +91,7 @@ describe('tournament participation requests', () => {
     const discovery = await competitor.get('/api/tournaments/discoverable');
     expect(discovery.status).toBe(200);
     expect(discovery.body.map((item: { tournamentId: string }) => item.tournamentId)).toContain(publicId);
-    expect(discovery.body).not.toEqual(expect.arrayContaining([
+    expect(discovery.body).toEqual(expect.arrayContaining([
       expect.objectContaining({ tournamentId: privateResponse.body.tournamentId }),
     ]));
     expect(discovery.body[0]).not.toHaveProperty('participants');
@@ -122,6 +122,7 @@ describe('tournament participation requests', () => {
     expect(projection.body).toMatchObject([{
       tournamentId: publicId,
       status: 'registration_open',
+      participantCount: 0,
       request: { botId: bot.botId, revisionId: bot.revisionId, status: 'pending' },
       resultsPublished: false,
     }]);
@@ -175,6 +176,9 @@ describe('tournament participation requests', () => {
     const trackedAfterApproval = await competitor.get(`/api/tournaments/${tournamentId}/participation-requests/mine`);
     expect(trackedAfterApproval.status).toBe(200);
     expect(trackedAfterApproval.body).toMatchObject([{ requestId, status: 'approved' }]);
+    expect((await competitor.get('/api/my/tournaments')).body).toEqual(expect.arrayContaining([
+      expect.objectContaining({ tournamentId, participantCount: 1, participantId: expect.any(String) }),
+    ]));
 
     const secondRequest = await otherCompetitor.post(`/api/tournaments/${tournamentId}/participation-requests`)
       .set('x-csrf-token', otherCompetitorCsrf)
@@ -203,6 +207,6 @@ describe('tournament participation requests', () => {
     expect(otherTrackedAfterClose.body).toMatchObject([{ requestId: secondRequest.body.requestId, status: 'rejected' }]);
     expect((await competitor.post(`/api/tournaments/${tournamentId}/participation-requests`)
       .set('x-csrf-token', competitorCsrf)
-      .send({ botId: bot.botId, revisionId: bot.revisionId, participantName: 'Too late' })).status).toBe(404);
+      .send({ botId: bot.botId, revisionId: bot.revisionId, participantName: 'Too late' })).status).toBe(409);
   });
 });

@@ -51,7 +51,7 @@ describe('role foundation', () => {
     try {
       const user = new SqlUserRepository(db).findById('legacy-1');
       expect(user).toMatchObject({ id: 'legacy-1', username: 'legacy', password_hash: 'preserve-me', role: 'competitor' });
-      expect((db.prepare('SELECT MAX(version) AS version FROM schema_version').get() as { version: number }).version).toBe(4);
+    expect((db.prepare('SELECT MAX(version) AS version FROM schema_version').get() as { version: number }).version).toBe(5);
       expect((db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('bots', 'sessions', 'rate_limits')").all() as Array<{ name: string }>).map(row => row.name).sort()).toEqual(['bots', 'rate_limits', 'sessions']);
     } finally {
       db.close();

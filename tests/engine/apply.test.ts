@@ -125,39 +125,39 @@ describe('Engine Apply', () => {
   describe('Win Detection - Type Elimination', () => {
     it('should detect win when opponent loses all dam', () => {
       const testState = cloneState(state);
-      // Remove all B's dam pieces
-      testState.pieces = testState.pieces.filter(p => !(p.player === 'B' && p.type === 'dam'));
+      // Remove all opposing pieces.
+      testState.pieces = testState.pieces.filter(p => p.player !== 'B');
 
       const win = checkWin(testState);
       expect(win.isWin).toBe(true);
       expect(win.winner).toBe('A');
-      expect(win.reason).toBe('type_elimination');
+      expect(win.reason).toBe('all_pieces_captured');
     });
 
     it('should detect win when opponent loses all la', () => {
       const testState = cloneState(state);
-      testState.pieces = testState.pieces.filter(p => !(p.player === 'B' && p.type === 'la'));
+      testState.pieces = testState.pieces.filter(p => p.player !== 'B');
 
       const win = checkWin(testState);
       expect(win.isWin).toBe(true);
       expect(win.winner).toBe('A');
-      expect(win.reason).toBe('type_elimination');
+      expect(win.reason).toBe('all_pieces_captured');
     });
 
     it('should detect win when opponent loses all keo', () => {
       const testState = cloneState(state);
-      testState.pieces = testState.pieces.filter(p => !(p.player === 'B' && p.type === 'keo'));
+      testState.pieces = testState.pieces.filter(p => p.player !== 'B');
 
       const win = checkWin(testState);
       expect(win.isWin).toBe(true);
       expect(win.winner).toBe('A');
-      expect(win.reason).toBe('type_elimination');
+      expect(win.reason).toBe('all_pieces_captured');
     });
 
     it('should detect win via capture eliminating last type', () => {
       const testState = cloneState(state);
-      // Set up: B has only 1 keo left at (4,5), A has dam at (4,4)
-      testState.pieces = testState.pieces.filter(p => !(p.player === 'B' && p.type === 'keo' && p.id !== 'B-keo-1'));
+      // Set up: B has only 1 piece left at (4,5), A has dam at (4,4)
+      testState.pieces = testState.pieces.filter(p => p.player !== 'B' || p.id === 'B-keo-1');
       // Ensure B-keo-1 is at (4,5)
       const victim = getPieceById(testState, 'B-keo-1')!;
       victim.row = 4;
@@ -183,7 +183,7 @@ describe('Engine Apply', () => {
       expect(result.success).toBe(true);
       expect(result.state.status).toBe('finished');
       expect(result.state.winner).toBe('A');
-      expect(result.state.winReason).toBe('type_elimination');
+      expect(result.state.winReason).toBe('all_pieces_captured');
     });
   });
 
@@ -292,10 +292,10 @@ describe('Engine Apply', () => {
 
   describe('Win Priority', () => {
     it('should prioritize type elimination over goal square if both occur', () => {
-      // This tests the order: type elimination checked first
+      // Reaching the goal remains a valid win when other enemy pieces remain.
       const testState = cloneState(state);
       // B has only 1 keo at i9 (8,8), A has dam adjacent
-      testState.pieces = testState.pieces.filter(p => !(p.player === 'B' && p.type === 'keo' && p.id !== 'B-keo-1'));
+      testState.pieces = testState.pieces.filter(p => p.player !== 'B' || p.id === 'B-keo-1');
       const victim = getPieceById(testState, 'B-keo-1')!;
       victim.row = 8;
       victim.col = 8; // i9 - A's goal square
@@ -315,9 +315,8 @@ describe('Engine Apply', () => {
       expect(move).toBeDefined();
 
       const result = applyMove(testState, move!);
-      // Capture at a1 eliminates B's last keo AND reaches goal square
-      // Type elimination should win (checked first)
-      expect(result.state.winReason).toBe('type_elimination');
+      // Capture at i9 removes B's last piece and reaches the goal square.
+      expect(result.state.winReason).toBe('all_pieces_captured');
     });
   });
 
@@ -381,12 +380,12 @@ describe('Engine Apply', () => {
   describe('Game Result', () => {
     it('should return finished with winner for win', () => {
       const testState = cloneState(state);
-      testState.pieces = testState.pieces.filter(p => !(p.player === 'B' && p.type === 'dam'));
+      testState.pieces = testState.pieces.filter(p => p.player !== 'B');
 
       const result = getGameResult(testState, { maxTurns: 200 });
       expect(result.finished).toBe(true);
       expect(result.winner).toBe('A');
-      expect(result.reason).toBe('type_elimination');
+      expect(result.reason).toBe('all_pieces_captured');
     });
 
     it('should return finished with draw for turn limit', () => {

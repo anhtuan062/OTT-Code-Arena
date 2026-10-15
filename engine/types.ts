@@ -5,7 +5,7 @@
 export type Player = 'A' | 'B';
 export type PieceType = 'dam' | 'la' | 'keo';
 export type GameStatus = 'playing' | 'finished';
-export type WinReason = 'type_elimination' | 'goal_reached';
+export type WinReason = 'all_pieces_captured' | 'goal_reached';
 
 export const BOARD_SIZE = 9;
 export const COLS = 'abcdefghi' as const;

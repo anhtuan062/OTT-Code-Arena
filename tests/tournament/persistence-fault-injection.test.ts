@@ -257,7 +257,7 @@ describe('Persistence Recovery - Fault Injection', () => {
       await expect(repository.listMatchResults(tournamentId)).rejects.toThrow('Inconsistent persisted match one');
     });
 
-    it('should explicitly accept a valid markerless legacy pair', async () => {
+    it('should reject markerless pairs instead of falling back to legacy acceptance', async () => {
       const tournamentId = 'match-legacy';
       await repository.save(createTestTournament(tournamentId));
       const result = {
@@ -270,9 +270,9 @@ describe('Persistence Recovery - Fault Injection', () => {
       await fs.writeFile(path.join(dir, 'match-legacy.json'), JSON.stringify(result), 'utf-8');
       await fs.writeFile(path.join(dir, 'replay-legacy.json'), JSON.stringify(replay), 'utf-8');
 
-      const results = await repository.listMatchResults(tournamentId);
-      expect(results).toHaveLength(1);
-      expect(results[0]?.matchId).toBe('legacy');
+      await expect(repository.listMatchResults(tournamentId)).rejects.toThrow('Uncommitted persisted match legacy: commit marker is required');
+      await expect(repository.loadMatchResult(tournamentId, 'legacy')).rejects.toThrow('Uncommitted persisted match legacy: commit marker is required');
+      await expect(repository.loadReplay(tournamentId, 'legacy')).rejects.toThrow('Uncommitted persisted match legacy: commit marker is required');
     });
   });
 

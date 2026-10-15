@@ -1,175 +1,87 @@
-# Testing Strategy
+# Kiểm thử
 
-## Test Organization
+## Lệnh chính
 
-```
-tests/
-├── engine/
-│   ├── state.test.ts
-│   ├── moves.test.ts
-│   ├── apply.test.ts
-│   ├── win.test.ts
-│   └── integration.test.ts
-├── protocol/
-│   ├── serialize.test.ts
-│   ├── parse.test.ts
-│   └── schema.test.ts
-├── bot-runner/
-│   ├── runner.test.ts
-│   └── limits.test.ts
-├── match/
-│   ├── match.test.ts
-│   ├── replay.test.ts
-│   └── error-handling.test.ts
-└── tournament/
-    ├── schedule.test.ts
-    └── standings.test.ts
+```powershell
+npm.cmd test
+npm.cmd run build
+node --check app.js
+git diff --check
 ```
 
-## Engine Tests (Priority 1)
+Chạy theo phạm vi:
 
-### State Tests
-- Initial state matches specification
-- Piece count: 9 per player, 3 each type
-- Positions match algebraic coordinates
-- Current player = A
-- Turn = 1
-- Status = playing
-
-### Move Validation Tests
-- All 8 directions valid from center
-- Edge/corner boundary checks
-- Cannot move off board
-- Cannot stay in place
-- Cannot move onto own piece
-- Cannot capture own piece
-- Cannot capture same type
-- Can capture defeated type (dam→keo, keo→la, la→dam)
-- Cannot capture superior type
-
-### Move Application Tests
-- Piece position updates
-- Board updates (source cleared, dest set)
-- Captured piece removed from pieces and board
-- Turn switches to opponent
-- Turn counter increments
-- Last move recorded
-
-### Win Detection Tests
-- Type elimination: player loses all Dam → opponent wins
-- Type elimination: player loses all La → opponent wins
-- Type elimination: player loses all Keo → opponent wins
-- Goal square a1 (0,0): piece reaches → player wins
-- Goal square i9 (8,8): piece reaches → player wins
-- Win detected immediately after move
-- No further moves after win
-
-### Draw Tests (Provisional)
-- Turn limit reached → draw
-- Threefold repetition → draw
-- Insufficient material → draw
-
-### Edge Cases
-- Simultaneous win conditions (both type elimination and goal)
-- Invalid state rejection (duplicate pieces, off-board pieces)
-- State immutability (original state not modified)
-
-## Protocol Tests
-
-### Serialization
-- Valid state → valid request JSON
-- All required fields present
-- Coordinates in algebraic notation
-- Legal moves correctly computed
-- Piece IDs stable
-
-### Parsing
-- Valid response → move object
-- Missing move field → error
-- Invalid piece_id → error
-- Invalid coordinates → error
-- Extra fields ignored (forward compatibility)
-
-### Schema Validation
-- Request matches JSON Schema
-- Response matches JSON Schema
-- Version field checked
-- Size limits enforced
-
-## Bot Runner Tests
-
-### Happy Path
-- Bot executes, returns valid move
-- Stdout captured, parsed
-- Stderr captured, logged
-- Exit code 0
-- Duration recorded
-
-### Error Cases
-- Timeout → forfeit, process killed
-- Crash (exit code != 0) → forfeit
-- Invalid JSON → forfeit
-- Missing move → forfeit
-- Illegal move → forfeit
-- Oversized output → forfeit
-- No output → forfeit
-- Multiple JSON lines → first only
-
-### Resource Limits (where supported)
-- Memory limit exceeded → kill
-- CPU limit exceeded → kill
-- Output size limit → truncate/kill
-
-## Match Runner Tests
-
-### Normal Completion
-- Two valid bots play to completion
-- Winner correctly determined
-- Full log recorded
-- Result matches engine
-
-### Error Handling
-- Bot A crashes → Bot B wins
-- Bot A times out → Bot B wins
-- Bot A invalid move → Bot B wins
-- Both crash → draw? (needs decision)
-- Draw by turn limit
-
-### Replay Consistency
-- Replay from log produces same final state
-- Replay from log produces same winner
-- Deterministic for same inputs
-
-## Tournament Tests
-
-### Scheduling
-- Round robin: each pair plays once
-- No duplicate matches
-- All teams scheduled
-
-### Standings
-- Points: Win=3, Draw=1, Loss=0
-- Tie-break: Buchholz, then Sonneborn-Berger
-- Rankings update after each match
-
-## Running Tests
-
-```bash
-# All tests
-npm test
-
-# Engine only
-npm test -- tests/engine
-
-# With coverage
-npm run test:coverage
-
-# Watch mode
-npm run test:watch
+```powershell
+npx vitest run tests/engine
+npx vitest run tests/protocol
+npx vitest run tests/bot-executor
+npx vitest run tests/match
+npx vitest run tests/tournament
+npx vitest run tests/server
+npx vitest run tests/frontend
 ```
 
-## CI Requirements
-- All tests pass on Node.js 20, 22
-- Coverage > 90% for engine
-- No flaky tests
-- Tests run in < 30 seconds
+Không ghi số lượng test cố định trong tài liệu vì suite thay đổi thường xuyên. Kết quả chỉ được coi là PASS khi lệnh thực tế đã chạy thành công trong môi trường hiện tại.
+
+## Phạm vi cần bảo vệ
+
+### Engine
+
+- layout hợp lệ, đúng số lượng quân;
+- di chuyển tám hướng và quan hệ ăn quân;
+- A chỉ thắng ở `i9`, B chỉ thắng ở `a1`;
+- ăn hết toàn bộ quân mới thắng;
+- turn limit, repetition và insufficient material;
+- layout theo seed ổn định và khác nhau giữa các ván BO3.
+
+### Protocol và SDK
+
+- serialize request đúng `0.1.0`;
+- parse và validate response;
+- starter C++17/Python 3 biên dịch/chạy được;
+- SDK identity và source digest không bị thay đổi;
+- lỗi encoding, kích thước và move ngoài legal list bị từ chối.
+
+### Executor
+
+- production fail closed;
+- image bắt buộc dùng digest;
+- timeout theo phase;
+- giới hạn stdout/stderr;
+- cleanup workspace, volume, container và prepared artifact;
+- warm execution không làm thay đổi identity;
+- cancellation không để lại tài nguyên test-owned.
+
+### Match và tournament
+
+- forfeit ánh xạ đúng winner;
+- result/replay tái tạo đúng final state;
+- BO1 tương thích dữ liệu cũ;
+- BO3 đổi A/B, dừng sớm 2-0, chơi ván 3 khi cần và giữ điểm theo participant;
+- bye không cộng điểm;
+- retry xóa trạng thái attempt cũ nhưng không làm sai pairing;
+- restart giữ result đã commit và đưa pairing dở về `scheduled`;
+- standings được tính idempotent từ aggregate result.
+
+### API và frontend
+
+- role và ownership;
+- CSRF và session;
+- bot/revision lifecycle;
+- organizer-only management;
+- spectator live/replay authorization;
+- DTO không lộ dữ liệu nội bộ;
+- rate limit trả `429` và `Retry-After`;
+- live chuyển ván, late join, reconnect và replay navigation;
+- loading, empty, error state và responsive layout.
+
+## Docker tests
+
+Các bài test cần Docker phải dùng resource cô lập và image đã có sẵn. Không pull image, prune Docker hoặc dùng dữ liệu production trong test. Nếu Docker không sẵn sàng, báo BLOCKED/SKIPPED rõ ràng; không quy đổi thành PASS.
+
+## Dữ liệu kiểm thử
+
+- Dùng thư mục tạm hoặc `TOURNAMENT_DATA_DIR` riêng.
+- Không chạy test ghi dữ liệu vào `data/tournaments` đang dùng.
+- Dọn resource test-owned sau khi chạy.
+- Không reset hoặc xóa thay đổi sẵn có trong worktree.

@@ -8,6 +8,7 @@ import { createRequire } from 'node:module';
 import { RevisionDockerExecutor } from '../../bot-executor/revision-docker-executor.js';
 import { DockerExecutor } from '../../bot-executor/docker-executor.js';
 import type { BotExecutionResult, BotRequestMessage } from '../../bot-executor/types.js';
+import { ExecutionCancelledError } from '../../bot-executor/types.js';
 import { appExport, closeServer, initServer } from '../../server/index.js';
 import { createControlledAccount } from '../../server/admin/role-bootstrap.js';
 
@@ -25,6 +26,7 @@ describe('Practice HTTP contract (controlled executor; no Docker)', () => {
   let root: string;
   let dir: string;
   let execute: ReturnType<typeof vi.spyOn>;
+  let release: ReturnType<typeof vi.spyOn>;
 
   beforeEach(async () => {
     root = await fs.mkdtemp(path.join(os.tmpdir(), 'ott-practice-api-'));
@@ -38,6 +40,7 @@ describe('Practice HTTP contract (controlled executor; no Docker)', () => {
     vi.spyOn(DockerExecutor.prototype, 'isAvailable').mockResolvedValue(true);
     execute = vi.spyOn(RevisionDockerExecutor.prototype, 'executeRevision')
       .mockImplementation(async (_context, _revision, input) => success(input));
+    release = vi.spyOn(RevisionDockerExecutor.prototype, 'releaseRevisionScope').mockResolvedValue(true);
     await initServer(dir);
   });
 
@@ -84,6 +87,30 @@ describe('Practice HTTP contract (controlled executor; no Docker)', () => {
         expect(response.body.capture).toBeNull();
       }
     }
+  });
+
+  it('reuses one revision scope for a fixed-opponent match and releases it afterwards', async () => {
+    const user = await competitor('cpp');
+    const response = await user.agent
+      .post(`/api/bots/${user.botId}/revisions/${user.revision.revisionId}/test-match`)
+      .set('x-csrf-token', user.csrf).send({});
+    expect(response.status).toBe(200);
+    expect(response.body).toMatchObject({ mode: 'fixed-opponent', status: 'completed' });
+    expect(execute.mock.calls.length).toBeGreaterThan(1);
+    const scopes = execute.mock.calls.map(call => call[0]?.revisionScopeId);
+    expect(scopes.every(scope => typeof scope === 'string' && scope === scopes[0])).toBe(true);
+    expect(release).toHaveBeenCalledOnce();
+    expect(release).toHaveBeenCalledWith(scopes[0]);
+  });
+
+  it('releases a fixed-opponent lock when execution is cancelled', async () => {
+    const user = await competitor('cpp');
+    execute.mockRejectedValueOnce(new ExecutionCancelledError());
+    const url = `/api/bots/${user.botId}/revisions/${user.revision.revisionId}/test-match`;
+    expect((await user.agent.post(url).set('x-csrf-token', user.csrf).send({})).status).toBe(503);
+    expect(release).toHaveBeenCalledOnce();
+    execute.mockImplementation(async (_context: unknown, _revision: unknown, input: BotRequestMessage) => success(input));
+    expect((await user.agent.post(url).set('x-csrf-token', user.csrf).send({})).status).toBe(200);
   });
 
   it('rejects the 21st chargeable request per Competitor, isolates users, and resets after 15 minutes', async () => {

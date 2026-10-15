@@ -38,7 +38,7 @@ describe('UX.4 Practice Runner', () => {
 
   it('clears stale results on scenario changes and invalidates pending responses', async () => {
     const app = await source('app.js');
-    expect(app).toContain("$('#practice-scenario').addEventListener('change'");
+    expect(app).toContain("on('#practice-scenario', 'change'");
     expect(app).toContain('state.practiceRequestToken += 1;');
     expect(app).toContain('clearPracticeResult();');
     expect(app).toContain('token !== state.practiceRequestToken');

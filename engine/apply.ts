@@ -14,18 +14,8 @@ import type {
 import { cloneState, getPieceById, getPieceAt, getPlayerPieces, opponent, isPlayerGoalSquare } from './state.js';
 import { validateMove } from './moves.js';
 
-function checkTypeElimination(state: GameState, player: Player): WinReason | null {
-  const pieces = getPlayerPieces(state, player);
-  const types = new Set(pieces.map(p => p.type));
-
-  const missingDam = !types.has('dam');
-  const missingLa = !types.has('la');
-  const missingKeo = !types.has('keo');
-
-  if (missingDam || missingLa || missingKeo) {
-    return 'type_elimination';
-  }
-  return null;
+function checkAllPiecesCaptured(state: GameState, player: Player): WinReason | null {
+  return getPlayerPieces(state, player).length === 0 ? 'all_pieces_captured' : null;
 }
 
 function checkGoalSquare(pos: Position, player: Player): WinReason | null {
@@ -83,8 +73,8 @@ export function applyMove(state: GameState, move: MoveOption): ApplyResult {
   const opponentPlayer = opponent(piece.player);
   let winReason: WinReason | null = null;
 
-  // Check type elimination first
-  winReason = checkTypeElimination(newState, opponentPlayer);
+  // A player wins by capturing every opposing piece, not merely one type.
+  winReason = checkAllPiecesCaptured(newState, opponentPlayer);
 
   // Check goal square
   if (!winReason) {
