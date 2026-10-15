@@ -1,0 +1,153 @@
+/* Auth view overrides extracted from index.html. */
+#auth-screen.page {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  width: 100vw;
+  max-width: none;
+  min-height: 100dvh;
+  height: 100dvh;
+  margin: 0;
+  padding: 24px;
+  box-sizing: border-box;
+  overflow: auto;
+  background: #f2f4f1;
+  backdrop-filter: none;
+  animation: none;
+}
+
+#auth-screen .auth-container {
+  width: 100%;
+  max-width: 430px;
+  margin: auto;
+}
+
+#auth-screen .auth-card {
+  padding: 32px;
+  border: 1px solid #dce4dc;
+  border-radius: 16px;
+  background: #ffffff;
+  box-shadow: 0 10px 28px rgba(28, 45, 34, .08);
+  transform: none;
+}
+
+#auth-screen .auth-card:hover {
+  transform: none;
+  box-shadow: 0 10px 28px rgba(28, 45, 34, .08);
+}
+
+#auth-screen .auth-branding {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 28px;
+  text-align: left;
+}
+
+#auth-screen .auth-logo {
+  flex: 0 0 auto;
+  width: 48px;
+  height: 48px;
+  border-radius: 12px;
+  background: #167346;
+  box-shadow: none;
+  transform: none;
+}
+
+#auth-screen .auth-logo:hover {
+  transform: none;
+  box-shadow: none;
+}
+
+#auth-screen .brand-text h1 {
+  margin: 0;
+  color: #183024;
+  font-size: 1.2rem;
+  letter-spacing: -.02em;
+}
+
+#auth-screen .brand-tagline {
+  margin: 3px 0 0;
+  color: #6b766e;
+  font-size: .82rem;
+}
+
+#auth-screen .form-header {
+  margin-bottom: 22px;
+}
+
+#auth-screen .form-header h2 {
+  color: #183024;
+  font-size: 1.45rem;
+}
+
+#auth-screen .form-description {
+  color: #6b766e;
+}
+
+#auth-screen .form-message {
+  margin: 10px 0 12px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: #a12d2d;
+  font-size: .84rem;
+  line-height: 1.45;
+  text-align: center;
+}
+
+#auth-screen .form-message[data-type="success"] {
+  border: 0;
+  background: transparent;
+  color: #17633a;
+}
+
+#auth-screen .input-wrapper input {
+  border-color: #d8e1d9;
+  border-radius: 9px;
+  box-shadow: none;
+}
+
+#auth-screen .password-input-wrapper input {
+  padding-right: 56px;
+}
+
+#auth-screen .password-toggle-btn {
+  right: 8px;
+}
+
+#auth-screen .input-wrapper input:focus {
+  border-color: #167346;
+  box-shadow: 0 0 0 3px rgba(22, 115, 70, .12);
+}
+
+#auth-screen .primary-btn {
+  min-height: 46px;
+  border-radius: 9px;
+  background: #167346;
+  box-shadow: none;
+}
+
+#auth-screen .primary-btn:hover:not(:disabled) {
+  background: #125c38;
+  box-shadow: none;
+  transform: none;
+}
+
+#auth-screen .primary-btn:disabled {
+  cursor: pointer;
+  opacity: .72;
+}
+
+@media (max-width: 520px) {
+  #auth-screen.page {
+    padding: 16px;
+  }
+
+  #auth-screen .auth-card {
+    padding: 24px 20px;
+    border-radius: 12px;
+  }
+}

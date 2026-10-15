@@ -56,6 +56,11 @@ app.use((err: any, req: express.Request, res: express.Response, next: express.Ne
 app.get('/', (req, res) => res.sendFile(path.join(projectRoot, 'index.html')));
 app.get('/app.js', (req, res) => res.sendFile(path.join(projectRoot, 'app.js')));
 app.get('/style.css', (req, res) => res.sendFile(path.join(projectRoot, 'style.css')));
+app.get('/styles/views/replay.css', (req, res) => res.sendFile(path.join(projectRoot, 'styles/views/replay.css')));
+app.get('/styles/views/live.css', (req, res) => res.sendFile(path.join(projectRoot, 'styles/views/live.css')));
+app.get('/styles/components/editor.css', (req, res) => res.sendFile(path.join(projectRoot, 'styles/components/editor.css')));
+app.get('/styles/layout.css', (req, res) => res.sendFile(path.join(projectRoot, 'styles/layout.css')));
+app.get('/styles/views/auth.css', (req, res) => res.sendFile(path.join(projectRoot, 'styles/views/auth.css')));
 // Serve static icons if they were separate, but they are embedded in index.html
 
 // Initialize singleton Tournament Manager

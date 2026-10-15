@@ -1,0 +1,25 @@
+#replay-view.live-match-view .replay-scrubber-label,
+#replay-view.live-match-view #replay-scrubber,
+#replay-view.live-match-view .replay-controls,
+#replay-view.live-match-view .replay-timeline-panel,
+#replay-view.live-match-view #r-result-text { display: none; }
+#replay-view.live-match-view .replay-result { color: #176b50; }
+#live-game-result-modal { position: fixed; inset: 0; z-index: 1200; display: grid; place-items: center; padding: 20px; background: rgba(18, 39, 28, .42); opacity: 0; pointer-events: none; transition: opacity .2s ease; }
+#live-game-result-modal.is-visible { opacity: 1; pointer-events: auto; }
+#live-game-result-modal .live-game-result-card { width: min(94vw, 520px); padding: 30px; border: 1px solid #d7e8dc; border-radius: 22px; background: linear-gradient(145deg, #fff 0%, #f5fbf7 100%); box-shadow: 0 24px 70px rgba(18, 53, 34, .24); text-align: center; animation: live-result-pop .32s cubic-bezier(.2, .8, .2, 1); }
+@keyframes live-result-pop { from { opacity: 0; transform: translateY(14px) scale(.96); } to { opacity: 1; transform: translateY(0) scale(1); } }
+#live-game-result-modal .live-game-result-kicker { margin: 0 0 9px; color: #176b50; font-size: .72rem; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; }
+#live-game-result-title { margin: 0; color: #173b2a; font-size: 1.55rem; }
+#live-game-result-winner { margin: 7px 0 18px; color: #648071; font-size: .88rem; }
+.live-game-scoreboard { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: center; gap: 12px; margin: 20px 0; }
+.live-game-score-player { min-width: 0; padding: 16px 10px 13px; border: 1px solid #dbe9df; border-radius: 14px; background: rgba(255, 255, 255, .8); }
+.live-game-score-player.is-right { background: #f0f8f3; }
+.live-game-score-player strong, .live-game-score-player small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.live-game-score-player strong { color: #1b3d2b; font-size: .96rem; }
+.live-game-score-player small { margin-top: 4px; color: #789085; font-size: .7rem; }
+.live-game-score-number { display: block; margin-top: 10px; color: #315b46; font-size: 2.15rem; line-height: 1; font-weight: 800; font-variant-numeric: tabular-nums; }
+.live-game-score-number.is-leading { color: #176b50; text-shadow: 0 0 18px rgba(23, 107, 80, .22); }
+.live-game-score-vs { color: #a2b2a8; font-size: .76rem; font-weight: 800; letter-spacing: .08em; }
+#live-game-result-score { margin: 0; color: #176b50; font-size: .78rem; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
+#live-game-result-next { margin: 8px 0 0; color: #68786f; font-size: .9rem; }
+#live-game-result-close { margin-top: 22px; min-width: 96px; }
