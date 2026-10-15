@@ -16,4 +16,12 @@ describe('BO3 replay presentation', () => {
     expect(types).toContain("format: 'bo3'");
     expect(types).toContain('bestOf: 3');
   });
+
+  it('accurately resolves winner participant card across BO3 side swaps', async () => {
+    const app = await source('app.js');
+    expect(app).toContain('function getReplayWinningParticipantSlot()');
+    expect(app).toContain('winningSlot === \'A\'');
+    expect(app).toContain('winningSlot === \'B\'');
+    expect(app).toContain('is-current-side-b');
+  });
 });

@@ -1083,9 +1083,24 @@ async function loadDashboard() {
       if (tournamentDetail) tournamentDetail.textContent = `${top3Finishes} lần lọt Top 3`;
       const winRate = totalMatches > 0 ? (wins / totalMatches) * 100 : 0;
       if (recordRate) recordRate.textContent = totalMatches > 0 ? `${winRate.toFixed(1).replace('.0', '')}%` : '—';
-      if (recordMatches) recordMatches.textContent = totalMatches > 0
-        ? `${totalMatches} trận tham gia · ${wins} thắng`
-        : 'Chưa có trận tham gia';
+      if (recordMatches) {
+        if (totalMatches > 0) {
+          recordMatches.textContent = `${wins} thắng / ${totalMatches} trận`;
+          let winBar = $('#dash-record-card .record-win-bar');
+          if (!winBar) {
+            winBar = create('div', { className: 'record-win-bar' });
+            const fill = create('div', { className: 'record-win-bar-fill' });
+            winBar.appendChild(fill);
+            $('#dash-record-card .stat-card__header')?.appendChild(winBar);
+          }
+          const fill = winBar.querySelector('.record-win-bar-fill');
+          if (fill) fill.style.width = `${Math.min(100, Math.max(0, winRate))}%`;
+        } else {
+          recordMatches.textContent = 'Chưa có trận tham gia';
+          const winBar = $('#dash-record-card .record-win-bar');
+          if (winBar) winBar.remove();
+        }
+      }
       $('#dash-queue-value').textContent = openCount;
       const queueLabelText = $('#dash-queue-label'); if (queueLabelText) queueLabelText.textContent = 'Giải đang mở đăng ký';
       if (botSection) { botSection.hidden = false; renderDashboardBotList(bots); }
@@ -1140,9 +1155,9 @@ async function loadDashboard() {
         $('#dash-empty-title').textContent = 'Chưa có giải đấu mở';
         $('#dash-empty-copy').textContent = 'Tạo Bot đầu tiên để sẵn sàng tham gia khi có giải đấu.';
       }
-      $('#dash-empty-bot').hidden = true;
-      if (competitor) $('#dash-empty-bot').textContent = bots.length ? 'Xem giải đấu đang mở' : 'Đăng ký Bot';
-      $('#dash-empty-tournament').hidden = true;
+      $('#dash-empty-bot').hidden = false;
+      if (competitor) $('#dash-empty-bot').textContent = bots.length ? '⚡ Luyện tập trong Sandbox' : '+ Tạo Bot đầu tiên';
+      $('#dash-empty-tournament').hidden = !competitor ? false : true;
       return;
     }
     if (!filteredTournaments.length) {
@@ -1205,9 +1220,18 @@ function renderDashboardBotList(bots) {
     list.appendChild(empty);
     return;
   }
-  bots.slice(0, 5).forEach(bot => {
+  const botColorPalettes = [
+    'linear-gradient(135deg, #0d9488, #059669)',
+    'linear-gradient(135deg, #2563eb, #1d4ed8)',
+    'linear-gradient(135deg, #7c3aed, #6d28d9)',
+    'linear-gradient(135deg, #d97706, #b45309)',
+    'linear-gradient(135deg, #e11d48, #be123c)'
+  ];
+  bots.slice(0, 5).forEach((bot, index) => {
     const item = create('button', { className: 'dashboard-bot-item', type: 'button', attrs: { 'aria-label': `Xem Bot ${bot.name}` } });
-    const botIcon = icon('icon-bot'); botIcon.classList.add('dashboard-bot-item-icon');
+    const initials = (bot.name || 'B').trim().slice(0, 2).toUpperCase();
+    const identicon = create('span', { className: 'dashboard-bot-identicon', text: initials });
+    identicon.style.background = botColorPalettes[index % botColorPalettes.length];
     const copy = create('span', { className: 'dashboard-bot-copy' });
     const nameStrong = create('strong', { text: bot.name });
     const runtime = bot.selectedRevision?.runtimeId || (bot.command === 'python3' ? 'python3' : 'cpp');
@@ -1218,7 +1242,7 @@ function renderDashboardBotList(bots) {
     nameStrong.appendChild(badge);
     copy.append(nameStrong, create('small', { text: bot.currentRevisionId ? 'Đã có phiên bản mã nguồn' : 'Chưa có phiên bản mã nguồn' }));
     const arrow = icon('icon-arrow-right'); arrow.classList.add('dashboard-bot-arrow');
-    item.append(botIcon, copy, arrow);
+    item.append(identicon, copy, arrow);
     item.addEventListener('click', () => openBotWorkspace(bot));
     list.appendChild(item);
   });
@@ -3359,6 +3383,8 @@ function stopLiveMatchPolling() {
   state.livePollBackoffMs = 0;
   state.liveMatchContext = null;
   state.liveMatchSnapshot = null;
+  document.querySelector('#replay-view .replay-player-a-label')?.classList.remove('is-winner');
+  document.querySelector('#replay-view .replay-player-b-label')?.classList.remove('is-winner');
   state.liveMatchStartedGames.clear();
   state.liveLatestSnapshot = null;
   state.liveHistoryGame = null;
@@ -3828,7 +3854,12 @@ function setReplayLoading(isLoading) {
   const content = $('#replay-content');
   if (loading) loading.hidden = !isLoading;
   if (content) content.hidden = isLoading;
-  if (isLoading) { const seriesCard = $('#replay-series-card'); if (seriesCard) seriesCard.hidden = true; }
+  if (isLoading) {
+    const seriesCard = $('#replay-series-card');
+    if (seriesCard) seriesCard.hidden = true;
+    document.querySelector('#replay-view .replay-player-a-label')?.classList.remove('is-winner');
+    document.querySelector('#replay-view .replay-player-b-label')?.classList.remove('is-winner');
+  }
 }
 
 function formatReplayReason(reason) { return localizeReason(reason); }
@@ -3877,6 +3908,8 @@ function selectReplayGame(index) {
   stopReplayPlayback();
   state.replayGameIndex = index;
   state.replay = state.replaySeries.series.games[index].replay;
+  document.querySelector('#replay-view .replay-player-a-label')?.classList.remove('is-winner');
+  document.querySelector('#replay-view .replay-player-b-label')?.classList.remove('is-winner');
   renderReplaySeriesControls(state.replaySeries);
   renderReplaySummaryV2(state.replaySeries);
   goToReplayTurn(-1);
@@ -3916,7 +3949,12 @@ function renderReplaySummary(replay) {
   // cards must still reflect the completed result instead of staying at 0-0.
   updateReplaySeriesScore(replay.winner === 'A' ? 1 : 0, replay.winner === 'B' ? 1 : 0);
   $('#r-result-text').textContent = `${replayResultLabel(replay)} · ${formatReplayReason(replay.terminationReason)}`;
-  $('#r-winner').textContent = replayWinnerLabel(replay);
+  const winnerText = replayWinnerLabel(replay);
+  const winnerEl = $('#r-winner');
+  if (winnerEl) {
+    winnerEl.textContent = (replay.winner === 'A' || replay.winner === 'B') ? `🏆 ${winnerText}` : winnerText;
+    winnerEl.classList.toggle('has-winner', replay.winner === 'A' || replay.winner === 'B');
+  }
   $('#r-termination').textContent = formatReplayReason(replay.terminationReason) || 'Chưa xác định';
   $('#r-protocol').textContent = String(replay.protocolVersion || 'unknown');
   const statusBadge = $('#replay-status-badge'); if (statusBadge) statusBadge.textContent = 'Đã hoàn thành';
@@ -4081,8 +4119,13 @@ function renderReplayBoard(board, liveMove = null) {
     }
     const piece = board.pieces.find(candidate => candidate.row === row && candidate.col === col);
     if (piece) {
-      const label = `Người chơi ${piece.player}, ${PIECE_LABELS[piece.type] || piece.type}`;
-      const token = create('span', { className: `replay-piece replay-player-${piece.player.toLowerCase()}`, attrs: { 'aria-label': label, title: label } });
+      const isPlayerA = piece.player === 'A';
+      const isGoalReached = (row === 8 && col === 8 && isPlayerA) || (row === 0 && col === 0 && !isPlayerA);
+      if (isGoalReached) {
+        cell.classList.add('goal-reached', 'victory-cell');
+      }
+      const label = `Người chơi ${piece.player}, ${PIECE_LABELS[piece.type] || piece.type}${isGoalReached ? ' (ĐẠT Ô ĐÍCH CHIẾN THẮNG)' : ''}`;
+      const token = create('span', { className: `replay-piece replay-player-${piece.player.toLowerCase()}${isGoalReached ? ' victory-piece' : ''}`, attrs: { 'aria-label': label, title: label } });
       const symbolId = PIECE_TYPES[piece.type];
       if (symbolId) token.appendChild(icon(symbolId));
       else token.textContent = '?';
@@ -4091,6 +4134,47 @@ function renderReplayBoard(board, liveMove = null) {
     }
     element.appendChild(cell);
   }
+}
+
+function getReplayWinningParticipantSlot() {
+  const replay = state.replay;
+  if (!replay) return null;
+  const matchWinner = replay.winner;
+  if (matchWinner !== 'A' && matchWinner !== 'B') return null;
+
+  // Case 1: BO3 Series Game
+  if (state.replaySeries?.series?.games) {
+    const series = state.replaySeries.series;
+    const selectedIndex = Math.max(0, Math.min(Number(state.replayGameIndex) || 0, series.games.length - 1));
+    const currentGame = series.games[selectedIndex];
+    const identities = state.replaySeries.participantIdentities || {};
+    const playerAId = identities.A?.participantId;
+    const playerBId = identities.B?.participantId;
+
+    if (currentGame) {
+      const winnerId = currentGame.winnerParticipantId || (
+        currentGame.winner === 'A' ? currentGame.participantA :
+        currentGame.winner === 'B' ? currentGame.participantB : null
+      );
+      if (winnerId && playerAId && winnerId === playerAId) return 'A';
+      if (winnerId && playerBId && winnerId === playerBId) return 'B';
+    }
+  }
+
+  // Case 2: Swapped side classes on participant labels
+  const playerAEl = document.querySelector('#replay-view .replay-player-a-label');
+  const playerBEl = document.querySelector('#replay-view .replay-player-b-label');
+  if (playerAEl && playerBEl) {
+    if (playerAEl.classList.contains('is-current-side-b')) {
+      return matchWinner === 'B' ? 'A' : 'B';
+    }
+    if (playerAEl.classList.contains('is-current-side-a')) {
+      return matchWinner === 'A' ? 'A' : 'B';
+    }
+  }
+
+  // Case 3: Standard BO1 / Practice matches
+  return matchWinner === 'A' ? 'A' : 'B';
 }
 
 function goToReplayTurn(index) {
@@ -4114,9 +4198,32 @@ function goToReplayTurn(index) {
   const currentMove = $('#r-current-move');
   currentMove?.classList.toggle('replay-current-move-a', move?.player === 'A');
   currentMove?.classList.toggle('replay-current-move-b', move?.player === 'B');
-  currentMove.textContent = move?.pieceId
-    ? `Lượt ${move.turn} · ${replayHistoryPlayerName(move.player)}: ${replayCoordinate(move.from)} → ${replayCoordinate(move.to)}`
-    : state.replayMoveIndex >= 0 ? `Lượt ${move.turn} · ${replayHistoryPlayerName(move.player)}: không có nước đi được áp dụng` : 'Vị trí ban đầu';
+  const totalMoves = state.replay?.moves?.length || 0;
+  const isFinalMove = totalMoves === 0 ? true : (state.replayMoveIndex >= totalMoves - 1 && state.replayMoveIndex >= 0);
+  const matchWinner = state.replay?.winner;
+  const isDecidedMatch = isFinalMove && (matchWinner === 'A' || matchWinner === 'B');
+  currentMove?.classList.toggle('is-victory-announcement', isDecidedMatch);
+
+  // Update winner visual states on participant cards (A = left card / Player 1, B = right card / Player 2)
+  const winningSlot = isDecidedMatch ? getReplayWinningParticipantSlot() : null;
+  document.querySelector('#replay-view .replay-player-a-label')?.classList.toggle('is-winner', winningSlot === 'A');
+  document.querySelector('#replay-view .replay-player-b-label')?.classList.toggle('is-winner', winningSlot === 'B');
+
+  if (isDecidedMatch) {
+    const winningCardName = winningSlot === 'A'
+      ? document.querySelector('#replay-view #r-p1-name')?.textContent?.trim()
+      : winningSlot === 'B'
+        ? document.querySelector('#replay-view #r-p2-name')?.textContent?.trim()
+        : '';
+    const rawWinner = replayWinnerLabel(state.replay);
+    const cleanWinner = winningCardName || (rawWinner.endsWith(' chiến thắng') ? rawWinner.slice(0, -' chiến thắng'.length) : rawWinner);
+    const reason = formatReplayReason(state.replay.terminationReason) || 'Chiến thắng';
+    currentMove.textContent = `🏆 CHIẾN THẮNG: ${cleanWinner} (${reason})`;
+  } else {
+    currentMove.textContent = move?.pieceId
+      ? `Lượt ${move.turn} · ${replayHistoryPlayerName(move.player)}: ${replayCoordinate(move.from)} → ${replayCoordinate(move.to)}`
+      : state.replayMoveIndex >= 0 ? `Lượt ${move.turn} · ${replayHistoryPlayerName(move.player)}: không có nước đi được áp dụng` : 'Vị trí ban đầu';
+  }
 }
 
   if (false) {
@@ -4269,8 +4376,7 @@ function bindEvents() {
   on('#dashboard-open-bots', 'click', () => navigate('bots'));
   on('#dash-empty-bot', 'click', () => {
     if (state.user?.role === 'competitor' && state.bots.length) {
-      state.tournamentScope = 'discoverable';
-      navigate('tournaments');
+      openBotWorkspace(state.bots[0]);
       return;
     }
     openBotWorkspace();

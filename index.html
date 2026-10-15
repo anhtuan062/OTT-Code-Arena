@@ -1102,6 +1102,208 @@
       margin-top: 0;
     }
 
+    
+    /* === Tactical Replay & Sandbox Enhancements === */
+    .editor-sandbox {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      color: #176b4d;
+      font-size: .74rem;
+      font-weight: 700;
+      background: #eaf6ee;
+      padding: 3px 10px;
+      border-radius: 999px;
+      border: 1px solid #cce8d6;
+    }
+
+    .editor-sandbox::before {
+      content: '';
+      display: inline-block;
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: #10b981;
+      box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.25);
+      animation: pulseGreen 2s infinite ease-in-out;
+    }
+
+    @keyframes pulseGreen {
+      0%, 100% { transform: scale(1); opacity: 1; }
+      50% { transform: scale(1.25); opacity: 0.65; }
+    }
+
+    .replay-piece {
+      transition: transform .18s cubic-bezier(0.16, 1, 0.3, 1), box-shadow .18s ease;
+      box-shadow: 0 3px 6px rgba(0, 0, 0, 0.16);
+    }
+
+    .replay-piece:hover {
+      transform: scale(1.12);
+      box-shadow: 0 4px 10px rgba(0, 0, 0, 0.22);
+    }
+
+    @keyframes capturePulse {
+      0% { transform: scale(0.92); box-shadow: inset 0 0 0 2px #dc2626; }
+      50% { transform: scale(1.04); box-shadow: inset 0 0 0 3px #ef4444, 0 0 10px rgba(239, 68, 68, 0.4); }
+      100% { transform: scale(1); box-shadow: inset 0 0 0 2px #dc2626; }
+    }
+
+    
+    /* === Victory & Goal Reached Celebratory Effects === */
+    .replay-cell.goal {
+      background: radial-gradient(circle at center, #fefbf2 20%, #fef5e0 100%);
+      border: 1.5px dashed #d97706 !important;
+      position: relative;
+    }
+
+    .goal-flag {
+      position: absolute;
+      top: 3px;
+      right: 3px;
+      z-index: 2;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 16px;
+      height: 16px;
+      color: #d97706;
+      opacity: .92;
+      filter: drop-shadow(0 1px 2px rgba(217, 119, 6, 0.4));
+      transition: transform .3s ease;
+    }
+
+    .replay-cell.goal-reached,
+    .replay-cell.victory-cell {
+      background: radial-gradient(circle at center, #fffbeb 0%, #fef3c7 60%, #fde68a 100%) !important;
+      box-shadow: 0 0 24px rgba(245, 158, 11, 0.75), inset 0 0 0 3px #f59e0b !important;
+      border-style: solid !important;
+      border-color: #f59e0b !important;
+      z-index: 10;
+      animation: victoryCellPulse 1.8s infinite ease-in-out;
+    }
+
+    .replay-cell.goal-reached .goal-flag,
+    .replay-cell.victory-cell .goal-flag {
+      color: #b45309;
+      transform: scale(1.35) rotate(-5deg);
+      animation: flagCelebrate 1.2s infinite alternate ease-in-out;
+    }
+
+    .replay-piece.victory-piece {
+      transform: scale(1.18) !important;
+      box-shadow: 0 0 16px rgba(245, 158, 11, 0.9), 0 4px 10px rgba(0, 0, 0, 0.3) !important;
+      border-color: #fde68a !important;
+      animation: victoryPieceBounce 1.4s infinite ease-in-out;
+    }
+
+    @keyframes victoryCellPulse {
+      0%, 100% {
+        box-shadow: 0 0 16px rgba(245, 158, 11, 0.6), inset 0 0 0 2px #f59e0b;
+      }
+      50% {
+        box-shadow: 0 0 28px rgba(245, 158, 11, 0.95), inset 0 0 0 3.5px #d97706;
+      }
+    }
+
+    @keyframes flagCelebrate {
+      0% { transform: scale(1.2) rotate(-8deg); }
+      100% { transform: scale(1.4) rotate(8deg); }
+    }
+
+    @keyframes victoryPieceBounce {
+      0%, 100% { transform: scale(1.15) translateY(0); }
+      50% { transform: scale(1.22) translateY(-4px); }
+    }
+
+    #replay-view .replay-series-card .replay-player-identity.is-winner {
+      border-color: #f59e0b !important;
+      background: linear-gradient(135deg, rgba(254, 243, 199, 0.5), rgba(253, 230, 138, 0.3)) !important;
+      box-shadow: 0 0 20px rgba(245, 158, 11, 0.28), 0 4px 12px rgba(23, 35, 29, 0.06) !important;
+      position: relative;
+    }
+
+    #replay-view .replay-series-card .replay-player-identity.is-winner::after {
+      content: '🏆 THẮNG CUỘC';
+      position: absolute;
+      top: -10px;
+      padding: 1px 7px;
+      border-radius: 999px;
+      background: linear-gradient(135deg, #f59e0b, #d97706);
+      color: #fff;
+      font-size: .65rem;
+      font-weight: 800;
+      letter-spacing: .03em;
+      box-shadow: 0 2px 6px rgba(217, 119, 6, 0.4);
+      animation: winnerBadgePulse 2s infinite ease-in-out;
+      z-index: 2;
+    }
+
+    #replay-view .replay-series-card .replay-player-a-label.is-winner::after {
+      left: 12px;
+      right: auto;
+    }
+
+    #replay-view .replay-series-card .replay-player-b-label.is-winner::after {
+      right: 12px;
+      left: auto;
+    }
+
+    @keyframes winnerBadgePulse {
+      0%, 100% { transform: scale(1); }
+      50% { transform: scale(1.06); }
+    }
+
+    #replay-view .replay-series-card .replay-player-identity.is-winner .replay-player-score {
+      background: #fef3c7;
+      color: #b45309;
+      font-weight: 850;
+      box-shadow: inset 0 0 0 1.5px #f59e0b;
+    }
+
+    .replay-current-move.is-victory-announcement {
+      background: linear-gradient(135deg, #fef3c7, #fde68a) !important;
+      border-left: 4px solid #f59e0b !important;
+      color: #78350f !important;
+      font-weight: 750 !important;
+      font-size: .84rem !important;
+      box-shadow: 0 4px 14px rgba(245, 158, 11, 0.25);
+      animation: announcementGlow 1.8s infinite ease-in-out;
+    }
+
+    @keyframes announcementGlow {
+      0%, 100% { box-shadow: 0 4px 14px rgba(245, 158, 11, 0.2); }
+      50% { box-shadow: 0 4px 20px rgba(245, 158, 11, 0.45); }
+    }
+
+    #r-winner.has-winner {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      color: #b45309;
+      background: #fef3c7;
+      padding: 2px 8px;
+      border-radius: 6px;
+      font-weight: 750;
+      border: 1px solid #fde68a;
+    }
+
+    .replay-cell.capture {
+      background: #fef2f2;
+      box-shadow: inset 0 0 0 2px #ef4444;
+      animation: capturePulse .4s ease-out;
+    }
+
+    .replay-cell.move-from {
+      background: #fffbeb;
+      box-shadow: inset 0 0 0 2px #f59e0b;
+    }
+
+    .replay-cell.move-to {
+      background: #ecfdf5;
+      box-shadow: inset 0 0 0 2px #10b981;
+    }
+
     .editor-sandbox {
       color: #176b4d;
       font-size: .72rem;
@@ -5433,6 +5635,63 @@
       border-radius: 14px;
       box-shadow: 0 10px 28px rgba(30, 77, 55, .055);
       transition: transform .22s cubic-bezier(0.16, 1, 0.3, 1), box-shadow .22s ease, border-color .22s ease;
+    }
+
+    
+    #dashboard.dashboard-page .dashboard-empty-actions {
+      display: flex;
+      justify-content: center;
+      gap: 12px;
+      margin-top: 16px;
+    }
+
+    #dashboard.dashboard-page .dashboard-empty-actions button {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      min-height: 40px;
+      padding: 9px 20px;
+      font-size: .88rem;
+      border-radius: 10px;
+      font-weight: 600;
+      transition: all .18s ease;
+    }
+
+    #dashboard.dashboard-page .dashboard-empty-actions button:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 6px 18px rgba(23, 107, 80, .14);
+    }
+
+    .record-win-bar {
+      display: flex;
+      height: 4px;
+      width: 100%;
+      min-width: 120px;
+      border-radius: 999px;
+      overflow: hidden;
+      background: #fcecd2;
+      margin-top: 6px;
+    }
+
+    .record-win-bar-fill {
+      background: #e49a00;
+      border-radius: 999px;
+      height: 100%;
+      transition: width .4s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    .dashboard-bot-identicon {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 38px;
+      height: 38px;
+      flex: 0 0 38px;
+      border-radius: 10px;
+      font-size: .82rem;
+      font-weight: 800;
+      color: #fff;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, .08);
     }
 
     #dashboard.dashboard-page .summary-card:hover {
