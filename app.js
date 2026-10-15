@@ -95,53 +95,11 @@ const state = {
   detailRequestBotNames: new Map(),
 };
 
-const CP1252_BYTES = {
-  '€': 0x80, '‚': 0x82, 'ƒ': 0x83, '„': 0x84, '…': 0x85, '†': 0x86, '‡': 0x87,
-  'ˆ': 0x88, '‰': 0x89, 'Š': 0x8a, '‹': 0x8b, 'Œ': 0x8c, 'Ž': 0x8e,
-  '‘': 0x91, '’': 0x92, '“': 0x93, '”': 0x94, '•': 0x95, '–': 0x96, '—': 0x97,
-  '˜': 0x98, '™': 0x99, 'š': 0x9a, '›': 0x9b, 'œ': 0x9c, 'ž': 0x9e, 'Ÿ': 0x9f,
-};
-
-function repairMojibake(value) {
-  if (typeof value !== 'string' || !/[ÃÄÂáâ]/.test(value)) return value;
-  const bytes = [];
-  for (const character of value) {
-    const code = CP1252_BYTES[character] ?? character.charCodeAt(0);
-    if (code > 255) return value;
-    bytes.push(code);
-  }
-  try {
-    const repaired = new TextDecoder('utf-8', { fatal: true }).decode(new Uint8Array(bytes));
-    return repaired.includes('�') ? value : repaired;
-  } catch {
-    return value;
-  }
-}
-
-function repairMojibakeDom() {
-  const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
-  const textNodes = [];
-  while (walker.nextNode()) textNodes.push(walker.currentNode);
-  textNodes.forEach(node => {
-    const repaired = repairMojibake(node.nodeValue || '');
-    if (repaired !== node.nodeValue) node.nodeValue = repaired;
-  });
-  document.querySelectorAll('[aria-label], [title], [placeholder]').forEach(element => {
-    ['aria-label', 'title', 'placeholder'].forEach(attribute => {
-      if (element.hasAttribute(attribute)) {
-        const value = element.getAttribute(attribute);
-        const repaired = repairMojibake(value || '');
-        if (repaired !== value) element.setAttribute(attribute, repaired);
-      }
-    });
-  });
-}
-
 const $ = (selector, root = document) => root.querySelector(selector);
 const create = (tag, options = {}) => {
   const element = document.createElement(tag);
   if (options.className) element.className = options.className;
-  if (options.text !== undefined) element.textContent = repairMojibake(String(options.text));
+  if (options.text !== undefined) element.textContent = String(options.text);
   if (options.type) element.type = options.type;
   if (options.attrs) Object.entries(options.attrs).forEach(([name, value]) => element.setAttribute(name, String(value)));
   return element;
@@ -1202,9 +1160,9 @@ async function loadDashboard() {
       if (competitor && tournament.myRequestStatus) {
         clear(action);
         if (tournament.myRequestStatus === 'approved') {
-          action.appendChild(actionButton('Xem giáº£i Ä‘áº¥u', () => viewTournament(tournament.tournamentId), `view:${tournament.tournamentId}`));
+          action.appendChild(actionButton('Xem giải đấu', () => viewTournament(tournament.tournamentId), `view:${tournament.tournamentId}`));
         } else {
-          const statusAction = actionButton(tournament.myRequestStatus === 'pending' ? 'Chá» duyá»‡t' : 'ÄÃ£ tá»« chá»‘i', () => {}, `request:${tournament.tournamentId}`);
+          const statusAction = actionButton(tournament.myRequestStatus === 'pending' ? 'Chờ duyệt' : 'Đã từ chối', () => {}, `request:${tournament.tournamentId}`);
           statusAction.disabled = true;
           action.appendChild(statusAction);
         }
@@ -1234,7 +1192,7 @@ function renderDashboardBotList(bots) {
   if (!bots.length) {
     const empty = create('div', { className: 'dashboard-bot-empty' });
     const botIcon = icon('icon-bot'); botIcon.classList.add('dashboard-bot-icon');
-    empty.append(botIcon, create('strong', { text: 'Báº¡n chÆ°a cÃ³ Bot nÃ o' }), create('span', { text: 'Táº¡o Bot Ä‘áº§u tiÃªn Ä‘á»ƒ báº¯t Ä‘áº§u xÃ¢y dá»±ng chiáº¿n thuáº­t.' }));
+    empty.append(botIcon, create('strong', { text: 'Bạn chưa có Bot nào' }), create('span', { text: 'Tạo Bot đầu tiên để bắt đầu xây dựng chiến thuật.' }));
     list.appendChild(empty);
     return;
   }
@@ -1242,7 +1200,7 @@ function renderDashboardBotList(bots) {
     const item = create('button', { className: 'dashboard-bot-item', type: 'button', attrs: { 'aria-label': `Xem Bot ${bot.name}` } });
     const botIcon = icon('icon-bot'); botIcon.classList.add('dashboard-bot-item-icon');
     const copy = create('span', { className: 'dashboard-bot-copy' });
-    copy.append(create('strong', { text: bot.name }), create('small', { text: bot.currentRevisionId ? 'ÄÃ£ cÃ³ phiÃªn báº£n mÃ£ nguá»“n' : 'ChÆ°a cÃ³ phiÃªn báº£n mÃ£ nguá»“n' }));
+    copy.append(create('strong', { text: bot.name }), create('small', { text: bot.currentRevisionId ? 'Đã có phiên bản mã nguồn' : 'Chưa có phiên bản mã nguồn' }));
     const arrow = icon('icon-chevron-down'); arrow.classList.add('dashboard-bot-arrow');
     item.append(botIcon, copy, arrow);
     item.addEventListener('click', () => openBotWorkspace(bot));
@@ -1273,7 +1231,7 @@ async function loadBots() {
 
 function renderBotList() {
   const list = $('#bots-list');
-  clearLoadingSkeleton(list);
+  if (typeof clearLoadingSkeleton === 'function') clearLoadingSkeleton(list);
   const toolbar = $('#bots-toolbar');
   const createButton = $('#open-bot-modal');
   const headerDescription = $('.bots-workspace-header p');
@@ -1399,19 +1357,30 @@ function updateEditorMetrics() {
   syncSourceEditorTools();
 }
 
-function escapeSourceHtml(value) {
-  return String(value).replace(/[&<>]/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[character]));
-}
-
-function highlightSourceCode(source) {
-  const escaped = escapeSourceHtml(source);
+function renderSourceHighlight(container, source) {
+  clear(container);
+  if (!source) {
+    container.appendChild(document.createTextNode(' '));
+    return;
+  }
   const tokenPattern = /(\/\/[^\n]*|#[^\n]*|\#[a-zA-Z_][\w]*|"[^"\n]*"|'[^'\n]*'|\b\d+(?:\.\d+)?\b|\b(?:class|def|return|if|else|elif|for|while|in|import|from|as|True|False|None|and|or|not|using|namespace|const|auto|int|string|bool|void|struct|vector|return|include|public|private|new)\b)/g;
-  return escaped.replace(tokenPattern, token => {
-    if (token.startsWith('//') || token.startsWith('#')) return `<span class="code-comment">${token}</span>`;
-    if (token.startsWith('"') || token.startsWith("'")) return `<span class="code-string">${token}</span>`;
-    if (/^\d/.test(token)) return `<span class="code-number">${token}</span>`;
-    return `<span class="code-keyword">${token}</span>`;
-  }) || ' ';
+  let lastIndex = 0;
+  let match;
+  while ((match = tokenPattern.exec(source)) !== null) {
+    if (match.index > lastIndex) {
+      container.appendChild(document.createTextNode(source.slice(lastIndex, match.index)));
+    }
+    const token = match[0];
+    let className = 'code-keyword';
+    if (token.startsWith('//') || token.startsWith('#')) className = 'code-comment';
+    else if (token.startsWith('"') || token.startsWith("'")) className = 'code-string';
+    else if (/^\d/.test(token)) className = 'code-number';
+    container.appendChild(create('span', { className, text: token }));
+    lastIndex = tokenPattern.lastIndex;
+  }
+  if (lastIndex < source.length) {
+    container.appendChild(document.createTextNode(source.slice(lastIndex)));
+  }
 }
 
 function sourceSyntaxCheck(source, runtimeId) {
@@ -1453,7 +1422,7 @@ function syncSourceEditorTools() {
   if (!editor) return;
   const highlight = $('#bot-source-highlight');
   if (highlight) {
-    highlight.innerHTML = highlightSourceCode(editor.value);
+    renderSourceHighlight(highlight, editor.value);
     highlight.style.transform = `translate(${-editor.scrollLeft}px, ${-editor.scrollTop}px)`;
   }
   const before = editor.value.slice(0, editor.selectionStart);
@@ -1906,7 +1875,7 @@ function renderPracticeResult(result) {
     ['Từ', result.move?.from || '—'], ['Đến', result.move?.to || '—'],
     ['Kết quả ăn quân', capturedPiece ? `${PIECE_LABELS[capturedPiece.type] || capturedPiece.type} · ${capturedPiece.id}` : 'Không ăn quân'],
     ['Ngôn ngữ', result.runtimeId === 'cpp' ? 'C++17' : 'Python 3'],
-    ['Phiên bản', revision?.revisionId ? revision.revisionId.slice(0, 12) : 'Đã chọn từ không gian mã nguồn'],
+    ['Revision', revision?.revisionId ? revision.revisionId.slice(0, 12) : 'Đã chọn từ không gian mã nguồn'],
     ['Tình huống', scenario.label],
   ];
   if (result.executionMode === 'strategy' && result.sdkVersion) entries.push(['SDK chiến thuật', result.sdkVersion]);
@@ -2359,12 +2328,10 @@ async function loadTournaments() {
     // Only competitors use the public discovery projection. Organizers must
     // load their owner-scoped list; the discovery projection intentionally
     // omits ownership fields and must never render management actions.
-    if (state.user?.role === 'competitor' && state.tournamentScope === 'discoverable') {
-      response = await request('/tournaments/discoverable');
-    } else {
-      const path = state.user?.role === 'competitor' ? '/my/tournaments' : '/tournaments';
-      response = await request(path);
-    }
+    const path = state.user?.role === 'competitor'
+      ? (state.tournamentScope === 'mine' ? '/my/tournaments' : '/tournaments/discoverable')
+      : '/tournaments';
+    response = await request(path);
     const scopedResponse = state.user?.role === 'competitor' && state.tournamentScope === 'discoverable'
       // The discovery endpoint also supports finding a running tournament
       // for live spectating, but terminal/draft tournaments do not belong in
@@ -2742,9 +2709,10 @@ function renderTournamentLifecycle(tournament) {
     item.setAttribute('aria-current', index === currentIndex ? 'step' : 'false');
     return item;
   }));
-  // The detail page refreshes while a tournament is running. Do not call
-  // scrollIntoView here: rebuilding the lifecycle must never move the user's
-  // document position while they are reading the schedule below.
+  const current = list.querySelector('.is-current');
+  if (current?.scrollIntoView && !state.detailRefreshInFlight) {
+    current.scrollIntoView({ inline: 'center', block: 'nearest' });
+  }
 }
 
 async function refreshTournamentDetail() {
@@ -3334,7 +3302,7 @@ function updateRegistrationRevisionSummary(revisionId = $('#reg-revision-select'
   if (!revision) { target.textContent = 'Chưa chọn Bot và revision'; return; }
   const language = revision.runtimeId === 'cpp' ? 'C++17' : revision.runtimeId === 'python3' ? 'Python 3' : 'Runtime không hỗ trợ';
   const mode = revision.executionMode === 'strategy' ? 'Chiến thuật' : revision.executionMode === 'raw' ? 'Mã nguồn trực tiếp' : '';
-  target.textContent = `Phiên bản bất biến: ${language}${mode ? ` · ${mode}` : ''} · ${revision.revisionId}`;
+  target.textContent = `Revision bất biến: ${language}${mode ? ` · ${mode}` : ''} · ${revision.revisionId}`;
 }
 
 const PIECE_TYPES = { dam: 'icon-piece-dam', la: 'icon-piece-la', keo: 'icon-piece-keo' };
@@ -4125,7 +4093,7 @@ function goToReplayTurn(index) {
 
   if (false) {
     const selected = $('#r-selected-move');
-  if (selected) selected.textContent = move?.pieceId ? $('#r-current-move').textContent : state.replayMoveIndex < 0 ? 'Vá»‹ trÃ­ ban Ä‘áº§u' : 'KhÃ´ng cÃ³ nÆ°á»›c Ä‘i Ä‘Æ°á»£c Ã¡p dá»¥ng';
+  if (selected) selected.textContent = move?.pieceId ? $('#r-current-move').textContent : state.replayMoveIndex < 0 ? 'Vị trí ban đầu' : 'Không có nước đi được áp dụng';
 }
 
 function setupReplayCoordinates() {
@@ -4573,17 +4541,12 @@ function renderSchedule(tournament, viewerParticipantIds = []) {
         : pairing?.matchResult?.score
           || (pairing?.matchResult?.winner === 'A' ? '1\u20130' : pairing?.matchResult?.winner === 'B' ? '0\u20131' : pairing?.matchResult?.winner === 'draw' ? '0\u20130' : '\u2014');
       const winner = card.querySelector('.schedule-card-winner');
-      if (winner) winner.textContent = `${winner.textContent.replace(/\s*[·Â·].*$/, '')} · T\u1ec9 s\u1ed1: ${score}`;
+      if (winner) winner.textContent = `${winner.textContent.replace(/\s*·.*$/, '')} · Tỷ số: ${score}`;
     });
   });
 }
 
-repairMojibakeDom();
 bindEvents();
-if (window.MutationObserver) {
-  const mojibakeObserver = new MutationObserver(() => repairMojibakeDom());
-  mojibakeObserver.observe(document.body, { childList: true, characterData: true, subtree: true, attributes: true, attributeFilter: ['aria-label', 'title', 'placeholder'] });
-}
 document.querySelectorAll('.bottom-nav [data-target]').forEach(button => bindEvent(button, 'click', () => {
   state.tournamentScope = button.dataset.target === 'my-tournaments' ? 'mine' : 'discoverable';
   navigate(button.dataset.target === 'my-tournaments' ? 'tournaments' : button.dataset.target);

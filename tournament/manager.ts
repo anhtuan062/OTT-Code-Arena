@@ -1622,7 +1622,7 @@ export async function createTournamentManager(
         !executorConfig?.dockerConfig &&
         !executorConfig?.childProcessConfig &&
         effectiveExecutionPolicy === 'development' &&
-        process.env.NODE_ENV?.trim().toLowerCase() === 'test'
+        (process.env.NODE_ENV?.trim().toLowerCase() === 'test' || process.env.NODE_ENV?.trim().toLowerCase() === 'development')
         ? 'child-process' as const
         : undefined;
       botExecutor = await createExecutor({

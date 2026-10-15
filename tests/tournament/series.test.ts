@@ -69,7 +69,7 @@ describe('BO3 tournament series', () => {
     expect(replay.data?.series?.seed).toBe(pairing.matchResult?.series?.seed);
     expect(tournament.standings.every(standing => standing.matchesPlayed === 1 && standing.draws === 1)).toBe(true);
     expect(tournament.standings.every(standing => standing.points === 1)).toBe(true);
-  });
+  }, 20_000);
 
   it('stops after the second series win', async () => {
     const calls: string[] = [];

@@ -261,4 +261,46 @@ describe('Practice view runtime behavior', () => {
     expect(notices).toContain('Đã lưu phiên bản mã nguồn.');
     expect(navigations).toContain('bots');
   });
+
+  it('opens the replay view when a completed test-match response arrives', async () => {
+    const nodes: Record<string, TestElement & { disabled?: boolean }> = {
+      '#practice-run': new TestElement('button'),
+      '#practice-output': new TestElement('section'),
+      '#practice-status': new TestElement('p'),
+    };
+    const state = {
+      practiceRevision: { botId: 'bot-1', revisionId: 'rev-1', runtimeId: 'cpp' },
+      practiceDraft: null,
+      practiceAbortController: null as { abort: () => void } | null,
+      practiceRequestToken: 0,
+    };
+    const replayCalls: Array<{ result: Record<string, unknown>; revision: unknown }> = [];
+    const result = {
+      status: 'completed', winner: 'B', terminationReason: 'goal_reached',
+      opponentName: 'Bot hệ thống', moves: [{ turn: 1 }],
+      initialState: { boardSize: 9, pieces: [] },
+    };
+    const functions = await actualFunctions(['testBotMatch'], {
+      state,
+      AbortController: class {
+        abort() {}
+      },
+      $: (selector: string) => nodes[selector],
+      clearPracticeResult: () => {},
+      request: async () => result,
+      openPracticeReplayPage: (response: Record<string, unknown>, revision: unknown) => {
+        replayCalls.push({ result: response, revision });
+        nodes['#practice-status'].textContent = 'Đã chuyển sang replay';
+      },
+    });
+
+    await functions.testBotMatch();
+
+    expect(replayCalls).toHaveLength(1);
+    expect(replayCalls[0].result).toBe(result);
+    expect(replayCalls[0].revision).toBe(state.practiceRevision);
+    expect(nodes['#practice-status'].textContent).not.toBe('Đang chạy trận thử với Bot hệ thống…');
+    expect(nodes['#practice-run'].disabled).toBe(false);
+    expect(nodes['#practice-run'].textContent).toBe('Chạy thử');
+  });
 });

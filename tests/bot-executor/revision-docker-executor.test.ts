@@ -240,7 +240,7 @@ describe('source revision Docker adapter contracts', () => {
   });
 
   it('executes a pinned strategy revision through the SDK wrapper path', async () => {
-    const workingDirBase = await fs.mkdtemp(`${os.tmpdir()}\\ott-sdk-test-`);
+    const workingDirBase = await fs.mkdtemp(path.join(os.tmpdir(), 'ott-sdk-test-'));
     try {
       const sdk = await getStrategySdkIdentity('cpp');
       const source = 'Move chooseMove(const GameState&, const std::vector<Move>& moves) { return moves.front(); }';

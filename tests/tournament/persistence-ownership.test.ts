@@ -47,10 +47,12 @@ describe('Tournament storage ownership', () => {
     directory = await fs.mkdtemp(path.join(os.tmpdir(), 'ott-owner-process-'));
     const script = [
       "import { FileTournamentRepository } from './tournament/persistence.ts';",
-      "const repository = new FileTournamentRepository({ baseDir: process.env.OWNER_DIR });",
-      "await repository.initialize();",
-      "console.log('owned');",
-      "setInterval(() => {}, 1000);",
+      "(async () => {",
+      "  (globalThis as any).repository = new FileTournamentRepository({ baseDir: process.env.OWNER_DIR });",
+      "  await (globalThis as any).repository.initialize();",
+      "  console.log('owned');",
+      "  setInterval(() => {}, 1000);",
+      "})();",
     ].join('\n');
     child = spawn(process.execPath, [tsxCli, '-e', script], {
       cwd: path.resolve('.'),

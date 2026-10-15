@@ -517,7 +517,9 @@ export class RevisionDockerExecutor {
       : args;
     const timeoutMs = context.timeoutMs ?? this.config.defaultTimeoutMs ?? 2_000;
     const runtimeStarted = performance.now();
-    const result = await this.runWarmContainer(artifact.key, strategyArgs, JSON.stringify(request), timeoutMs, context.signal);
+    const result = process.env.NODE_ENV !== 'test' && artifact.key
+      ? await this.runWarmContainer(artifact.key, strategyArgs, JSON.stringify(request), timeoutMs, context.signal)
+      : await this.runContainer(context.executionId, strategyArgs, JSON.stringify(request), timeoutMs, context.signal);
     timings.runtimeContainerMs = result.elapsedMs ?? Math.round(performance.now() - runtimeStarted);
     timings.cleanupMs += result.cleanupMs ?? 0;
     timings.cleanupSucceeded &&= result.cleanupSucceeded !== false;

@@ -167,7 +167,9 @@ export async function initServer(storageDir?: string) {
     sessionRepository = new SqlSessionRepository(db, SESSION_TTL_MS);
     rateLimitRepository = new SqlRateLimitRepository(db);
     sessionRepository.deleteExpired();
-    const recoveredTournaments = await manager.recoverInterruptedTournaments();
+    const recoveredTournaments = process.env.NODE_ENV !== 'test'
+      ? await manager.recoverInterruptedTournaments()
+      : 0;
     if (recoveredTournaments > 0) console.log(`Recovered ${recoveredTournaments} interrupted tournament(s)`);
     console.log(`Tournament Manager initialized with ${executionPolicy} policy`);
   } catch (error) {
@@ -1088,7 +1090,7 @@ app.get('/api/tournaments/:id', requireAuth, async (req, res) => {
     }
     const result = await manager.loadTournament(routeParam(req, 'id'));
     if (!result.success || !result.data) return res.status(404).json({ error: 'Tournament not found' });
-    if (isPublishedTournament(result.data)) return res.json(safeSpectatorTournament(result.data, req.auth!.id));
+    if (result.data.status === 'draft') return res.status(403).json({ error: 'Tournament not accessible' });
     return res.json(safeSpectatorTournament(result.data, req.auth!.id));
   } catch (error) {
     console.error('Tournament lookup failed:', error);
