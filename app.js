@@ -1068,6 +1068,10 @@ async function loadDashboard() {
     $('#dash-tourney-count').textContent = competitor ? participatingCount : tournaments.length;
     if (competitor) {
       $('#dash-bot-count').textContent = bots.length;
+      const navBotsBadge = $('#nav-badge-bots');
+      if (navBotsBadge) { navBotsBadge.textContent = bots.length; navBotsBadge.hidden = !bots.length; }
+      const navTourneysBadge = $('#nav-badge-tourneys');
+      if (navTourneysBadge) { navTourneysBadge.textContent = openCount; navTourneysBadge.hidden = !openCount; }
       const recordRate = $('#dash-record-rate');
       const recordMatches = $('#dash-record-matches');
       const totalMatches = Number(botStats?.totalMatches) || 0;
@@ -1200,12 +1204,31 @@ function renderDashboardBotList(bots) {
     const item = create('button', { className: 'dashboard-bot-item', type: 'button', attrs: { 'aria-label': `Xem Bot ${bot.name}` } });
     const botIcon = icon('icon-bot'); botIcon.classList.add('dashboard-bot-item-icon');
     const copy = create('span', { className: 'dashboard-bot-copy' });
-    copy.append(create('strong', { text: bot.name }), create('small', { text: bot.currentRevisionId ? 'Đã có phiên bản mã nguồn' : 'Chưa có phiên bản mã nguồn' }));
-    const arrow = icon('icon-chevron-down'); arrow.classList.add('dashboard-bot-arrow');
+    const nameStrong = create('strong', { text: bot.name });
+    const runtime = bot.selectedRevision?.runtimeId || (bot.command === 'python3' ? 'python3' : 'cpp');
+    const badge = create('span', {
+      className: `dashboard-bot-badge ${runtime === 'python3' ? 'badge-python' : 'badge-cpp'}`,
+      text: runtime === 'python3' ? 'Python' : 'C++17',
+    });
+    nameStrong.appendChild(badge);
+    copy.append(nameStrong, create('small', { text: bot.currentRevisionId ? 'Đã có phiên bản mã nguồn' : 'Chưa có phiên bản mã nguồn' }));
+    const arrow = icon('icon-arrow-right'); arrow.classList.add('dashboard-bot-arrow');
     item.append(botIcon, copy, arrow);
     item.addEventListener('click', () => openBotWorkspace(bot));
     list.appendChild(item);
   });
+  if (bots.length < 6) {
+    const addItem = create('button', { className: 'dashboard-bot-item dashboard-bot-item-add', type: 'button', attrs: { 'aria-label': 'Tạo Bot mới' } });
+    const plusIcon = icon('icon-plus'); plusIcon.classList.add('dashboard-bot-item-icon');
+    const addCopy = create('span', { className: 'dashboard-bot-copy' });
+    addCopy.append(create('strong', { text: '+ Tạo Bot mới' }), create('small', { text: 'Thêm chiến thuật thi đấu' }));
+    addItem.append(plusIcon, addCopy);
+    addItem.addEventListener('click', () => {
+      openModal('create-bot-modal');
+      const input = $('#bot-name'); if (input) { input.value = ''; input.focus(); }
+    });
+    list.appendChild(addItem);
+  }
 }
 
 async function loadBots() {
@@ -4379,7 +4402,7 @@ function bindEvents() {
       document.querySelectorAll('.modal-overlay.open').forEach(modal => closeModal(modal.id));
       closeMobileNavigation();
     }
-    else if (state.activeView === 'replay-view' && (!(event.target instanceof Element) || !event.target.closest('input, textarea, select, button'))) {
+    else if (state.activeView === 'replay-view' && (!(event.target instanceof Element) || !event.target.closest('input:not(#replay-scrubber), textarea, select'))) {
       if (event.key === ' ') { event.preventDefault(); toggleReplayPlayback(); }
       else if (event.key === 'ArrowLeft') { event.preventDefault(); stopReplayPlayback(); goToReplayTurn(state.replayMoveIndex - 1); }
       else if (event.key === 'ArrowRight') { event.preventDefault(); stopReplayPlayback(); goToReplayTurn(state.replayMoveIndex + 1); }
