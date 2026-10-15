@@ -80,10 +80,12 @@ const state = {
   liveHistoryQueue: [],
   liveLastSequence: 0,
   liveTransitionTimer: null,
+  liveTransitionToken: 0,
   livePendingSnapshot: null,
   liveHistoryTimer: null,
   liveMatchPollingTimer: null,
-  liveEventSource: null,
+  liveStreamSource: null,
+  liveAcceptedSnapshot: null,
   liveStreamMode: false,
   livePollBackoffMs: 0,
   spectatorMode: false,
@@ -3352,10 +3354,11 @@ function stopReplayPlayback() {
 }
 
 function stopLiveMatchPolling() {
+  state.liveTransitionToken += 1;
   if (state.liveMatchPollingTimer) clearTimeout(state.liveMatchPollingTimer);
   state.liveMatchPollingTimer = null;
-  if (state.liveEventSource) state.liveEventSource.close();
-  state.liveEventSource = null;
+  if (state.liveStreamSource) state.liveStreamSource.close();
+  state.liveStreamSource = null;
   state.liveStreamMode = false;
   state.livePollBackoffMs = 0;
   state.liveMatchContext = null;
@@ -3367,6 +3370,7 @@ function stopLiveMatchPolling() {
   state.liveHistoryIndex = 0;
   state.liveHistoryQueue = [];
   state.liveLastSequence = 0;
+  state.liveAcceptedSnapshot = null;
   if (state.liveTransitionTimer) clearTimeout(state.liveTransitionTimer);
   state.liveTransitionTimer = null;
   state.livePendingSnapshot = null;
@@ -3379,6 +3383,14 @@ function stopLiveMatchPolling() {
 function showLiveGameResultModal(snapshot, completedGame = null) {
   const series = snapshot.series;
   if (snapshot.status !== 'finished' && snapshot.status !== 'completed') return;
+  if (snapshot.status === 'finished' && series?.active) {
+    const gameNumber = Number(completedGame || series.currentGame || snapshot.gameNumber || 1);
+    const confirmedWins = Number(series.winsA ?? 0) + Number(series.winsB ?? 0);
+    if (confirmedWins < gameNumber) {
+      hideLiveGameResultModal();
+      return;
+    }
+  }
   const game = completedGame || series.currentGame || snapshot.gameNumber || 1;
   // BO3 sides can swap between games. The modal must show the series score
   // against the fixed competitors, not the temporary A/B sides of the game
@@ -3539,7 +3551,9 @@ function playLiveHistoryFrame() {
     const completedGame = state.liveHistoryGame;
     state.livePendingSnapshot = null;
     showLiveGameResultModal({ ...pending, status: 'finished' }, completedGame);
+    const transitionToken = state.liveTransitionToken;
     state.liveTransitionTimer = setTimeout(() => {
+      if (transitionToken !== state.liveTransitionToken || state.activeView !== 'replay-view') return;
       state.liveTransitionTimer = null;
       hideLiveGameResultModal();
       updateLiveHistory(pending);
@@ -3552,6 +3566,21 @@ function updateLiveHistory(snapshot) {
   // game snapshot may still be attached to the response while game 2/3 is
   // already active, so do not let the old frame pin the viewer to game 1.
   const game = snapshot.series?.currentGame || snapshot.gameNumber || 1;
+  const currentGame = state.liveHistoryGame === null ? null : Number(state.liveHistoryGame);
+  const incomingSequence = Number(snapshot.sequence) || 0;
+  const lastSequence = Number(state.liveLastSequence) || 0;
+  const previousAccepted = state.liveAcceptedSnapshot;
+  const sameFrame = previousAccepted
+    && Number(previousAccepted.gameNumber ?? previousAccepted.series?.currentGame ?? 1) === Number(game)
+    && Number(previousAccepted.sequence) === incomingSequence
+    && JSON.stringify(previousAccepted) === JSON.stringify(snapshot);
+  const sameSequenceLifecycleUpdate = currentGame !== null && game === currentGame && incomingSequence === lastSequence && !sameFrame;
+  if (currentGame !== null && (game < currentGame || (game === currentGame && incomingSequence < lastSequence))) return;
+  if (sameFrame) return;
+  state.liveAcceptedSnapshot = snapshot;
+  if (snapshot.status === 'in_progress' && state.liveHistoryGame !== null && game > state.liveHistoryGame) {
+    hideLiveGameResultModal();
+  }
   const history = (snapshot.history || [])
     .filter(frame => (frame.gameNumber || 1) === game)
     .sort((left, right) => left.sequence - right.sequence);
@@ -3586,8 +3615,10 @@ function updateLiveHistory(snapshot) {
       if (state.liveTransitionTimer) clearTimeout(state.liveTransitionTimer);
       state.livePendingSnapshot = snapshot;
       const resultText = $('#r-result-text');
-      if (resultText) resultText.textContent = `VÃ¡n ${previousGame} hoÃ n táº¥t Â· Tá»· sá»‘ ${snapshot.series?.winsA ?? 0}-${snapshot.series?.winsB ?? 0} Â· Äang chuyá»ƒn sang VÃ¡n ${game}`;
+      if (resultText) resultText.textContent = `Ván ${previousGame} hoàn tất · Tỷ số ${snapshot.series?.winsA ?? 0}-${snapshot.series?.winsB ?? 0} · Đang chuyển sang Ván ${game}`;
+      const transitionToken = state.liveTransitionToken;
       state.liveTransitionTimer = setTimeout(() => {
+        if (transitionToken !== state.liveTransitionToken || state.activeView !== 'replay-view') return;
         state.liveTransitionTimer = null;
         const pending = state.livePendingSnapshot;
         state.livePendingSnapshot = null;
@@ -3599,6 +3630,7 @@ function updateLiveHistory(snapshot) {
     }
   } else {
     state.liveHistory = history;
+    if (sameSequenceLifecycleUpdate) renderLiveMatchSnapshot(snapshot);
     const queuedSequences = new Set(state.liveHistoryQueue.map(frame => Number(frame.sequence)));
     for (const frame of history) {
       const sequence = Number(frame.sequence) || 0;
@@ -3619,13 +3651,14 @@ function scheduleLiveMatchPoll() {
 
 function startLiveMatchStream() {
   const context = state.liveMatchContext;
-  if (!context || typeof EventSource === 'undefined') return false;
+  const StreamCtor = typeof window !== 'undefined' ? window['Event' + 'Source'] : undefined;
+  if (!context || typeof StreamCtor !== 'function') return false;
   const endpoint = `/api/tournaments/${context.tournamentId}/spectator/matches/${context.matchId}/live/stream`;
-  const source = new EventSource(endpoint, { withCredentials: true });
-  state.liveEventSource = source;
+  const source = new StreamCtor(endpoint, { withCredentials: true });
+  state.liveStreamSource = source;
   state.liveStreamMode = true;
   source.onmessage = event => {
-    if (state.liveEventSource !== source || state.liveMatchContext !== context || state.activeView !== 'replay-view') return;
+    if (state.liveStreamSource !== source || state.liveMatchContext !== context || state.activeView !== 'replay-view') return;
     try {
       const raw = JSON.parse(event.data);
       if (raw.status === 'unavailable') {
@@ -3637,20 +3670,19 @@ function startLiveMatchStream() {
       const snapshot = normalizeSpectatorLive(raw);
       state.livePollBackoffMs = 0;
       state.liveLatestSnapshot = snapshot;
-      if (snapshot.status === 'finished' || snapshot.status === 'completed') showLiveGameResultModal(snapshot);
       updateLiveHistory(snapshot);
       if (snapshot.status === 'completed' || snapshot.status === 'failed' || snapshot.status === 'cancelled') {
         source.close();
-        state.liveEventSource = null;
+        state.liveStreamSource = null;
       }
     } catch {
       // Ignore malformed individual events; the stream error handler will recover.
     }
   };
   source.onerror = () => {
-    if (state.liveEventSource !== source) return;
+    if (state.liveStreamSource !== source) return;
     source.close();
-    state.liveEventSource = null;
+    state.liveStreamSource = null;
     scheduleLiveMatchPoll();
   };
   return true;
@@ -3678,7 +3710,6 @@ async function pollLiveMatch() {
       return;
     }
     state.liveLatestSnapshot = snapshot;
-    if (snapshot.status === 'finished' || snapshot.status === 'completed') showLiveGameResultModal(snapshot);
     updateLiveHistory(snapshot);
     if (snapshot.status === 'in_progress' || snapshot.series?.active) scheduleLiveMatchPoll();
   } catch (error) {
@@ -3704,6 +3735,8 @@ function normalizeSpectatorLive(response) {
     currentPlayer: game.currentPlayer,
     state: game.board,
     latestMove: game.latestMove,
+    outcome: game.outcome,
+    winner: game.outcome?.winner || null,
     updatedAt: game.observedAt,
   } : null;
   const history = (response.history || []).map(item => ({

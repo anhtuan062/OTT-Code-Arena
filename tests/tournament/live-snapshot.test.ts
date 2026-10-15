@@ -34,6 +34,17 @@ describe('BO3 live snapshot ordering', () => {
     expect(manager.getLiveMatchHistory('tournament-1', 'series-1')).toHaveLength(1);
   });
 
+  it('replaces an equal-order frame when lifecycle data changes', () => {
+    const manager = new TournamentManager({ repository: {} as never, executor: {} as never });
+    const publish = (manager as unknown as { publishLiveSnapshot: (tournamentId: string, value: LiveMatchSnapshot) => void }).publishLiveSnapshot.bind(manager);
+    const frame = snapshot(1, 8);
+    publish('tournament-1', frame);
+    publish('tournament-1', { ...frame, status: 'finished', state: { ...frame.state, winner: 'A' } });
+
+    expect(manager.getLiveMatchSnapshot('tournament-1', 'series-1')).toMatchObject({ sequence: 8, status: 'finished' });
+    expect(manager.getLiveMatchHistory('tournament-1', 'series-1')).toHaveLength(1);
+  });
+
   it('maps the live A/B labels to the actual sides for every game', () => {
     let seed = 0;
     let gameOne: ReturnType<typeof getSeriesSides> | undefined;
