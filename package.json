@@ -15,7 +15,7 @@
     "test:coverage": "vitest run --coverage",
     "lint": "eslint . --ext .ts",
     "predev": "node scripts/build-html.js",
-    "dev": "tsx watch server/index.ts",
+    "dev": "tsx watch --import ./scripts/dev-env.mjs server/index.ts",
     "dev:qa": "node scripts/build-html.js && tsx scripts/start-qa-server.ts",
     "engine:test": "vitest run tests/engine"
   },
