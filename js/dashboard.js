@@ -19,6 +19,12 @@ async function loadDashboard() {
   void refreshQueueStats();
   try {
     const competitor = state.user?.role === 'competitor';
+    $('#dashboard-role-label').textContent = competitor ? 'PLAYER WORKSPACE / NGƯỜI CHƠI' : 'ORGANIZER WORKSPACE / NGƯỜI TỔ CHỨC';
+    $('#dashboard-role-title').textContent = competitor ? 'Code tốt hơn. Tiến xa hơn.' : 'Mọi giải đấu. Trong tầm tay.';
+    $('#dashboard-next-title').textContent = competitor ? 'Đưa chiến thuật của bạn vào cuộc chơi' : 'Sẵn sàng cho giải đấu tiếp theo?';
+    $('#dashboard-next-copy').textContent = competitor ? 'Tạo Bot, kiểm thử chiến thuật và chinh phục đấu trường.' : 'Thiết lập thể thức, nhận đăng ký và điều phối các trận đấu.';
+    $('#dashboard-primary-label').textContent = competitor ? 'Tạo Bot mới' : 'Tạo giải đấu';
+    $('#dashboard-secondary-action').textContent = competitor ? 'Khám phá giải đấu' : 'Vận hành hệ thống';
     const dashboard = $('#dashboard');
     dashboard?.classList.toggle('player-dashboard', competitor);
     dashboard?.classList.toggle('organizer-dashboard', !competitor);

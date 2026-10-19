@@ -82,6 +82,17 @@ function bindEvents() {
   on('#open-bot-modal', 'click', () => openBotWorkspace()); on('#open-tournament-modal', 'click', openTournamentDialog);
   on('#dashboard-open-tournaments', 'click', () => { state.tournamentScope = state.user?.role === 'organizer' ? 'managed' : 'discoverable'; navigate('tournaments'); });
   on('#dashboard-open-bots', 'click', () => navigate('bots'));
+  on('#dashboard-primary-action', 'click', () => {
+    if (state.user?.role === 'competitor') openBotWorkspace();
+    else if (state.user?.role === 'organizer') openTournamentDialog();
+  });
+  on('#dashboard-secondary-action', 'click', () => {
+    if (state.user?.role === 'organizer') navigate('operations');
+    else if (state.user?.role === 'competitor') {
+      state.tournamentScope = 'discoverable';
+      navigate('tournaments');
+    }
+  });
   on('#dash-empty-tournament', 'click', openTournamentDialog);
   on('#bot-workspace-picker', 'change', event => {
     const bot = state.bots.find(item => item.id === event.target.value);

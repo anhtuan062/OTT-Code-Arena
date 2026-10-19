@@ -1,0 +1,117 @@
+body[data-role] {
+  --color-page: #f4f6fa;
+  --color-text-primary: #172439;
+  --color-text-secondary: #617086;
+  --color-text-muted: #69788b;
+  --color-border: #e1e7ef;
+  --color-brand: #087f75;
+  --color-brand-hover: #06665e;
+  --color-surface-subtle: #eaf6f3;
+  --workspace-accent: #087f75;
+  --workspace-soft: #eaf6f3;
+  background: var(--color-page);
+  color: var(--color-text-primary);
+}
+body[data-role="organizer"] {
+  --color-brand: #315ac8;
+  --color-brand-hover: #2649a8;
+  --color-surface-subtle: #edf2ff;
+  --workspace-accent: #315ac8;
+  --workspace-soft: #edf2ff;
+}
+body[data-role] .app-sidebar {
+  background: #111e32;
+  border-right: 1px solid #223149;
+  padding: 28px 16px 22px;
+}
+body[data-role] .sidebar-brand { border-bottom: 1px solid #2b394e; padding-bottom: 28px; }
+body[data-role] .sidebar-brand strong { color: #f4f7fc; font-size: 15px; letter-spacing: -.4px; }
+body[data-role] .sidebar-brand small { color: #9aaec5; font-size: 9px; letter-spacing: 1.5px; }
+body[data-role] .brand-symbol { background: #243850; color: #c1d8ef; border: 1px solid #344b65; border-radius: 10px; }
+body[data-role] .nav-links { margin-top: 26px; gap: 8px; }
+body[data-role] .nav-links::before { content: 'KHÔNG GIAN THI ĐẤU'; color: #8fa4be; font-size: 9px; letter-spacing: 1.6px; padding: 0 12px 12px; font-weight: 600; }
+body[data-role="organizer"] .nav-links::before { content: 'KHÔNG GIAN QUẢN LÝ'; }
+body[data-role] .nav-link { min-height: 46px; padding: 12px; gap: 12px; border-radius: 8px; color: #b8c8dc; font-size: 12px; font-weight: 500; border: 1px solid transparent; }
+body[data-role] .nav-link svg { color: inherit; width: 18px; height: 18px; }
+body[data-role] .nav-link:hover { background: #1e3049; color: #fff; }
+body[data-role] .nav-link.active { background: #24443f; color: #d4fff1; border-color: #355e55; box-shadow: none; }
+body[data-role="organizer"] .nav-link.active { background: #263c67; color: #e2eaff; border-color: #3c5480; }
+body[data-role] .nav-badge { color: #eef6ff; background: #344963; margin-left: auto; }
+body[data-role] .sidebar-footer { display: block; margin-top: auto; padding: 18px 12px 0; border-top: 1px solid #2b394e; color: #9aaec5; font-size: 11px; line-height: 1.8; }
+body[data-role] .app-topbar { background: #fff; border-bottom: 1px solid var(--color-border); box-shadow: none; }
+body[data-role] #topbar-breadcrumb { color: #617086; font-size: 12px; font-weight: 500; }
+body[data-role] .user-avatar { background: var(--workspace-soft); color: var(--workspace-accent); border: 1px solid var(--color-border); border-radius: 10px; }
+body[data-role] #current-user-role { color: var(--workspace-accent); font-size: 10px; font-weight: 600; }
+body[data-role] .logout-button { color: #617086; border-color: #e1e7ef; background: #fff; }
+body[data-role] .page:not(#auth-screen) { color: var(--color-text-primary); }
+body[data-role] .primary-btn { background: var(--workspace-accent); border-color: var(--workspace-accent); color: #fff; box-shadow: none; border-radius: 8px; }
+body[data-role] .primary-btn:hover { background: var(--color-brand-hover); }
+body[data-role] .secondary-btn { border-radius: 8px; }
+body[data-role] :is(button, a, input, select, textarea):focus-visible { outline: 3px solid var(--workspace-accent); outline-offset: 3px; }
+body[data-role] #dashboard.dashboard-page .dashboard-welcome { padding: 0 0 24px; min-height: 0; background: none; border: 0; border-radius: 0; box-shadow: none; }
+body[data-role] #dashboard.dashboard-page .dashboard-welcome-art { display: none; }
+body[data-role] #dashboard.dashboard-page .dashboard-welcome-content { max-width: none; }
+.workspace-eyebrow { display: block; color: var(--workspace-accent); font-size: 10px; font-weight: 700; letter-spacing: 1.8px; margin-bottom: 12px; }
+#dashboard-role-title { color: #172439; font-size: clamp(25px, 2.5vw, 36px); font-weight: 700; line-height: 1.3; letter-spacing: -1.2px; margin: 0 0 12px; }
+body[data-role] #dashboard.dashboard-page .dashboard-welcome-content #dashboard-welcome-copy { color: #617086; font-size: 12px; line-height: 1.9; margin: 0; }
+body[data-role] #dashboard.dashboard-page .welcome-greeting, body[data-role] #dashboard.dashboard-page .welcome-user { font-size: inherit; color: inherit; display: inline; }
+body[data-role] #dashboard.dashboard-page .welcome-user { margin-right: 8px; }
+body[data-role] #dashboard.dashboard-page .welcome-message { display: inline; margin: 0; font-size: inherit; color: inherit; }
+.workspace-actions { display: flex; align-items: center; justify-content: space-between; gap: 24px; background: var(--workspace-soft); border: 1px solid var(--color-border); border-left: 3px solid var(--workspace-accent); border-radius: 10px; padding: 22px 24px; margin-bottom: 24px; }
+.workspace-action-label { color: var(--workspace-accent); font-weight: 700; font-size: 9px; letter-spacing: 1.4px; }
+.workspace-actions h2 { font-size: 15px; font-weight: 600; margin: 7px 0; color: #172439; }
+.workspace-actions p { font-size: 11px; line-height: 1.8; color: #617086; margin: 0; }
+.workspace-action-buttons { display: flex; gap: 10px; flex-shrink: 0; }
+.workspace-action-buttons button { min-height: 40px; font-size: 11px; white-space: nowrap; }
+body[data-role] #dashboard.dashboard-page .summary-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; margin-bottom: 30px; }
+body[data-role="organizer"] #dashboard.dashboard-page .summary-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+body[data-role] #dashboard.dashboard-page .summary-card { min-height: 126px; background: #fff; border: 1px solid var(--color-border); border-radius: 10px; padding: 20px; box-shadow: 0 2px 3px #17243903; }
+body[data-role] #dashboard.dashboard-page .summary-card-main { align-items: flex-start; gap: 14px; }
+body[data-role] #dashboard.dashboard-page .summary-card-visual { background: var(--workspace-soft); color: var(--workspace-accent); width: 36px; height: 36px; border-radius: 9px; flex-shrink: 0; }
+body[data-role] #dashboard.dashboard-page .summary-card strong { color: #172439; font-size: 28px; letter-spacing: -.8px; font-weight: 600; line-height: 1.1; }
+body[data-role] #dashboard.dashboard-page .summary-card p { color: #43516a; font-size: 11px; margin-top: 8px; }
+body[data-role] #dashboard.dashboard-page .summary-card-detail { color: #69788b; font-size: 10px; line-height: 1.7; }
+body[data-role] #dashboard.dashboard-page .summary-card-chevron { display: none; }
+body[data-role] #dashboard.dashboard-page .dashboard-section { background: #fff; border: 1px solid var(--color-border); border-radius: 12px; padding: 24px; margin-top: 24px; box-shadow: none; }
+body[data-role] #dashboard.dashboard-page .dashboard-section-title { color: #172439; gap: 10px; }
+body[data-role] #dashboard.dashboard-page .dashboard-section-title h3 { font-size: 15px; font-weight: 600; }
+body[data-role] #dashboard.dashboard-page .dashboard-section-title svg { color: var(--workspace-accent); }
+body[data-role] .section-description { color: #69788b; font-size: 11px; margin-top: 6px; }
+body[data-role] #dashboard.dashboard-page .dashboard-section-link, body[data-role] .text-button { color: var(--workspace-accent); font-size: 11px; }
+body[data-role] #dashboard.dashboard-page .dashboard-list-toolbar { background: #f8fafc; border: 1px solid var(--color-border); border-radius: 8px; padding: 12px; margin: 18px 0; }
+body[data-role] .data-table th { background: #f8fafc; color: #69788b; font-size: 10px; font-weight: 600; letter-spacing: .3px; border-bottom-color: var(--color-border); }
+body[data-role] .data-table td { border-bottom-color: #edf1f6; font-size: 12px; }
+body[data-role] .data-table tbody tr:hover { background: #f8fafc; }
+body[data-role] .recent-tournaments-card { border: 1px solid var(--color-border); border-radius: 8px; box-shadow: none; overflow-x: auto; }
+body[data-role] #dashboard.dashboard-page .dashboard-empty { border: 1px dashed #d8e0ea; background: #fafbfd; padding: 32px 20px; border-radius: 10px; }
+body[data-role] #dashboard.dashboard-page .dashboard-empty-icon-wrap { background: var(--workspace-soft); color: var(--workspace-accent); }
+body[data-role] #dashboard.dashboard-page .dashboard-empty h3 { color: #172439; font-size: 15px; }
+body[data-role] #dashboard.dashboard-page .dashboard-empty p { color: #69788b; font-size: 12px; }
+body[data-role] #dashboard.dashboard-page .dashboard-bot-list { gap: 14px; }
+body[data-role] :is(.bot-card, .tournament-card) { border-color: var(--color-border); border-radius: 12px; box-shadow: 0 2px 4px #17243904; }
+body[data-role] [hidden] { display: none !important; }
+/* Override legacy ID-scoped accents and entrance animations in dashboard.css. */
+body[data-role] #dashboard.dashboard-page .dashboard-welcome::before,
+body[data-role] #dashboard.dashboard-page .dashboard-welcome::after { display: none; }
+body[data-role] #dashboard.dashboard-page .summary-card-visual { background: var(--workspace-soft) !important; color: var(--workspace-accent) !important; flex-basis: 36px; }
+body[data-role] #dashboard.dashboard-page .summary-card-detail { white-space: normal; color: #69788b !important; }
+body[data-role] #dashboard.dashboard-page.active :is(.dashboard-welcome, .summary-card, .dashboard-section) { animation: none; opacity: 1; transform: none; }
+@media (max-width: 1150px) {
+  .workspace-actions { align-items: flex-start; flex-direction: column; gap: 16px; }
+  body[data-role="organizer"] #dashboard.dashboard-page .summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 640px) {
+  .workspace-eyebrow { font-size: 9px; letter-spacing: 1px; }
+  #dashboard-role-title { letter-spacing: -.7px; }
+  .workspace-actions { padding: 18px; }
+  .workspace-action-buttons { width: 100%; flex-wrap: wrap; }
+  .workspace-action-buttons button { flex: 1; }
+  body[data-role] #dashboard.dashboard-page .summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+  body[data-role] #dashboard.dashboard-page .summary-card { padding: 14px; min-height: 130px; }
+  body[data-role] #dashboard.dashboard-page .summary-card-main { flex-direction: column; gap: 10px; }
+  body[data-role] #dashboard.dashboard-page .summary-card strong { font-size: 24px; }
+  body[data-role] #dashboard.dashboard-page .dashboard-section { padding: 16px; }
+  body[data-role] .app-topbar { padding-left: 16px; padding-right: 16px; }
+  body[data-role] #topbar-breadcrumb { font-size: 10px; }
+  body[data-role] .section-header { flex-wrap: wrap; gap: 12px; }
+}

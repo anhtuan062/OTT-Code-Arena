@@ -2,6 +2,8 @@
   <div id="dashboard" class="page dashboard-page">
     <section class="dashboard-welcome">
       <div class="dashboard-welcome-content">
+        <span class="workspace-eyebrow" id="dashboard-role-label">KHÔNG GIAN LÀM VIỆC</span>
+        <h1 id="dashboard-role-title">Sẵn sàng cho bước tiếp theo.</h1>
         <p class="welcome-copy" id="dashboard-welcome-copy">Chào mừng trở lại, <span id="dashboard-username">admin</span>. Theo dõi và quản lý các giải đấu của bạn.</p>
       </div>
       <div class="dashboard-welcome-art" aria-hidden="true">
@@ -20,6 +22,13 @@
       </div>
     </section>
 
+    <section class="workspace-actions" aria-label="Thao tác nhanh">
+      <div><span class="workspace-action-label">BƯỚC TIẾP THEO</span><h2 id="dashboard-next-title">Bắt đầu từ đây</h2><p id="dashboard-next-copy">Chọn thao tác để tiếp tục.</p></div>
+      <div class="workspace-action-buttons">
+        <button class="secondary-btn" id="dashboard-secondary-action" type="button">Khám phá giải đấu</button>
+        <button class="primary-btn" id="dashboard-primary-action" type="button"><svg class="ui-icon" aria-hidden="true"><use href="#icon-plus"></use></svg><span id="dashboard-primary-label">Tạo mới</span></button>
+      </div>
+    </section>
     <section class="summary-grid" aria-label="Tóm tắt không gian làm việc">
       <article class="summary-card" id="dash-bot-card">
         <div class="summary-card-main">
