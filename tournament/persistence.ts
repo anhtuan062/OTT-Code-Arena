@@ -23,6 +23,8 @@ import {
 } from './types.js';
 import type { MatchReplay } from '@match-runner/types.js';
 import { StorageOwnership } from './ownership.js';
+import { applicationMetrics } from '../observability/metrics.js';
+import { performance } from 'node:perf_hooks';
 
 export interface TournamentRepository {
   save(tournament: Tournament): Promise<void>;
@@ -62,7 +64,7 @@ export class FileTournamentRepository implements TournamentRepository {
 
   constructor(config: TournamentStorageConfig) {
     this.baseDir = path.resolve(config.baseDir);
-    this.indent = config.indent ?? 2;
+    this.indent = config.indent ?? 0;
     this.ownership = new StorageOwnership(this.baseDir);
   }
 
@@ -143,7 +145,12 @@ export class FileTournamentRepository implements TournamentRepository {
 
   async save(tournament: Tournament): Promise<void> {
     this.assertSafeId(tournament.tournamentId, 'tournament');
-    await this.withWriteLock(`tournament:${tournament.tournamentId}`, () => this.saveUnlocked(tournament));
+    const startedAt = performance.now();
+    try {
+      await this.withWriteLock(`tournament:${tournament.tournamentId}`, () => this.saveUnlocked(tournament));
+    } finally {
+      applicationMetrics.observe('persistence.write_ms', performance.now() - startedAt);
+    }
   }
 
   private async saveUnlocked(tournament: Tournament): Promise<void> {
@@ -200,30 +207,44 @@ export class FileTournamentRepository implements TournamentRepository {
   }
 
   async load(tournamentId: string): Promise<Tournament | null> {
+    const startedAt = performance.now();
     const file = this.getTournamentFile(tournamentId);
     try {
       const data = await fs.readFile(file, 'utf-8');
       return JSON.parse(data) as Tournament;
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-        const dir = this.getTournamentDir(tournamentId);
-        let entries: string[];
-        try {
-          entries = await fs.readdir(dir);
-        } catch (directoryError) {
-          if ((directoryError as NodeJS.ErrnoException).code === 'ENOENT') return null;
-          throw directoryError;
-        }
-        const backups = entries.filter(entry => /^tournament\.json(?:\..+)?\.bak$/.test(entry));
-        if (backups.length === 0) return null;
-        if (backups.length > 1) {
-          throw new Error(`Ambiguous tournament recovery for ${tournamentId}: multiple backup files exist`);
-        }
-        await this.ensureOwnership();
-        await fs.rename(path.join(dir, backups[0]!), file);
-        return JSON.parse(await fs.readFile(file, 'utf-8')) as Tournament;
+        // A writer briefly removes tournament.json while moving it to its
+        // recovery backup on Windows. Recovery must join the same per-
+        // tournament lock; otherwise a reader can steal that backup and race
+        // the writer's temp-file rename, producing EPERM and/or lost state.
+        return this.withWriteLock(`tournament:${tournamentId}`, async () => {
+          try {
+            return JSON.parse(await fs.readFile(file, 'utf-8')) as Tournament;
+          } catch (retryError) {
+            if ((retryError as NodeJS.ErrnoException).code !== 'ENOENT') throw retryError;
+          }
+
+          const dir = this.getTournamentDir(tournamentId);
+          let entries: string[];
+          try {
+            entries = await fs.readdir(dir);
+          } catch (directoryError) {
+            if ((directoryError as NodeJS.ErrnoException).code === 'ENOENT') return null;
+            throw directoryError;
+          }
+          const backups = entries.filter(entry => /^tournament\.json(?:\..+)?\.bak$/.test(entry));
+          if (backups.length === 0) return null;
+          if (backups.length > 1) {
+            throw new Error(`Ambiguous tournament recovery for ${tournamentId}: multiple backup files exist`);
+          }
+          await fs.rename(path.join(dir, backups[0]!), file);
+          return JSON.parse(await fs.readFile(file, 'utf-8')) as Tournament;
+        });
       }
       throw error;
+    } finally {
+      applicationMetrics.observe('persistence.read_ms', performance.now() - startedAt);
     }
   }
 
@@ -282,8 +303,15 @@ export class FileTournamentRepository implements TournamentRepository {
   ): Promise<void> {
     this.assertSafeId(tournamentId, 'tournament');
     this.assertSafeId(matchId, 'match');
-    await this.withWriteLock(`match:${tournamentId}:${matchId}`, () =>
-      this.saveMatchResultUnlocked(tournamentId, matchId, result, replay));
+    const startedAt = performance.now();
+    try {
+      await this.withWriteLock(`match:${tournamentId}:${matchId}`, () =>
+        this.saveMatchResultUnlocked(tournamentId, matchId, result, replay));
+    } finally {
+      const durationMs = performance.now() - startedAt;
+      applicationMetrics.observe('persistence.write_ms', durationMs);
+      applicationMetrics.observe('persistence.commit_ms', durationMs);
+    }
   }
 
   async deleteMatchResult(tournamentId: string, matchId: string): Promise<void> {
@@ -387,8 +415,13 @@ export class FileTournamentRepository implements TournamentRepository {
   async loadMatchResult(tournamentId: string, matchId: string): Promise<TournamentMatchRecord | null> {
     this.assertSafeId(tournamentId, 'tournament');
     this.assertSafeId(matchId, 'match');
-    const pair = await this.loadCommittedMatch(tournamentId, matchId);
-    return pair?.result ?? null;
+    const startedAt = performance.now();
+    try {
+      const pair = await this.loadCommittedMatch(tournamentId, matchId);
+      return pair?.result ?? null;
+    } finally {
+      applicationMetrics.observe('persistence.read_ms', performance.now() - startedAt);
+    }
   }
 
   /**
@@ -397,8 +430,13 @@ export class FileTournamentRepository implements TournamentRepository {
   async loadReplay(tournamentId: string, matchId: string): Promise<MatchReplay | null> {
     this.assertSafeId(tournamentId, 'tournament');
     this.assertSafeId(matchId, 'match');
-    const pair = await this.loadCommittedMatch(tournamentId, matchId);
-    return pair?.replay ?? null;
+    const startedAt = performance.now();
+    try {
+      const pair = await this.loadCommittedMatch(tournamentId, matchId);
+      return pair?.replay ?? null;
+    } finally {
+      applicationMetrics.observe('persistence.read_ms', performance.now() - startedAt);
+    }
   }
 
   private async loadCommittedMatch(tournamentId: string, matchId: string): Promise<{
@@ -456,6 +494,7 @@ export class FileTournamentRepository implements TournamentRepository {
    */
   async listMatchResults(tournamentId: string): Promise<TournamentMatchRecord[]> {
     this.assertSafeId(tournamentId, 'tournament');
+    const startedAt = performance.now();
     const dir = this.getTournamentDir(tournamentId);
     try {
       const files = await fs.readdir(dir);
@@ -470,18 +509,26 @@ export class FileTournamentRepository implements TournamentRepository {
       }
 
       const results: TournamentMatchRecord[] = [];
-        for (const matchId of matchIds) {
-        const pair = await this.loadCommittedMatch(tournamentId, matchId);
-          // BO3 per-game artifacts are committed independently for recovery,
-          // but only the aggregate series record contributes to standings.
-          if (pair && !pair.result.seriesGameOf) results.push(pair.result);
+      const matchIdList = Array.from(matchIds);
+      const pairs = await Promise.all(matchIdList.map(mId => this.loadCommittedMatch(tournamentId, mId)));
+      for (const pair of pairs) {
+        // BO3 per-game artifacts are committed independently for recovery,
+        // but only the aggregate series record contributes to standings.
+        if (pair && !pair.result.seriesGameOf) results.push(pair.result);
       }
+      results.sort((a, b) => {
+        const timeA = a.completedAt ? new Date(a.completedAt).getTime() : 0;
+        const timeB = b.completedAt ? new Date(b.completedAt).getTime() : 0;
+        return timeA - timeB;
+      });
       return results;
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
         return [];
       }
       throw error;
+    } finally {
+      applicationMetrics.observe('persistence.read_ms', performance.now() - startedAt);
     }
   }
 }

@@ -1,0 +1,65 @@
+<!-- BOT SOURCE WORKSPACE -->
+  <div id="bot-workspace" class="page bot-workspace-page">
+    <section id="bot-source-workspace" class="bot-source-workspace" aria-label="Soạn mã nguồn Bot">
+      <nav class="bot-workspace-breadcrumb" aria-label="Điều hướng Bot">
+        <button id="bot-workspace-back" class="breadcrumb-back" type="button">← <span>Bot của tôi</span></button>
+        <span id="bot-source-status" class="source-workspace-status" role="status" aria-live="polite">Bản nháp
+          mới</span>
+      </nav>
+      <div class="bot-source-header">
+        <label class="bot-workspace-selector" for="bot-workspace-picker">
+          <span>Bot đã tạo</span>
+          <select id="bot-workspace-picker" class="input-shell" aria-label="Chọn Bot đã tạo">
+            <option value="">Tạo Bot mới</option>
+          </select>
+        </label>
+        <div class="bot-source-actions">
+          <button id="open-bot-guide" class="secondary-btn workspace-guide-action" type="button"><svg class="ui-icon" aria-hidden="true"><use href="#icon-file-code-2"></use></svg>Hướng dẫn viết Bot</button>
+          <button id="run-bot-practice" class="secondary-btn workspace-practice-action" type="button" disabled>Chạy thử</button>
+          <button id="save-bot-source" class="primary-btn workspace-save-action" type="button" disabled>Tạo Bot</button>
+        </div>
+      </div>
+      <div class="bot-workspace-info-row">
+        <label class="workspace-name-field" for="bot-workspace-name"><span>Tên Bot</span><input id="bot-workspace-name"
+            class="input-shell" type="text" maxlength="50" autocomplete="off" placeholder="Bot của tôi"
+            aria-describedby="bot-name-error bot-source-error"><span id="bot-name-error" class="form-error" role="alert" hidden></span></label>
+        <label class="source-runtime-picker" for="bot-source-runtime"><span>Ngôn ngữ</span><select
+            id="bot-source-runtime" class="input-shell">
+            <option value="cpp">C++17</option>
+            <option value="python3">Python 3</option>
+          </select></label>
+      </div>
+      <div class="bot-source-grid">
+          <div class="bot-editor-panel">
+          <div class="editor-panel-head"><label for="bot-source-editor">Mã nguồn</label><span id="bot-source-mode"
+              class="source-mode-label">Chưa có phiên bản</span><span id="bot-source-filename"
+              class="editor-filename">main.cpp</span></div>
+          <div class="source-tools" role="toolbar" aria-label="Công cụ mã nguồn">
+            <button type="button" class="source-tool-button" id="source-format" title="Định dạng mã nguồn">Định dạng</button>
+            <button type="button" class="source-tool-button" id="source-theme" title="Đổi giao diện mã nguồn">Sáng</button>
+            <button type="button" class="source-tool-button" id="source-expand" title="Phóng to khung mã nguồn">Phóng to</button>
+          </div>
+          <div class="source-editor-shell">
+            <div class="source-code-layer"><pre id="bot-source-highlight" class="source-highlight" aria-hidden="true"></pre><textarea
+              id="bot-source-editor" class="source-editor" spellcheck="false" rows="24" wrap="off"
+              aria-describedby="bot-source-help bot-source-error"
+              placeholder="// Viết mã nguồn Bot của bạn ở đây"></textarea></div>
+          </div>
+          <span id="bot-source-lines" hidden aria-hidden="true"></span>
+          <div class="editor-footer"><span id="bot-source-help" class="field-help">C++17 · UTF-8 · Tối đa 64 KiB</span><span id="source-cursor-position" class="field-help">Dòng 1, cột 1</span><span id="source-byte-count" class="field-help">0 / 64 KiB</span><span id="source-syntax-status" class="field-help">Cú pháp hợp lệ</span><span class="editor-sandbox">Docker Sandbox</span></div>
+          <p id="bot-source-error" class="form-error" role="alert" hidden></p>
+          <div class="source-editor-actions"><span class="workspace-save-hint">Mỗi lần lưu tạo một phiên bản bất biến mới.</span></div>
+        </div>
+        <aside class="bot-revision-panel" aria-labelledby="bot-revisions-title">
+          <div class="bot-revision-heading">
+            <h3 id="bot-revisions-title">Phiên bản</h3><span id="bot-revision-count" class="bots-count">0 phiên
+              bản</span>
+          </div>
+          <p id="bot-sdk-reference" class="field-help">Phiên bản đã lưu không thể chỉnh sửa. Tạo bản nháp để tiếp tục
+            phát triển.</p>
+          <p id="bot-sdk-description" class="field-help" hidden>Bot sử dụng SDK của OTT Code Arena.</p>
+          <div id="bot-revision-list" class="bot-revision-list" aria-live="polite"></div>
+        </aside>
+      </div>
+    </section>
+  </div>

@@ -110,6 +110,23 @@ a { color: inherit; }
 
 svg { width: 1em; height: 1em; display: block; }
 
+/* Shared SVG icon baseline. View-specific styles may refine color or size. */
+svg.ui-icon,
+svg.summary-icon,
+svg.td-icon,
+svg.tournament-meta-icon,
+svg.tournament-action-icon,
+svg.modal-close-icon {
+  width: 25px;
+  height: 25px;
+  flex: 0 0 auto;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
 /* ==================== SCREENS ==================== */
 .screen { display: none; flex-direction: column; align-items: center; width: 100%; min-height: 100vh; }
 .screen.active { display: flex; animation: screenIn .35s cubic-bezier(.2,.8,.2,1); }
@@ -650,6 +667,10 @@ kbd { padding: 2px 6px; border-radius: 6px; border: 1px solid var(--border-light
 }
 
 /* ==================== UTILITY ==================== */
+[hidden] {
+  display: none !important;
+}
+
 .hidden { display: none !important; }
 .text-center { text-align: center; }
 

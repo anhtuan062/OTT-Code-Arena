@@ -14,6 +14,7 @@ import {
   buildCppVolumeRuntimeDockerArgs,
   resolveCppCompilationBackend,
   WorkspacePreparationError,
+  ownershipLabels,
 } from '@bot-executor/index.js';
 import type { RevisionDockerExecutorConfig } from '@bot-executor/revision-docker-executor.js';
 import { buildStrategyCppCompileDockerArgs, buildStrategyPythonRuntimeDockerArgs } from '@bot-executor/revision-docker-executor.js';
@@ -49,12 +50,82 @@ const request = {
 };
 
 describe('source revision Docker adapter contracts', () => {
+  it('emits complete ownership metadata and keeps environment/namespace boundaries explicit', () => {
+    const labels = ownershipLabels({
+      environment: 'qa', storageNamespace: 'arena-qa', serverInstanceId: 'server-a',
+      revisionScopeId: 'match-1', kind: 'warm',
+    });
+    expect(labels).toEqual(expect.arrayContaining([
+      'ott.owner.environment=qa',
+      'ott.owner.storage-namespace=arena-qa',
+      'ott.owner.server-instance=server-a',
+      'ott.owner.revision-scope=match-1',
+      'ott.owner.kind=warm',
+    ]));
+  });
+
+  it('reclaims only dead owned resources, preserves live owners, isolates namespaces and is idempotent', async () => {
+    const workingDirBase = await fs.mkdtemp(path.join(os.tmpdir(), 'ott-ownership-'));
+    try {
+      const executor = createRevisionDockerExecutor({
+        ...config(), workingDirBase, resourceEnvironment: 'qa', storageNamespace: 'arena-qa',
+        serverInstanceId: 'server-new', ownerLeaseTtlMs: 1_000,
+      }) as any;
+      const ownerDir = path.join(workingDirBase, '.revision-owners');
+      await fs.mkdir(ownerDir, { recursive: true });
+      await fs.writeFile(path.join(ownerDir, 'server-live.json'), JSON.stringify({
+        environment: 'qa', storageNamespace: 'arena-qa', serverInstanceId: 'server-live', pid: process.pid, heartbeatAt: Date.now(),
+      }));
+      await fs.writeFile(path.join(ownerDir, 'server-dead.json'), JSON.stringify({
+        environment: 'qa', storageNamespace: 'arena-qa', serverInstanceId: 'server-dead', pid: 999999, heartbeatAt: 1,
+      }));
+
+      const owned = (serverInstanceId: string, kind: 'warm' | 'volume') => JSON.stringify({
+        'ott.owner.environment': 'qa', 'ott.owner.storage-namespace': 'arena-qa',
+        'ott.owner.server-instance': serverInstanceId, 'ott.owner.revision-scope': 'match-1', 'ott.owner.kind': kind,
+      });
+      let first = true;
+      const bounded = vi.spyOn(executor, 'dockerCommandBounded').mockImplementation(async (args: string[]) => {
+        if (args[0] === 'ps') return first ? 'container-live\ncontainer-dead\ncontainer-unknown' : '';
+        if (args[0] === 'volume' && args[1] === 'ls') return first ? 'volume-dead' : '';
+        if (args[0] === 'inspect') {
+          if (args.at(-1) === 'container-live') return owned('server-live', 'warm');
+          if (args.at(-1) === 'container-unknown') return JSON.stringify({ 'ott.owner.environment': 'qa' });
+          return owned('server-dead', 'warm');
+        }
+        if (args[0] === 'volume' && args[1] === 'inspect') return owned('server-dead', 'volume');
+        if (args[0] === 'rm' || (args[0] === 'volume' && args[1] === 'rm')) return '';
+        return '';
+      });
+      const firstReport = await executor.recoverOwnedResources();
+      expect(firstReport.reclaimed).toEqual(expect.arrayContaining(['container-dead', 'volume-dead']));
+      expect(firstReport.preserved).toEqual(expect.arrayContaining([expect.objectContaining({ resource: 'container-live', reason: 'owner is active' })]));
+      expect(firstReport.preserved).toEqual(expect.arrayContaining([expect.objectContaining({ resource: 'container-unknown', reason: 'missing or invalid ownership metadata' })]));
+      first = false;
+      const callsAfterFirst = bounded.mock.calls.length;
+      const secondReport = await executor.recoverOwnedResources();
+      expect(secondReport.reclaimed).toEqual([]);
+      expect(bounded.mock.calls.filter(call => (call[0] as string[]).includes('rm'))).toHaveLength(2);
+      expect(bounded.mock.calls.length).toBeGreaterThan(callsAfterFirst);
+    } finally {
+      await fs.rm(workingDirBase, { recursive: true, force: true });
+    }
+  });
+
   it('keeps bind as the default and fails closed for unknown compilation backends', () => {
     expect(resolveCppCompilationBackend()).toBe('bind');
     expect(resolveCppCompilationBackend('bind')).toBe('bind');
     expect(resolveCppCompilationBackend('ephemeral-volume')).toBe('ephemeral-volume');
     expect(() => resolveCppCompilationBackend('volume')).toThrow(/Invalid C\+\+ compilation backend/);
     expect(() => createRevisionDockerExecutor({ ...config(), cppCompilationBackend: 'volume' as any })).toThrow();
+  });
+
+  it('includes the compilation backend in the validation environment identity', () => {
+    const bind = createRevisionDockerExecutor({ ...config(), cppCompilationBackend: 'bind' });
+    const volume = createRevisionDockerExecutor({ ...config(), cppCompilationBackend: 'ephemeral-volume' });
+    expect(bind.getValidationIdentity()).not.toBe(volume.getValidationIdentity());
+    bind.close();
+    volume.close();
   });
 
   it('builds isolated shell-free volume compile and runtime commands', () => {
@@ -110,6 +181,20 @@ describe('source revision Docker adapter contracts', () => {
       cppRuntimeImage: digest('cpp-runtime'),
       python3RuntimeImage: digest('python3-runtime'),
     })).toThrow(/trusted registry/);
+  });
+
+  it('checks only the requested runtime images for availability', async () => {
+    const executor = createRevisionDockerExecutor(config()) as any;
+    vi.spyOn(executor, 'ensureOwnershipReady').mockResolvedValue(undefined);
+    vi.spyOn(executor, 'recoverOwnedResources').mockResolvedValue({ reclaimed: [], preserved: [] });
+    const docker = vi.spyOn(executor, 'dockerCommand').mockResolvedValue('');
+
+    expect(await executor.isAvailable('cpp')).toBe(true);
+    const inspected = docker.mock.calls
+      .filter(([args]) => (args as string[])[0] === 'image' && (args as string[])[1] === 'inspect')
+      .map(([args]) => (args as string[])[2]);
+    expect(inspected).toEqual([config().imageRegistry.cppCompilerImage, config().imageRegistry.cppRuntimeImage]);
+    expect(inspected).not.toContain(config().imageRegistry.python3RuntimeImage);
   });
 
   it('builds a shell-free fixed C++ compile command with isolation controls', () => {
@@ -471,12 +556,12 @@ describe('source revision Docker adapter contracts', () => {
     expect(docker.mock.calls.some(call => (call[0] as string[]).includes('rm'))).toBe(false);
   });
 
-  it('does not route raw C++ or Python Strategy through the volume compiler', async () => {
+  it('keeps raw C++ on bind compilation and stages Python Strategy in an isolated volume', async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), 'ott-volume-compat-'));
     try {
       const executor = createRevisionDockerExecutor({ ...config(), workingDirBase: root, cppCompilationBackend: 'ephemeral-volume' }) as any;
       vi.spyOn(executor, 'isAvailable').mockResolvedValue(true);
-      const prepare = vi.spyOn(executor, 'prepareVolumeWorkspace');
+      const prepare = vi.spyOn(executor, 'prepareVolumeWorkspace').mockResolvedValue(undefined);
       const run = vi.spyOn(executor, 'runContainer');
       run.mockResolvedValueOnce({ code: 0, stdout: '', stderr: '', timedOut: false, killed: false, cancelled: false });
       run.mockResolvedValueOnce({ code: 0, stdout: '{"move":{"piece_id":"A-dam-1","from":"c1","to":"c2"}}', stderr: '', timedOut: false, killed: false, cancelled: false });
@@ -494,7 +579,7 @@ describe('source revision Docker adapter contracts', () => {
       expect(python.success).toBe(true);
       expect(raw.provenance?.compilationBackend).toBe('bind');
       expect(python.provenance?.compilationBackend).toBe('bind');
-      expect(prepare).not.toHaveBeenCalled();
+      expect(prepare).toHaveBeenCalledTimes(1);
     } finally { await fs.rm(root, { recursive: true, force: true }); }
   });
 });

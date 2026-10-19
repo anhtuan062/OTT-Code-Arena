@@ -66,11 +66,31 @@ describe('Practice HTTP contract (controlled executor; no Docker)', () => {
       .send({ runtimeId, executionMode: 'strategy', source });
     expect(revision.status).toBe(201);
     const url = `/api/bots/${bot.body.id}/revisions/${revision.body.revisionId}/test`;
-    return { agent, csrf, url, botId: bot.body.id as string, revision: revision.body };
+    const cookie = (auth.headers['set-cookie'] ?? []).join('; ');
+    return { agent, csrf, cookie, url, botId: bot.body.id as string, revision: revision.body };
   }
 
   function practice(user: Awaited<ReturnType<typeof competitor>>, scenarioId = 'initial') {
     return user.agent.post(user.url).set('x-csrf-token', user.csrf).send({ scenarioId });
+  }
+
+  function practiceHttp(user: Awaited<ReturnType<typeof competitor>>, url = user.url, scenarioId = 'initial') {
+    return request(appExport).post(url).set('Cookie', user.cookie).set('x-csrf-token', user.csrf).send({ scenarioId });
+  }
+
+  async function additionalRevision(user: Awaited<ReturnType<typeof competitor>>) {
+    const source = await fs.readFile(path.join(process.cwd(), 'bot-sdk/templates/cpp17.cpp'), 'utf8');
+    const revision = await user.agent.post(`/api/bots/${user.botId}/revisions`).set('x-csrf-token', user.csrf)
+      .send({ runtimeId: 'cpp', executionMode: 'strategy', source });
+    expect(revision.status).toBe(201);
+    return { agent: user.agent, csrf: user.csrf, cookie: user.cookie, url: `/api/bots/${user.botId}/revisions/${revision.body.revisionId}/test` };
+  }
+
+  function deferred<T>() {
+    let resolve!: (value: T | PromiseLike<T>) => void;
+    let reject!: (reason?: unknown) => void;
+    const promise = new Promise<T>((resolvePromise, rejectPromise) => { resolve = resolvePromise; reject = rejectPromise; });
+    return { promise, resolve, reject };
   }
 
   it.each(['cpp', 'python3'])('accepts first engine-legal Strategy moves in all %s scenarios', async runtime => {
@@ -217,6 +237,66 @@ describe('Practice HTTP contract (controlled executor; no Docker)', () => {
     for (let index = 0; index < 18; index++) expect((await practice(a)).status).toBe(200);
     expect((await practice(a)).status).toBe(429);
   });
+
+  it('enforces per-user admission across two revisions with deterministic overlap and cleanup', async () => {
+    const user = await competitor();
+    const secondRevision = await additionalRevision(user);
+    const other = await competitor('python3');
+    const third = await competitor();
+    const firstStarted = deferred<void>();
+    const secondStarted = deferred<void>();
+    const thirdStarted = deferred<void>();
+    const finishers: Array<(result: BotExecutionResult) => void> = [];
+    const inputs: BotRequestMessage[] = [];
+    let invocation = 0;
+    execute.mockImplementation(async (_context: unknown, _revision: unknown, input: BotRequestMessage) => {
+      invocation += 1;
+      if (invocation === 1) firstStarted.resolve();
+      if (invocation === 2) secondStarted.resolve();
+      if (invocation === 3) thirdStarted.resolve();
+      inputs.push(input);
+      return new Promise(resolve => finishers.push(resolve));
+    });
+
+    const first = practiceHttp(user);
+    void first.then(() => undefined, () => undefined);
+    await firstStarted.promise;
+    const secondRequest = practiceHttp(user, secondRevision.url);
+    expect((await secondRequest).status).toBe(429);
+
+    const otherRun = practiceHttp(other);
+    void otherRun.then(() => undefined, () => undefined);
+    await secondStarted.promise;
+    expect((await practiceHttp(third)).status).toBe(429);
+
+    finishers[0]!(timeout());
+    expect((await first).status).toBe(422);
+
+    const resumed = practiceHttp(user, secondRevision.url);
+    void resumed.then(() => undefined, () => undefined);
+    await thirdStarted.promise;
+    expect((await practiceHttp(third)).status).toBe(429);
+    finishers[2]!(success(inputs[2]!));
+    expect((await resumed).status).toBe(200);
+
+    finishers[1]!(success(inputs[1]!));
+    expect((await otherRun).status).toBe(200);
+
+    const disconnectStarted = deferred<void>();
+    execute.mockImplementationOnce(async () => {
+      disconnectStarted.resolve();
+      return new Promise(resolve => finishers.push(resolve));
+    });
+    const disconnected = practiceHttp(user);
+    disconnected.end(() => undefined);
+    await disconnectStarted.promise;
+    disconnected.abort();
+    finishers[3]!(timeout());
+    await new Promise<void>(resolve => setImmediate(resolve));
+
+    execute.mockImplementation(async (_context: unknown, _revision: unknown, input: BotRequestMessage) => success(input));
+    expect((await practice(third)).status).toBe(200);
+  }, 15000);
 
   it('does not charge requests rejected before authorization, CSRF or scenario validation', async () => {
     const user = await competitor();

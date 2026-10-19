@@ -101,7 +101,13 @@ describe('tournament participation requests', () => {
       .set('x-csrf-token', competitorCsrf)
       .send({ botId: bot.botId, revisionId: bot.revisionId, participantName: 'Competitor One' });
     expect(created.status).toBe(201);
-    expect(created.body).toMatchObject({ botId: bot.botId, revisionId: bot.revisionId, participantName: 'Competitor One', status: 'pending' });
+    expect(created.body).toMatchObject({
+      botId: bot.botId,
+      revisionId: bot.revisionId,
+      participantName: 'Competitor One',
+      status: 'pending',
+      preflight: expect.objectContaining({ status: expect.not.stringMatching(/^not_started$/) }),
+    });
     expect(created.body).not.toHaveProperty('competitorId');
     expect(created.body).not.toHaveProperty('botSnapshot');
 
@@ -160,6 +166,11 @@ describe('tournament participation requests', () => {
       .set('x-csrf-token', competitorCsrf)
       .send({ botId: bot.botId, revisionId: bot.revisionId, participantName: 'Duplicate' })).status).toBe(409);
     expect((await otherOrganizer.get(`/api/tournaments/${tournamentId}/requests`)).status).toBe(404);
+    expect((await otherOrganizer.post(`/api/tournaments/${tournamentId}/requests/${requestId}/preflight/retry`)
+      .set('x-csrf-token', otherOrganizerCsrf)).status).toBe(404);
+    expect((await organizer.post(`/api/tournaments/${tournamentId}/requests/${requestId}/preflight/retry`)).status).toBe(403);
+    expect((await organizer.post(`/api/tournaments/${tournamentId}/requests/${requestId}/preflight/retry`)
+      .set('x-csrf-token', organizerCsrf)).status).toBe(202);
     expect((await organizer.get(`/api/tournaments/${tournamentId}/requests`)).body).toEqual(expect.arrayContaining([
       expect.objectContaining({ requestId, botId: bot.botId, revisionId: bot.revisionId, status: 'pending' }),
     ]));
@@ -167,17 +178,15 @@ describe('tournament participation requests', () => {
     const approved = await organizer.post(`/api/tournaments/${tournamentId}/requests/${requestId}/approve`)
       .set('x-csrf-token', organizerCsrf)
       .send();
-    expect(approved.status).toBe(200);
-    expect(approved.body.participants).toHaveLength(1);
-    expect(approved.body.participants[0].bot.execution).toMatchObject({ kind: 'source-revision', revisionId: bot.revisionId, runtimeId: 'cpp', executionMode: 'strategy', sdkDigest: bot.sdkDigest });
-    expect(approved.body.participationRequests).toMatchObject([{ requestId, status: 'approved' }]);
+    expect(approved.status).toBe(409);
+    expect(approved.body.error).toContain('preflight');
     expect((await organizer.post(`/api/tournaments/${tournamentId}/requests/${requestId}/approve`)
       .set('x-csrf-token', organizerCsrf)).status).toBe(409);
     const trackedAfterApproval = await competitor.get(`/api/tournaments/${tournamentId}/participation-requests/mine`);
     expect(trackedAfterApproval.status).toBe(200);
-    expect(trackedAfterApproval.body).toMatchObject([{ requestId, status: 'approved' }]);
+    expect(trackedAfterApproval.body).toMatchObject([{ requestId, status: 'pending' }]);
     expect((await competitor.get('/api/my/tournaments')).body).toEqual(expect.arrayContaining([
-      expect.objectContaining({ tournamentId, participantCount: 1, participantId: expect.any(String) }),
+      expect.objectContaining({ tournamentId, participantCount: 0 }),
     ]));
 
     const secondRequest = await otherCompetitor.post(`/api/tournaments/${tournamentId}/participation-requests`)
@@ -192,16 +201,22 @@ describe('tournament participation requests', () => {
       .set('x-csrf-token', organizerCsrf)
       .send({ reason: 'Capacity' });
     expect(rejected.status).toBe(200);
-    expect(rejected.body.participants).toHaveLength(1);
+    expect((await organizer.post(`/api/tournaments/${tournamentId}/requests/${secondRequest.body.requestId}/preflight/retry`)
+      .set('x-csrf-token', organizerCsrf)).status).toBe(409);
+    expect(rejected.body.participants).toHaveLength(0);
     expect(rejected.body.participationRequests).toEqual(expect.arrayContaining([
       expect.objectContaining({ requestId: secondRequest.body.requestId, status: 'rejected', rejectionReason: 'Capacity' }),
     ]));
+    const rejectedFirst = await organizer.post(`/api/tournaments/${tournamentId}/requests/${requestId}/reject`)
+      .set('x-csrf-token', organizerCsrf)
+      .send({ reason: 'Preflight unavailable in test environment' });
+    expect(rejectedFirst.status).toBe(200);
     expect((await organizer.post(`/api/tournaments/${tournamentId}/action`)
       .set('x-csrf-token', organizerCsrf)
       .send({ action: 'close_registration' })).status).toBe(200);
     const trackedAfterClose = await competitor.get(`/api/tournaments/${tournamentId}/participation-requests/mine`);
     expect(trackedAfterClose.status).toBe(200);
-    expect(trackedAfterClose.body).toMatchObject([{ requestId, status: 'approved' }]);
+    expect(trackedAfterClose.body).toMatchObject([{ requestId, status: 'rejected' }]);
     const otherTrackedAfterClose = await otherCompetitor.get(`/api/tournaments/${tournamentId}/participation-requests/mine`);
     expect(otherTrackedAfterClose.status).toBe(200);
     expect(otherTrackedAfterClose.body).toMatchObject([{ requestId: secondRequest.body.requestId, status: 'rejected' }]);

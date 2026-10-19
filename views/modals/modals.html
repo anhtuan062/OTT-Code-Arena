@@ -1,0 +1,315 @@
+<!-- MODALS -->
+  <div class="live-game-result-modal" id="live-game-result-modal" role="status" aria-live="polite" aria-hidden="true">
+    <div class="live-game-result-card">
+      <p class="live-game-result-kicker">Kết quả ván đấu</p>
+      <h2 id="live-game-result-title">Ván đấu đã kết thúc</h2>
+      <p id="live-game-result-winner">Kết quả ván đã được ghi nhận</p>
+      <div class="live-game-scoreboard" aria-label="Tỉ số hai đội">
+        <div class="live-game-score-player"><strong id="live-game-player-a">Đội A</strong><small id="live-game-bot-a">Đội A</small><span id="live-game-score-a" class="live-game-score-number">0</span></div>
+        <span class="live-game-score-vs">VS</span>
+        <div class="live-game-score-player is-right"><strong id="live-game-player-b">Đội B</strong><small id="live-game-bot-b">Đội B</small><span id="live-game-score-b" class="live-game-score-number">0</span></div>
+      </div>
+      <p id="live-game-result-score">Tỷ số 0-0</p>
+      <p id="live-game-result-next">Đang chuẩn bị ván tiếp theo</p>
+      <button id="live-game-result-close" class="secondary-btn" type="button" hidden>Đóng</button>
+    </div>
+  </div>
+  <div class="modal-overlay" id="bot-guide-modal" role="dialog" aria-modal="true" aria-labelledby="bot-guide-title"
+    aria-describedby="bot-guide-description" aria-hidden="true">
+    <div class="modal-box bot-guide-modal">
+      <div class="modal-head">
+        <div>
+          <p class="section-kicker">BẮT ĐẦU LẬP TRÌNH</p>
+          <h2 id="bot-guide-title">Hướng dẫn viết Bot</h2>
+          <p id="bot-guide-description" class="dialog-copy">Tạo chiến thuật, kiểm tra trong sandbox và lưu phiên bản để tham gia giải đấu.</p>
+        </div>
+        <button class="icon-btn modal-close" type="button" data-close-modal="bot-guide-modal" aria-label="Đóng hướng dẫn"><svg class="ui-icon" aria-hidden="true"><use href="#icon-x"></use></svg></button>
+      </div>
+      <div class="bot-guide-content">
+        <section class="bot-guide-section">
+          <h3>Cách hệ thống gọi mã nguồn</h3>
+          <p>OTT Code Arena dùng <strong>Strategy SDK 1.0.0</strong>. Mỗi lượt, hệ thống truyền trạng thái hiện tại và danh sách nước đi hợp lệ vào hàm chiến thuật. Bot chỉ cần chọn và trả về một phần tử trong danh sách đó.</p>
+          <p class="bot-guide-note">Bạn không cần viết <code>main</code>, đọc JSON, xử lý stdin/stdout, Docker hoặc vòng lặp trận đấu. Hệ thống quản lý toàn bộ phần giao tiếp và kiểm tra nước đi.</p>
+        </section>
+        <section class="bot-guide-section">
+          <h3>Hàm bắt buộc</h3>
+          <div class="bot-guide-runtime"><strong>C++17</strong><pre class="bot-guide-code">using namespace std;
+
+Move chooseMove(const GameState&amp; state,
+                const vector&lt;Move&gt;&amp; legalMoves) {
+    return legalMoves.front();
+}</pre></div>
+          <div class="bot-guide-runtime"><strong>Python 3</strong><pre class="bot-guide-code">from ott_strategy_sdk import Move, GameState
+
+def choose_move(state: GameState, legal_moves: list[Move]) -&gt; Move:
+    return legal_moves[0]</pre></div>
+        </section>
+        <section class="bot-guide-section">
+          <h3>Dữ liệu được hỗ trợ</h3>
+          <div class="bot-guide-table-wrap"><table class="bot-guide-table"><thead><tr><th>Dữ liệu</th><th>C++17</th><th>Python 3</th></tr></thead><tbody>
+            <tr><td>Trạng thái</td><td><code>GameState</code></td><td><code>GameState</code></td></tr>
+            <tr><td>Nước đi</td><td><code>Move</code></td><td><code>Move</code></td></tr>
+            <tr><td>Quân cờ</td><td><code>Piece</code></td><td><code>Piece</code></td></tr>
+            <tr><td>Danh sách nước hợp lệ</td><td><code>vector&lt;Move&gt;</code></td><td><code>list[Move]</code></td></tr>
+          </tbody></table></div>
+          <p class="bot-guide-help"><strong>GameState:</strong> <code>protocol_version</code>, <code>match_id</code>, <code>turn</code> (bắt đầu từ 1), <code>player</code> (<code>A</code>/<code>B</code>), <code>board_size</code> (9), <code>pieces</code>.</p>
+          <p class="bot-guide-help"><strong>Piece:</strong> <code>id</code>, <code>type</code> (<code>dam</code>/<code>la</code>/<code>keo</code>), <code>player</code>, <code>pos</code> dạng <code>a1</code>–<code>i9</code>. <strong>Move C++:</strong> <code>piece_id</code>, <code>from</code>, <code>to</code>, <code>captures</code>, <code>has_capture</code>. <strong>Move Python:</strong> <code>piece_id</code>, <code>from_position</code>, <code>to</code>, <code>captures</code>.</p>
+          <p class="bot-guide-help">Nước không ăn quân có <code>has_capture == false</code> ở C++ và <code>captures is None</code> ở Python. Khi có ăn quân, <code>captures</code> là ID quân bị ăn.</p>
+        </section>
+        <section class="bot-guide-section">
+          <h3>Luật bàn cờ cần biết</h3>
+          <ul class="bot-guide-list"><li>Bàn cờ 9×9, cột <code>a</code> đến <code>i</code>, hàng <code>1</code> đến <code>9</code>.</li><li>Mỗi quân đi một ô theo 8 hướng.</li><li>Loại quân: <code>dam</code> (Búa), <code>la</code> (Bao), <code>keo</code> (Kéo).</li><li>Quan hệ bắt quân: <code>dam</code> bắt <code>keo</code>, <code>keo</code> bắt <code>la</code>, <code>la</code> bắt <code>dam</code>. Không bắt được quân cùng loại, quân của mình hoặc quân không khắc chế.</li><li>Người chơi A hướng tới <code>i9</code>; người chơi B hướng tới <code>a1</code>. Đưa quân tới ô đích sẽ thắng.</li><li>Bộ máy kiểm tra loại quân còn lại, giới hạn mặc định 200 lượt, lặp vị trí và trạng thái không đủ vật liệu để xác định kết quả.</li><li>Mỗi lượt Bot có thời gian mặc định 2 giây; lỗi quá thời gian, dừng đột ngột hoặc đầu ra không hợp lệ làm lượt đấu thất bại.</li><li><code>legalMoves</code>/<code>legal_moves</code> đã được hệ thống tạo theo đúng luật và không nên tự sửa thứ tự.</li></ul>
+        </section>
+        <section class="bot-guide-section">
+          <h3>Một số cách viết chiến thuật</h3>
+          <pre class="bot-guide-code" aria-label="Các ví dụ chiến thuật">// C++17: chọn nước đầu tiên
+return legalMoves.front();
+
+// C++17: ưu tiên nước ăn quân
+for (const Move&amp; move : legalMoves) {
+    if (move.has_capture) return move;
+}
+return legalMoves.front();
+
+# Python 3: ưu tiên nước ăn quân
+for move in legal_moves:
+    if move.captures is not None:
+        return move
+return legal_moves[0]</pre>
+          <p class="bot-guide-help">Bạn có thể duyệt <code>state.pieces</code> để biết vị trí, loại và người sở hữu từng quân; sau đó chọn nước phù hợp trong danh sách hợp lệ.</p>
+        </section>
+        <section class="bot-guide-section">
+          <h3>Điều kiện mã nguồn hợp lệ</h3>
+          <ul class="bot-guide-list"><li>Phải có đúng hàm <code>chooseMove</code> (C++) hoặc <code>choose_move</code> (Python).</li><li>Phải trả về một nước đi có trong danh sách hợp lệ.</li><li>Không trả về <code>null</code>, <code>None</code> hoặc tự tạo nước đi không hợp lệ.</li><li>Lỗi biên dịch, môi trường chạy hoặc quá thời gian sẽ làm lượt đấu thất bại.</li></ul>
+          <p class="bot-guide-note">Quy trình nên dùng: viết mã nguồn → Chạy thử → sửa lỗi → lưu phiên bản → chọn phiên bản đó khi đăng ký giải đấu. Phiên bản đã ghim sẽ không thay đổi khi bạn chỉnh sửa mã nguồn sau này.</p>
+        </section>
+        <section class="bot-guide-section">
+          <h3>Lỗi thường gặp</h3>
+          <ul class="bot-guide-list"><li>Sai tên hoặc chữ ký hàm: C++ phải là <code>chooseMove</code>, Python phải là <code>choose_move</code>.</li><li>Thiếu include/import cần thiết hoặc dùng sai tên trường của SDK sẽ gây lỗi biên dịch/môi trường chạy.</li><li>Trả về nước đi không có trong danh sách hợp lệ sẽ bị hệ thống từ chối và lượt đấu kết thúc với lỗi Bot.</li><li>Lỗi biên dịch, chương trình dừng đột ngột, đầu ra không hợp lệ, đầu ra rỗng hoặc quá thời gian đều làm lượt đấu của Bot thất bại.</li><li>Không tự xử lý JSON hay in kết quả ra stdout; Strategy SDK đã làm phần này.</li></ul>
+        </section>
+        <section class="bot-guide-section">
+          <h3>Cách kiểm tra Bot</h3>
+          <p>Trong Không gian mã nguồn, nhập hoặc sửa mã rồi chọn <strong>Chạy thử</strong>. Hệ thống chạy Bot hiện tại đấu với Bot hệ thống cố định trong môi trường sandbox. Khi chạy xong, bạn được chuyển sang trang <strong>Xem lại trận đấu</strong> để xem bàn cờ, nước đi và kết quả.</p>
+          <p class="bot-guide-help">Trận thử không lưu kết quả vào giải đấu và không tạo thay đổi cho phiên bản đã lưu.</p>
+        </section>
+        <section class="bot-guide-section">
+          <h3>Lưu phiên bản và tham gia giải đấu</h3>
+          <p>Chọn <strong>Tạo Bot</strong> cho Bot mới hoặc <strong>Lưu phiên bản</strong> để tạo phiên bản bất biến mới. Mỗi phiên bản giữ nguyên mã nguồn, môi trường chạy và thông tin SDK tại thời điểm lưu.</p>
+          <p class="bot-guide-note">Khi đăng ký giải đấu, hệ thống ghim đúng Bot ID và phiên bản bạn chọn. Nếu sau đó lưu R2, phiên bản R1 đã đăng ký vẫn giữ nguyên và không tự chuyển sang R2.</p>
+        </section>
+      </div>
+      <div class="modal-footer"><button class="secondary-btn" type="button" data-close-modal="bot-guide-modal">Đã hiểu</button></div>
+    </div>
+  </div>
+
+  <div class="modal-overlay" id="practice-modal" role="dialog" aria-modal="true" aria-labelledby="practice-title"
+    aria-describedby="practice-description" aria-hidden="true">
+    <div class="modal-box practice-dialog">
+      <div class="modal-head">
+        <h4 id="practice-title">Chạy thử Bot</h4><button class="modal-close" type="button"
+          data-close-modal="practice-modal" aria-label="Đóng cửa sổ chạy thử"><svg class="ui-icon" aria-hidden="true"><use href="#icon-x"></use></svg></button>
+      </div>
+      <p class="dialog-copy" id="practice-description">Kiểm tra chiến thuật trong Docker sandbox trước khi tham gia giải đấu.</p>
+      <p class="practice-revision-meta" id="practice-revision-meta">Chưa chọn phiên bản</p>
+      <div class="practice-toolbar">
+        <div class="practice-opponent"><svg class="practice-opponent-icon" aria-hidden="true"><use href="#icon-bot"></use></svg><div class="practice-opponent-copy"><span class="field-label">ĐỐI THỦ</span><strong>Bot hệ thống cố định</strong><span>Trận thử không lưu kết quả giải đấu.</span></div></div>
+        <select id="practice-scenario" hidden aria-hidden="true">
+          <option value="initial">Bàn cờ ban đầu</option>
+          <option value="capture">Có cơ hội ăn quân</option>
+          <option value="near-goal">Tiến gần ô đích</option>
+        </select>
+        <span id="practice-scenario-help" hidden>Trận thử với Bot hệ thống cố định.</span>
+      </div>
+      <p id="practice-status" class="practice-status" role="status" aria-live="polite">Sẵn sàng đấu với Bot hệ thống.</p>
+      <div id="practice-progress" class="practice-progress" hidden aria-live="polite">
+        <div class="practice-progress-head">
+          <strong id="practice-progress-label">&#272;ang chu&#7849;n b&#7883; Docker sandbox</strong>
+          <span id="practice-progress-elapsed">0 gi&#226;y</span>
+        </div>
+        <div class="practice-progress-track" role="progressbar" aria-label="Ti&#7871;n tr&#236;nh tr&#7853;n &#273;&#7845;u th&#7917;" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+          <span id="practice-progress-bar"></span>
+        </div>
+        <div class="practice-progress-stages" aria-hidden="true">
+          <span data-progress-stage="prepare">Chu&#7849;n b&#7883; sandbox</span>
+          <span data-progress-stage="compile">Bi&#234;n d&#7883;ch</span>
+          <span data-progress-stage="match">Ch&#7841;y tr&#7853;n</span>
+          <span data-progress-stage="finish">T&#7893;ng h&#7907;p</span>
+        </div>
+      </div>
+      <p id="practice-error" class="form-error" role="alert" hidden></p>
+      <details id="practice-error-details" class="practice-error-details" hidden>
+        <summary>Chi tiết kỹ thuật</summary>
+        <p id="practice-error-technical"></p>
+      </details>
+      <div id="practice-replay-toolbar" class="practice-replay-toolbar" aria-label="Điều khiển diễn biến trận thử" hidden>
+        <div class="practice-replay-controls">
+          <button class="icon-btn replay-control" id="practice-replay-start" type="button" aria-label="Về đầu" title="Về đầu"><svg class="ui-icon" aria-hidden="true"><use href="#icon-skip-back"></use></svg></button>
+          <button class="icon-btn replay-control" id="practice-replay-prev" type="button" aria-label="Lùi một nước" title="Lùi một nước"><svg class="ui-icon" aria-hidden="true"><use href="#icon-step-back"></use></svg></button>
+          <button class="primary-btn replay-play replay-control" id="practice-replay-play" type="button" aria-label="Phát" title="Phát" aria-pressed="false"><svg class="ui-icon" aria-hidden="true"><use href="#icon-play"></use></svg><span>Phát</span></button>
+          <button class="icon-btn replay-control" id="practice-replay-next" type="button" aria-label="Tiến một nước" title="Tiến một nước"><svg class="ui-icon" aria-hidden="true"><use href="#icon-step-forward"></use></svg></button>
+          <button class="icon-btn replay-control" id="practice-replay-end" type="button" aria-label="Đến cuối" title="Đến cuối"><svg class="ui-icon" aria-hidden="true"><use href="#icon-skip-forward"></use></svg></button>
+          <span id="practice-replay-turn" class="replay-step" aria-live="polite">0 / 0</span>
+        </div>
+        <label class="practice-replay-scrubber-label" for="practice-replay-scrubber">Tiến độ trận thử</label>
+        <input id="practice-replay-scrubber" type="range" min="-1" value="-1" step="1" aria-label="Chọn lượt trận thử">
+        <label class="practice-replay-speed" for="practice-replay-speed">Tốc độ phát<select id="practice-replay-speed"><option value="1200">Chậm</option><option value="800" selected>Bình thường</option><option value="400">Nhanh</option></select></label>
+      </div>
+      <div id="practice-output" class="practice-output" hidden>
+        <section id="practice-result" class="practice-result" aria-labelledby="practice-result-title" hidden>
+          <h5 id="practice-result-title">Nước đi hợp lệ</h5>
+          <p id="practice-result-move" class="practice-result-move">—</p>
+          <dl id="practice-result-details" class="practice-result-details"></dl>
+          <section class="practice-move-history" aria-labelledby="practice-move-history-title">
+            <div class="practice-move-history-head"><h6 id="practice-move-history-title">Diễn biến trận đấu</h6><span id="practice-move-count">0 lượt</span></div>
+            <div id="practice-move-history-list" class="practice-move-history-list" aria-live="polite"></div>
+          </section>
+        </section>
+        <div id="practice-board-frame" class="practice-board-frame" hidden>
+          <h5 class="practice-board-title">Bàn cờ và nước đi được chọn</h5>
+          <div class="replay-board-wrap">
+            <div id="practice-columns" class="replay-coordinates replay-columns" aria-hidden="true"></div>
+            <div class="replay-board-row">
+              <div id="practice-rows" class="replay-coordinates replay-rows" aria-hidden="true"></div>
+              <div id="practice-board" class="replay-board" role="grid" aria-label="Bàn cờ chạy thử 9 x 9"></div>
+            </div>
+          </div>
+          <div class="practice-legend" aria-label="Chú giải bàn cờ">
+            <span class="practice-legend-item"><span class="practice-legend-mark" aria-hidden="true"></span>Ô
+              nguồn</span>
+            <span class="practice-legend-item"><span class="practice-legend-mark destination"
+                aria-hidden="true"></span>Ô đích</span>
+            <span class="practice-legend-item"><span class="practice-legend-mark capture" aria-hidden="true"></span>Ăn
+              quân</span>
+            <span class="practice-legend-item"><span class="practice-legend-mark goal" aria-hidden="true"></span>Ô đích
+              thắng</span>
+          </div>
+        </div>
+      </div>
+      <div class="practice-actions">
+        <button class="secondary-btn" type="button" data-close-modal="practice-modal">Đóng</button>
+        <button id="practice-run" class="primary-btn" type="button"><svg class="ui-icon" aria-hidden="true"><use href="#icon-play"></use></svg>Chạy thử</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-overlay" id="delete-bot-modal" role="dialog" aria-modal="true" aria-labelledby="delete-bot-title"
+    aria-describedby="delete-bot-support" aria-hidden="true">
+    <div class="modal-box confirmation-dialog">
+      <div class="modal-head">
+        <h4 id="delete-bot-title">Xóa Bot</h4><button class="modal-close" type="button"
+          data-close-modal="delete-bot-modal" aria-label="Đóng xác nhận xóa">×</button>
+      </div>
+      <p class="delete-bot-message">Bạn có chắc muốn xóa Bot «<strong id="delete-bot-name"></strong>»?</p>
+      <p class="dialog-copy" id="delete-bot-support">Chỉ Bot chưa có phiên bản mã nguồn bất biến và chưa được giải đấu
+        tham chiếu mới có thể bị xóa. Các Bot đã có phiên bản cần được giữ lại để bảo toàn lịch sử và kết quả thi đấu.
+      </p>
+      <p id="delete-bot-error" class="form-error" role="alert" hidden></p>
+      <div class="dialog-actions"><button class="secondary-btn" type="button"
+          data-close-modal="delete-bot-modal">Hủy</button><button class="danger-btn" id="confirm-delete-bot"
+          type="button">Xóa Bot</button></div>
+    </div>
+  </div>
+
+  <div class="modal-overlay" id="delete-revision-modal" role="dialog" aria-modal="true" aria-labelledby="delete-revision-title"
+    aria-describedby="delete-revision-support" aria-hidden="true">
+    <div class="modal-box confirmation-dialog">
+      <div class="modal-head">
+        <h4 id="delete-revision-title">Xóa phiên bản</h4><button class="modal-close" type="button"
+          data-close-modal="delete-revision-modal" aria-label="Đóng xác nhận xóa">×</button>
+      </div>
+      <p class="delete-bot-message">Bạn có chắc muốn xóa phiên bản «<strong id="delete-revision-name"></strong>»?</p>
+      <p class="dialog-copy" id="delete-revision-support">Phiên bản đã xóa không thể khôi phục. Nếu đây là phiên bản đang chọn, hệ thống sẽ chuyển sang phiên bản khác trước khi xóa.</p>
+      <p id="delete-revision-error" class="form-error" role="alert" hidden></p>
+      <div class="dialog-actions"><button class="secondary-btn" type="button"
+          data-close-modal="delete-revision-modal">Hủy</button><button class="danger-btn" id="confirm-delete-revision"
+          type="button">Xóa phiên bản</button></div>
+    </div>
+  </div>
+
+  <div class="modal-overlay" id="add-tourney-modal" role="dialog" aria-modal="true" aria-labelledby="add-tourney-title"
+    aria-describedby="tourney-dialog-description" aria-hidden="true">
+    <div class="modal-box">
+      <div class="modal-head">
+        <h4 id="add-tourney-title">Tạo giải đấu mới</h4><button class="modal-close" type="button"
+          data-close-modal="add-tourney-modal" aria-label="Đóng hộp thoại tạo giải đấu"><svg class="modal-close-icon" aria-hidden="true"><use href="#icon-x"></use></svg></button>
+      </div>
+      <p class="dialog-copy" id="tourney-dialog-description">Tạo giải đấu để tiếp nhận Bot và tổ chức các trận đấu.
+      </p>
+      <div class="form-group"><label for="new-tourney-name">Tên giải đấu</label><input type="text" id="new-tourney-name"
+          class="input-shell" maxlength="100" style="width: 100%" placeholder="Ví dụ: Giải đấu mùa hè"
+          autocomplete="off" aria-describedby="tournament-form-error"></div>
+      <p id="tournament-form-error" class="form-error" role="alert" hidden></p>
+      <div class="dialog-actions"><button class="secondary-btn" type="button"
+          data-close-modal="add-tourney-modal">Hủy</button><button class="primary-btn" id="submit-tournament"
+          type="button"><span class="tournament-submit-label">Tạo giải đấu</span><span class="tournament-submit-loading hidden" aria-hidden="true">Đang tạo…</span></button></div>
+    </div>
+  </div>
+
+  <div class="modal-overlay" id="register-bot-tourney-modal" role="dialog" aria-modal="true"
+    aria-labelledby="register-participant-title" aria-describedby="register-participant-description" aria-hidden="true">
+    <div class="modal-box">
+      <div class="modal-head">
+        <h4 id="register-participant-title">Đăng ký Bot tham gia</h4><button class="modal-close" type="button"
+          data-close-modal="register-bot-tourney-modal" aria-label="Đóng hộp thoại đăng ký người tham gia">×</button>
+      </div>
+      <p class="dialog-copy" id="register-participant-description">Chọn một Bot của bạn và đặt tên hiển thị cho người
+        tham gia trong giải đấu.</p>
+      <p id="registration-bots-loading" class="dialog-status" role="status">Đang tải danh sách Bot…</p>
+      <p id="registration-tournament-context" class="dialog-status">Giải đấu đang chọn</p>
+      <div id="registration-bots-empty" class="dialog-empty-state" hidden>
+        <strong>Bạn chưa có Bot để đăng ký</strong>
+        <p>Hãy tạo Bot trước khi đăng ký tham gia giải đấu.</p>
+        <button class="secondary-btn" id="go-to-bots-from-registration" type="button">Đi tới Bot của tôi</button>
+      </div>
+      <div id="registration-bots-error" class="dialog-empty-state" role="alert" hidden>
+        <strong>Không thể tải danh sách Bot</strong>
+        <p>Hãy thử lại trước khi đăng ký tham gia giải đấu.</p>
+        <button class="secondary-btn" id="retry-registration-bots" type="button">Thử lại</button>
+      </div>
+      <div id="registration-fields" hidden>
+        <p id="registration-revision-summary" class="field-help" aria-live="polite">Chưa chọn Bot và revision</p>
+         <div class="form-group"><label for="reg-part-name">Tên hiển thị người tham gia</label><input type="text"
+             id="reg-part-name" class="input-shell" style="width: 100%" required autocomplete="name"
+            aria-describedby="reg-part-name-help registration-form-error"></div>
+        <small id="reg-part-name-help" class="field-help">Tên này được hiển thị trong danh sách và kết quả của giải
+          đấu.</small>
+        <div class="form-group">
+          <label for="reg-bot-select">Bot tham gia</label>
+          <select id="reg-bot-select" class="input-shell" style="width: 100%" required
+            aria-describedby="registration-form-error"></select>
+        </div>
+        <div class="form-group">
+          <label for="reg-revision-select">Phiên bản mã nguồn</label>
+          <select id="reg-revision-select" class="input-shell" style="width: 100%" required
+            aria-describedby="reg-revision-help registration-form-error"></select>
+          <small id="reg-revision-help" class="field-help">Yêu cầu sẽ ghim đúng phiên bản bạn chọn; các chỉnh sửa sau đó
+            không thay đổi yêu cầu này.</small>
+        </div>
+        <p id="registration-form-error" class="form-error" role="alert" hidden></p>
+      </div>
+      <section id="registration-submission-status" class="registration-submission-status" role="status" aria-live="polite" hidden>
+        <strong id="registration-submission-title">Yêu cầu đã được tiếp nhận</strong>
+        <p id="registration-submission-state">Đang đưa revision vào hàng đợi kiểm tra.</p>
+        <p id="registration-submission-diagnostic" class="field-help" hidden></p>
+      </section>
+      <div class="dialog-actions"><button class="secondary-btn" type="button"
+          data-close-modal="register-bot-tourney-modal">Hủy</button><button class="primary-btn" id="submit-registration"
+          type="button" hidden>Đăng ký Bot</button></div>
+    </div>
+  </div>
+
+  <div class="modal-overlay" id="tournament-action-modal" role="dialog" aria-modal="true"
+    aria-labelledby="tournament-action-title" aria-describedby="tournament-action-copy tournament-action-support"
+    aria-hidden="true">
+    <div class="modal-box confirmation-dialog">
+      <div class="modal-head">
+        <h4 id="tournament-action-title">XÁC NHẬN THAO TÁC</h4><button class="modal-close" type="button"
+          data-close-modal="tournament-action-modal" aria-label="Đóng xác nhận thao tác">×</button>
+      </div>
+      <p id="tournament-action-copy" class="dialog-copy"></p>
+      <p id="tournament-action-support" class="dialog-copy"></p>
+      <div class="dialog-actions"><button class="secondary-btn" type="button"
+          data-close-modal="tournament-action-modal">Hủy</button><button id="confirm-tournament-action"
+          class="danger-btn" type="button">Tiếp tục</button></div>
+    </div>
+  </div>

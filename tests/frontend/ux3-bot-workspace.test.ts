@@ -1,5 +1,6 @@
 import { readFile } from 'node:fs/promises';
 import { describe, expect, it } from 'vitest';
+import { readAssembledFrontendMarkup } from './frontend-fixtures';
 const source = (file: string) => readFile(new URL(`../../${file}`, import.meta.url), 'utf8');
 
 describe('UX.3 Bot management and strategy workspace', () => {
@@ -18,7 +19,7 @@ describe('UX.3 Bot management and strategy workspace', () => {
     expect(app).toContain('state.pendingSourceRevision');
   });
   it('standardizes Strategy SDK and keeps revision provenance read-only', async () => {
-    const [app, page] = await Promise.all([source('app.js'), source('index.html')]);
+    const [app, page] = await Promise.all([source('app.js'), readAssembledFrontendMarkup()]);
     expect(app).toContain("mode.textContent = sdkVersion ? `Strategy SDK ${sdkVersion}` : 'Strategy SDK'");
     expect(app).toContain('String(revision.sourceDigest).slice(0, 12)');
     expect(page).toContain('id="bot-source-mode"');
@@ -26,7 +27,7 @@ describe('UX.3 Bot management and strategy workspace', () => {
     expect(page).toContain('id="practice-run"');
   });
   it('preserves Practice and navigation entry points', async () => {
-    const [app, page] = await Promise.all([source('app.js'), source('index.html')]);
+    const [app, page] = await Promise.all([source('app.js'), readAssembledFrontendMarkup()]);
     expect(app).toContain('function openPracticeRunner(revision)');
     expect(app).toContain('function testBotRevision()');
     expect(app).toContain("navigate('bots')");

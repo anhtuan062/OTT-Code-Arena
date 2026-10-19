@@ -14,6 +14,7 @@
   <link rel="stylesheet" href="style.css">
   <link rel="stylesheet" href="styles/views/replay.css">
   <link rel="stylesheet" href="styles/views/live.css">
+  <link rel="stylesheet" href="styles/views/operations.css">
   <style>
     /* Additions to existing style.css for Dashboard/Tournaments */
     .nav-bar {
@@ -2707,19 +2708,6 @@
       gap: 7px;
     }
 
-    .replay-player-a::before,
-    .replay-player-b::before {
-      width: 9px;
-      height: 9px;
-      border-radius: 50%;
-      content: "";
-      background: #16803c;
-    }
-
-    .replay-player-b::before {
-      background: #475569;
-    }
-
     .replay-board-wrap {
       width: min(100%, 650px);
       max-width: 650px;
@@ -4093,12 +4081,6 @@
     .replay-players .replay-player-a,
     .replay-players .replay-player-b {
       background: transparent;
-    }
-
-    .replay-player-a::before,
-    .replay-player-b::before {
-      width: 10px;
-      height: 10px;
     }
 
     .replay-current-move {
@@ -7331,215 +7313,16 @@
       }
     }
   </style>
-  <link rel="stylesheet" href="styles/layout.css">
+  <link rel="stylesheet" href="styles/components/app-shell.css">
   <link rel="stylesheet" href="styles/views/auth.css">
+  <link rel="stylesheet" href="styles/views/dashboard.css">
   <link rel="stylesheet" href="styles/components/editor.css">
+  <link rel="stylesheet" href="styles/views/tournaments.css">
 </head>
 
 <body>
 
-<section id="auth-screen" class="page active" role="main" aria-labelledby="auth-title">
-   <div class="auth-container">
-     <div class="auth-card">
-       <div class="auth-branding">
-         <div class="auth-logo" aria-label="OTT Code Arena Logo">
-           <svg viewBox="0 0 48 48" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="OTT Code Arena Logo">
-             <circle cx="24" cy="24" r="23" fill="currentColor" class="logo-circle"/>
-             <text x="24" y="32" text-anchor="middle" font-family="Be Vietnam Pro, sans-serif" font-size="18" font-weight="700" fill="white">O</text>
-           </svg>
-         </div>
-         <div class="brand-text">
-           <h1>OTT Code Arena</h1>
-           <p class="brand-tagline">Nền tảng thi đấu lập trình Bot chuyên nghiệp</p>
-         </div>
-       </div>
-
-       <div class="auth-forms-wrapper">
-         <!-- Form Đăng Nhập -->
-         <form id="login-form" class="auth-form active-form" novalidate>
-           <div class="form-header">
-             <h2 id="auth-title">Đăng nhập</h2>
-             <p class="form-description">Chào mừng trở lại! Đăng nhập để tiếp tục.</p>
-           </div>
-           
-           <div class="form-fields">
-             <div class="form-group">
-               <label for="login-username" class="required-field">Tên người dùng</label>
-               <div class="input-wrapper">
-                 <div class="input-icon" aria-hidden="true">
-                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                     <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
-                     <circle cx="12" cy="7" r="4"></circle>
-                   </svg>
-                 </div>
-                 <input 
-                   id="login-username" 
-                   type="text" 
-                   required 
-                   autocomplete="username"
-                   aria-invalid="false"
-                   placeholder="Nhập tên người dùng của bạn"
-                 >
-               </div>
-             </div>
-             
-             <div class="form-group">
-               <label for="login-password" class="required-field">Mật khẩu</label>
-               <div class="input-wrapper password-input-wrapper">
-                 <div class="input-icon password-icon" aria-hidden="true">
-                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                     <rect x="4" y="10" width="16" height="11" rx="2"></rect>
-                     <path d="M8 10V7a4 4 0 0 1 8 0v3"></path>
-                     <circle cx="12" cy="15.5" r="1"></circle>
-                   </svg>
-                 </div>
-                 <input 
-                   id="login-password" 
-                   type="password" 
-                   required 
-                   autocomplete="current-password"
-                   aria-invalid="false"
-                   aria-describedby="login-password-toggle"
-                   placeholder="Nhập mật khẩu của bạn"
-                 >
-                 <button 
-                   type="button" 
-                   id="login-password-toggle" 
-                   class="password-toggle-btn"
-                   aria-label="Hiển thị mật khẩu"
-                   aria-controls="login-password"
-                   aria-expanded="false"
-                 >
-                   <svg class="eye-icon" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                     <path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0"></path>
-                     <circle cx="12" cy="12" r="3"></circle>
-                   </svg>
-                   <svg class="eye-slash-icon hidden" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                     <path d="M10.733 5.076a10.744 10.744 0 0 1 11.205 6.575 1 1 0 0 1 0 .696 10.8 10.8 0 0 1-1.444 2.49"></path>
-                     <path d="M14.084 14.158a3 3 0 0 1-4.242-4.242"></path>
-                     <path d="M17.479 17.499A10.75 10.75 0 0 1 2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 4.446-5.143"></path>
-                     <path d="m2 2 20 20"></path>
-                   </svg>
-                 </button>
-               </div>
-             </div>
-           </div>
-           <p id="login-form-message" class="form-message" role="alert" aria-live="polite" hidden></p>
-           
-           <div class="form-actions">
-             <button id="login-submit" class="primary-btn" type="submit">
-               <span class="btn-text">Đăng nhập</span>
-               <span class="btn-loading hidden">
-                 <svg class="spinner" viewBox="0 0 24 24">
-                   <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"></circle>
-                   <path fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                 </svg>
-               </span>
-             </button>
-           </div>
-           <div class="auth-switch">
-             <p>Chưa có tài khoản OTT Code Arena? 
-               <button id="show-register" class="text-link" type="button">Tạo tài khoản ngay</button>
-             </p>
-           </div>
-         </form>
-
-         <!-- Form Đăng Ký -->
-         <form id="register-form" class="auth-form" novalidate>
-           <div class="form-header">
-             <h2 id="register-title">Tạo tài khoản</h2>
-             <p class="form-description">Tham gia cùng hàng nghìn lập trình viên. Đăng ký ngay hôm nay!</p>
-           </div>
-           
-           <div class="form-fields">
-             <div class="form-group">
-               <label for="register-username" class="required-field">Tên người dùng</label>
-               <div class="input-wrapper">
-                 <div class="input-icon" aria-hidden="true">
-                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                     <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
-                     <circle cx="12" cy="7" r="4"></circle>
-                   </svg>
-                 </div>
-                 <input 
-                   id="register-username" 
-                   type="text" 
-                   required 
-                   minlength="3" 
-                   maxlength="32" 
-                   autocomplete="username"
-                   aria-invalid="false"
-                   placeholder="Chọn tên người dùng (3-32 ký tự)"
-                 >
-               </div>
-             </div>
-             
-             <div class="form-group">
-               <label for="register-password" class="required-field">Mật khẩu</label>
-               <div class="input-wrapper password-input-wrapper">
-                 <div class="input-icon password-icon" aria-hidden="true">
-                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                     <rect x="4" y="10" width="16" height="11" rx="2"></rect>
-                     <path d="M8 10V7a4 4 0 0 1 8 0v3"></path>
-                     <circle cx="12" cy="15.5" r="1"></circle>
-                   </svg>
-                 </div>
-                 <input 
-                   id="register-password" 
-                   type="password" 
-                   required 
-                   minlength="12" 
-                   maxlength="128" 
-                   autocomplete="new-password"
-                   aria-invalid="false"
-                   aria-describedby="register-password-toggle"
-                   placeholder="Tạo mật khẩu mạnh (tối thiểu 12 ký tự)"
-                 >
-                 <button 
-                   type="button" 
-                   id="register-password-toggle" 
-                   class="password-toggle-btn"
-                   aria-label="Hiển thị mật khẩu"
-                   aria-controls="register-password"
-                   aria-expanded="false"
-                 >
-                   <svg class="eye-icon" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                     <path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0"></path>
-                     <circle cx="12" cy="12" r="3"></circle>
-                   </svg>
-                   <svg class="eye-slash-icon hidden" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                     <path d="M10.733 5.076a10.744 10.744 0 0 1 11.205 6.575 1 1 0 0 1 0 .696 10.8 10.8 0 0 1-1.444 2.49"></path>
-                     <path d="M14.084 14.158a3 3 0 0 1-4.242-4.242"></path>
-                     <path d="M17.479 17.499A10.75 10.75 0 0 1 2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 4.446-5.143"></path>
-                     <path d="m2 2 20 20"></path>
-                   </svg>
-                 </button>
-               </div>
-             </div>
-           </div>
-           <p id="register-form-message" class="form-message" role="alert" aria-live="polite" hidden></p>
-           
-           <div class="form-actions">
-             <button id="register-submit" class="primary-btn" type="submit">
-               <span class="btn-text">Tạo tài khoản</span>
-               <span class="btn-loading hidden">
-                 <svg class="spinner" viewBox="0 0 24 24">
-                   <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"></circle>
-                   <path fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                 </svg>
-               </span>
-             </button>
-           </div>
-           <div class="auth-switch">
-             <p>Đã có tài khoản? 
-               <button id="show-login" class="text-link" type="button">Đăng nhập ngay</button>
-             </p>
-           </div>
-         </form>
-       </div>
-     </div>
-   </div>
- </section>
+<div class="page-fragment" data-page-fragment="/views/pages/auth.html" data-page-root="auth-screen"></div>
 
   <!-- NAVIGATION -->
   <button id="sidebar-backdrop" class="sidebar-backdrop" type="button" aria-label="Đóng điều hướng" hidden></button>
@@ -7559,6 +7342,7 @@
         data-scope="mine"><svg class="ui-icon" aria-hidden="true"><use href="#icon-trophy"></use></svg>Giải đấu của tôi</button>
       <button class="nav-link role-nav organizer-nav" type="button" data-role="organizer" data-target="tournaments"
         data-scope="managed" hidden><svg class="ui-icon" aria-hidden="true"><use href="#icon-users"></use></svg>Quản lý giải đấu</button>
+      <button class="nav-link role-nav organizer-nav" type="button" data-role="organizer" data-target="operations" hidden><svg class="ui-icon" aria-hidden="true"><use href="#icon-activity"></use></svg>Vận hành hệ thống</button>
     </nav>
     <div class="sidebar-footer">Lập trình, kiểm thử, thi đấu.</div>
   </aside>
@@ -7579,352 +7363,23 @@
   </header>
 
   <!-- DASHBOARD -->
-  <div id="dashboard" class="page dashboard-page">
-    <section class="dashboard-welcome" aria-labelledby="dashboard-welcome-title">
-      <div>
-        <h2 id="dashboard-welcome-title">Tổng quan</h2>
-        <p class="welcome-copy" id="dashboard-welcome-copy">Chào mừng trở lại, <span id="dashboard-username">tuyển
-            thủ</span>. Quản lý Bot và giải đấu của bạn.</p>
-      </div>
-      <div class="dashboard-actions">
-        <button class="primary-btn dashboard-action" id="dashboard-create-bot" type="button"><svg class="ui-icon" aria-hidden="true"><use href="#icon-plus"></use></svg><span id="dashboard-create-bot-label">Tạo Bot</span></button>
-        <button class="primary-btn dashboard-action" id="dashboard-create-tournament" type="button"><svg class="ui-icon" aria-hidden="true"><use href="#icon-plus"></use></svg>Tạo giải
-          đấu</button>
-      </div>
-    </section>
-
-    <section class="summary-grid" aria-label="Tóm tắt không gian làm việc">
-      <article class="summary-card" id="dash-bot-card">
-        <div class="summary-card-main">
-          <span class="summary-card-visual"><svg class="summary-icon" aria-hidden="true"><use id="dash-bot-icon-main" href="#icon-bot"></use></svg></span>
-          <div class="stat-card__header">
-            <p id="dash-bot-label">Mở đăng ký</p><strong id="dash-bot-count">—</strong><small id="dash-bot-detail" class="summary-card-detail">Không gian chiến thuật</small>
-          </div>
-        </div>
-        <span class="summary-card-chip"><svg class="summary-icon" aria-hidden="true"><use id="dash-bot-icon" href="#icon-bot"></use></svg></span>
-      </article>
-      <article class="summary-card" id="dash-record-card" hidden>
-        <div class="summary-card-main">
-          <span class="summary-card-visual"><svg class="summary-icon" aria-hidden="true"><use href="#icon-percent"></use></svg></span>
-          <div class="stat-card__header">
-            <p>Tỉ lệ thắng</p><strong id="dash-record-rate">—</strong><small id="dash-record-matches" class="summary-card-detail">— trận tham gia</small>
-          </div>
-        </div>
-        <span class="summary-card-chip"><svg class="summary-icon" aria-hidden="true"><use href="#icon-activity"></use></svg></span>
-      </article>
-      <article class="summary-card" id="dash-tourney-card">
-        <div class="summary-card-main">
-          <span class="summary-card-visual"><svg class="summary-icon" aria-hidden="true"><use id="dash-tourney-icon-main" href="#icon-users"></use></svg></span>
-          <div class="stat-card__header">
-            <p id="dash-tourney-label">Giải đấu quản lý</p><strong id="dash-tourney-count">—</strong><small id="dash-tourney-detail" class="summary-card-detail">Giải đấu hiện tại</small>
-          </div>
-        </div>
-        <span class="summary-card-chip"><svg class="summary-icon" aria-hidden="true"><use id="dash-tourney-icon" href="#icon-calendar"></use></svg></span>
-      </article>
-      <article class="summary-card" id="dash-queue-card">
-        <div class="summary-card-main">
-          <span class="summary-card-visual"><svg class="summary-icon" aria-hidden="true"><use id="dash-queue-icon-main" href="#icon-activity"></use></svg></span>
-          <div class="stat-card__header">
-            <p id="dash-queue-label">Đang diễn ra</p><strong id="dash-queue-value">—</strong><small class="summary-card-detail">Giải đấu đang thi đấu</small>
-          </div>
-        </div>
-        <span class="summary-card-chip"><svg class="summary-icon" aria-hidden="true"><use id="dash-queue-icon" href="#icon-activity"></use></svg></span>
-      </article>
-    </section>
-
-    <section class="dashboard-section" aria-labelledby="recent-tournaments-title">
-      <div class="section-header" id="dashboard-activity-header">
-        <div>
-          <div class="dashboard-section-title"><svg class="ui-icon" aria-hidden="true"><use href="#icon-trophy"></use></svg><h3 id="recent-tournaments-title">Giải đấu đang mở đăng ký</h3></div>
-          <p class="section-description" id="dashboard-activity-copy">Các giải đấu bạn có thể gửi yêu cầu tham gia.</p>
-        </div>
-        <button class="text-button dashboard-section-link" id="dashboard-open-tournaments" type="button">Xem tất cả <svg class="ui-icon" aria-hidden="true"><use href="#icon-arrow-right"></use></svg></button>
-      </div>
-      <div class="dashboard-list-toolbar" id="dashboard-tournament-toolbar" hidden>
-        <label class="bot-search" for="dashboard-tournament-search"><svg class="ui-icon search-icon" aria-hidden="true"><use href="#icon-search"></use></svg><span class="visually-hidden">Tìm giải đấu</span><input id="dashboard-tournament-search" type="search" placeholder="Tìm giải đấu" autocomplete="off"></label>
-        <label class="dashboard-filter" for="dashboard-tournament-status"><svg class="ui-icon" aria-hidden="true"><use href="#icon-filter"></use></svg><span class="visually-hidden">Lọc trạng thái</span><select id="dashboard-tournament-status" class="input-shell"><option value="all">Tất cả trạng thái</option><option value="draft">Bản nháp</option><option value="registration_open">Đang mở đăng ký</option><option value="registration_closed">Đã đóng đăng ký</option><option value="running">Đang diễn ra</option><option value="completed">Đã hoàn thành</option><option value="cancelled">Đã hủy</option></select></label>
-      </div>
-      <div class="dashboard-empty" id="dash-empty" hidden role="status" aria-live="polite">
-        <h3 id="dash-empty-title">Bắt đầu với OTT Code Arena</h3>
-        <p id="dash-empty-copy">Đăng ký Bot đầu tiên, sau đó tạo giải đấu để bắt đầu thi đấu.</p>
-        <div class="dashboard-empty-actions">
-          <button class="primary-btn" id="dash-empty-bot" type="button">Đăng ký Bot</button>
-          <button class="secondary-btn" id="dash-empty-tournament" type="button" hidden>Tạo giải đấu</button>
-        </div>
-      </div>
-      <div class="recent-tournaments-card" id="dash-recent-table">
-        <table class="data-table" id="dash-recent-tourneys">
-          <thead>
-            <tr>
-              <th>Tên</th>
-              <th id="dashboard-secondary-column">Thể thức</th>
-              <th>Trạng thái</th>
-              <th>Người tham gia</th>
-              <th><span class="visually-hidden">Thao tác</span></th>
-            </tr>
-          </thead>
-          <tbody></tbody>
-        </table>
-      </div>
-    </section>
-    <section class="dashboard-section dashboard-bots-section" id="dash-bots-section" aria-labelledby="dashboard-bots-title" hidden>
-      <div class="section-header">
-        <div>
-          <div class="dashboard-section-title"><svg class="ui-icon" aria-hidden="true"><use href="#icon-code-2"></use></svg><h3 id="dashboard-bots-title">Bot của tôi</h3></div>
-          <p class="section-description">Truy cập nhanh các Bot đã tạo.</p>
-        </div>
-        <button class="text-button dashboard-section-link" id="dashboard-open-bots" type="button">Xem tất cả <svg class="ui-icon" aria-hidden="true"><use href="#icon-arrow-right"></use></svg></button>
-      </div>
-      <div class="dashboard-bot-list" id="dash-bot-list" aria-live="polite"></div>
-    </section>
-  </div>
+  <div class="page-fragment" data-page-fragment="/views/pages/dashboard.html" data-page-root="dashboard"></div>
+<div class="page-fragment" data-page-fragment="/views/pages/operations.html" data-page-root="operations"></div>
 
   <!-- BOTS -->
-  <div id="bots" class="page bots-page">
-    <div class="workspace-header bots-workspace-header">
-      <div>
-        <h2>Bot của tôi</h2>
-        <p>Quản lý các Bot tham gia thi đấu.</p>
-      </div>
-      <button class="primary-btn workspace-primary-action" id="open-bot-modal" type="button"><svg class="ui-icon" aria-hidden="true"><use href="#icon-plus"></use></svg>Tạo Bot</button>
-    </div>
-    <div class="bots-toolbar" id="bots-toolbar" hidden>
-      <label class="bot-search" for="bot-search"><svg class="ui-icon search-icon" aria-hidden="true"><use href="#icon-search"></use></svg><span class="visually-hidden">Tìm Bot theo tên</span><input
-          id="bot-search" type="search" placeholder="Tìm Bot theo tên" autocomplete="off"></label>
-      <span id="bots-count" class="bots-count">Đang tải danh sách Bot</span>
-    </div>
-    <section id="bots-list" class="bot-grid" aria-live="polite" aria-label="Các Bot của bạn"></section>
-  </div>
+  <div class="page-fragment" data-page-fragment="/views/pages/bots.html" data-page-root="bots"></div>
 
   <!-- BOT SOURCE WORKSPACE -->
-  <div id="bot-workspace" class="page bot-workspace-page">
-    <section id="bot-source-workspace" class="bot-source-workspace" aria-labelledby="bot-source-title">
-      <nav class="bot-workspace-breadcrumb" aria-label="Điều hướng Bot">
-        <button id="bot-workspace-back" class="breadcrumb-back" type="button">← <span>Bot của tôi</span></button>
-        <span id="bot-source-status" class="source-workspace-status" role="status" aria-live="polite">Bản nháp
-          mới</span>
-      </nav>
-      <div class="bot-source-header">
-        <div class="bot-workspace-heading">
-          <h2 id="bot-source-title">Tạo Bot mới</h2>
-          <p id="bot-source-description" class="dialog-copy">Viết và quản lý mã nguồn Bot</p>
-          <p id="bot-sdk-description" class="field-help">Strategy SDK 1.0.0 · C++17 và Python 3</p>
-        </div>
-        <div class="bot-source-actions">
-          <button id="open-bot-guide" class="secondary-btn workspace-guide-action" type="button"><svg class="ui-icon" aria-hidden="true"><use href="#icon-file-code-2"></use></svg>Hướng dẫn viết Bot</button>
-          <button id="run-bot-practice" class="secondary-btn workspace-practice-action" type="button" disabled>Chạy thử</button>
-          <button id="save-bot-source" class="primary-btn workspace-save-action" type="button" disabled>Tạo Bot</button>
-        </div>
-      </div>
-      <div class="bot-workspace-info-row">
-        <label class="workspace-name-field" for="bot-workspace-name"><span>Tên Bot</span><input id="bot-workspace-name"
-            class="input-shell" type="text" maxlength="50" autocomplete="off" placeholder="Bot của tôi"
-            aria-describedby="bot-name-error bot-source-error"><span id="bot-name-error" class="form-error" role="alert" hidden></span></label>
-        <label class="source-runtime-picker" for="bot-source-runtime"><span>Ngôn ngữ</span><select
-            id="bot-source-runtime" class="input-shell">
-            <option value="cpp">C++17</option>
-            <option value="python3">Python 3</option>
-          </select></label>
-      </div>
-      <div class="bot-source-grid">
-          <div class="bot-editor-panel">
-          <div class="editor-panel-head"><label for="bot-source-editor">Mã nguồn</label><span id="bot-source-mode"
-              class="source-mode-label">Chưa có phiên bản</span><span id="bot-source-filename"
-              class="editor-filename">main.cpp</span></div>
-          <div class="source-tools" role="toolbar" aria-label="Công cụ mã nguồn">
-            <button type="button" class="source-tool-button" id="source-format" title="Định dạng mã nguồn">Định dạng</button>
-            <button type="button" class="source-tool-button" id="source-theme" title="Đổi giao diện mã nguồn">Sáng</button>
-            <button type="button" class="source-tool-button" id="source-expand" title="Phóng to khung mã nguồn">Phóng to</button>
-          </div>
-          <div class="source-editor-shell">
-            <pre id="bot-source-lines" class="source-line-numbers" aria-hidden="true">1</pre><div class="source-code-layer"><pre id="bot-source-highlight" class="source-highlight" aria-hidden="true"></pre><textarea
-              id="bot-source-editor" class="source-editor" spellcheck="false" rows="24" wrap="off"
-              aria-describedby="bot-source-help bot-source-error"
-              placeholder="// Viết mã nguồn Bot của bạn ở đây"></textarea></div>
-          </div>
-          <div class="editor-footer"><span id="bot-source-help" class="field-help">C++17 · UTF-8 · Tối đa 64 KiB</span><span id="source-cursor-position" class="field-help">Dòng 1, cột 1</span><span id="source-byte-count" class="field-help">0 / 64 KiB</span><span id="source-syntax-status" class="field-help">Cú pháp hợp lệ</span><span class="editor-sandbox">Docker Sandbox</span></div>
-          <p id="bot-source-error" class="form-error" role="alert" hidden></p>
-          <div class="source-editor-actions"><span class="workspace-save-hint">Mỗi lần lưu tạo một phiên bản bất biến mới.</span></div>
-        </div>
-        <aside class="bot-revision-panel" aria-labelledby="bot-revisions-title">
-          <div class="bot-revision-heading">
-            <h3 id="bot-revisions-title">Phiên bản</h3><span id="bot-revision-count" class="bots-count">0 phiên
-              bản</span>
-          </div>
-          <p id="bot-sdk-reference" class="field-help">Phiên bản đã lưu không thể chỉnh sửa. Tạo bản nháp để tiếp tục
-            phát triển.</p>
-          <div id="bot-revision-list" class="bot-revision-list" aria-live="polite"></div>
-        </aside>
-      </div>
-    </section>
-  </div>
+  <div class="page-fragment" data-page-fragment="/views/pages/bot-workspace.html" data-page-root="bot-workspace"></div>
 
   <!-- TOURNAMENTS LIST -->
-  <div id="tournaments" class="page tournaments-page">
-    <div class="workspace-header tournaments-workspace-header">
-      <div>
-        <h2>Giải đấu của tôi</h2>
-        <p>Tạo và quản lý các giải đấu giữa những Bot đã đăng ký.</p>
-      </div>
-      <button class="primary-btn workspace-primary-action" id="open-tournament-modal" type="button"><svg class="ui-icon" aria-hidden="true"><use href="#icon-plus"></use></svg>Tạo giải
-        đấu</button>
-    </div>
-    <div class="tournament-toolbar" id="tournaments-toolbar" hidden>
-      <div class="tournament-toolbar-controls">
-        <label class="bot-search" for="tournament-search"><svg class="ui-icon search-icon" aria-hidden="true"><use href="#icon-search"></use></svg><span class="visually-hidden">Tìm giải đấu theo tên</span><input id="tournament-search" type="search" placeholder="Tìm giải đấu theo tên" autocomplete="off"></label>
-        <label class="tournament-filter" for="tournament-status-filter"><svg class="ui-icon" aria-hidden="true"><use href="#icon-filter"></use></svg><span class="visually-hidden">Lọc trạng thái</span><select id="tournament-status-filter" class="input-shell"><option value="all">Tất cả trạng thái</option><option value="draft">Bản nháp</option><option value="registration_open">Đang mở đăng ký</option><option value="registration_closed">Đã đóng đăng ký</option><option value="running">Đang diễn ra</option><option value="completed">Đã hoàn thành</option><option value="cancelled">Đã hủy</option></select></label>
-      </div>
-      <span id="tournaments-count" class="bots-count">Đang tải danh sách giải đấu</span>
-    </div>
-    <section id="tournaments-list" class="tournament-grid" aria-live="polite" aria-label="Các giải đấu của bạn">
-    </section>
-  </div>
+  <div class="page-fragment" data-page-fragment="/views/pages/tournaments.html" data-page-root="tournaments"></div>
 
   <!-- TOURNAMENT DETAILS -->
-  <div id="tournament-detail" class="page tournament-detail-redesign">
-    <div class="tournament-detail-hero">
-      <div class="tournament-heading-copy"><button class="tournament-breadcrumb" id="back-to-tournaments" type="button"><svg class="td-icon td-icon--sm" aria-hidden="true"><use href="#td-icon-arrow-left"></use></svg><span>Quản lý giải đấu</span><span class="breadcrumb-separator" aria-hidden="true">/</span><span id="td-breadcrumb-name">Đang tải</span></button>
-        <div class="tournament-detail-title">
-          <h2 id="td-name">Đang tải giải đấu…</h2><span id="td-status" class="status-badge">Đang tải</span>
-        </div>
-        <p class="dialog-copy" id="td-subtitle">Quản lý tiến độ, người tham gia và kết quả giải đấu.</p>
-      </div>
-      <div id="td-actions" class="tournament-actions" aria-label="Thao tác giải đấu"></div>
-    </div>
-    <ol id="td-lifecycle" class="tournament-lifecycle" aria-label="Tiến trình giải đấu"></ol><span class="lifecycle-mobile-count" id="td-lifecycle-count" aria-hidden="true"></span>
-    <section class="tournament-next-step" id="td-next-step" aria-live="polite"></section>
-    <section class="tournament-podium-panel" id="td-podium-panel" hidden aria-labelledby="td-podium-title">
-      <div class="podium-heading">
-        <div class="podium-heading-copy">
-          <div class="podium-heading-title"><svg class="td-icon td-icon--md" aria-hidden="true"><use href="#td-icon-trophy"></use></svg><span id="td-podium-title">Vinh danh kết quả chung cuộc</span></div>
-          <p>Ba vị trí dẫn đầu của giải đấu</p>
-        </div>
-      </div>
-      <div class="podium-list" id="td-podium-list"></div>
-    </section>
-    <section class="tournament-panel" id="td-requests" hidden aria-labelledby="td-requests-title">
-      <div class="tournament-panel-head">
-        <div><h3><svg class="td-icon td-icon--md panel-heading-icon" aria-hidden="true"><use href="#td-icon-clipboard-list"></use></svg><span id="td-requests-title">Yêu cầu tham gia</span></h3></div>
-        <span class="panel-count request-pending-count" id="td-requests-count" aria-live="polite"></span>
-      </div>
-      <div id="td-request-list" aria-live="polite"></div>
-    </section>
-    <div class="tournament-overview">
-      <section class="tournament-panel">
-        <div class="tournament-panel-head">
-          <div><p class="panel-kicker">Người tham gia</p></div><span class="panel-count" id="td-pcount">0</span>
-        </div>
-        <ul id="td-participants" class="participant-list"></ul><button id="btn-register-bot" type="button"
-          class="secondary-btn detail-register" hidden><svg class="td-icon td-icon--sm" aria-hidden="true"><use href="#td-icon-user-round-plus"></use></svg>Đăng ký Bot</button>
-      </section>
-      <section class="tournament-panel standings-panel">
-        <div class="tournament-panel-head">
-          <div class="standings-heading"><svg class="td-icon td-icon--md" aria-hidden="true"><use href="#td-icon-trophy"></use></svg><p class="panel-kicker">Bảng xếp hạng</p></div><span id="td-execution-status" class="bots-count" role="status"
-            aria-live="polite"></span><span id="td-stats" class="bots-count"></span>
-        </div>
-        <div id="td-standings-empty" class="detail-empty" role="status" hidden></div>
-        <div class="standings-table-scroll" role="region" aria-label="Bảng xếp hạng, cuộn ngang để xem đầy đủ"
-          tabindex="0">
-          <table class="data-table" id="td-standings">
-            <thead>
-              <tr>
-                <th>Hạng</th>
-                <th>Tên</th>
-                <th>ĐT</th>
-                <th>Thắng</th>
-                <th>Hòa</th>
-                <th>Thua</th>
-                <th>Điểm</th>
-              </tr>
-            </thead>
-            <tbody></tbody>
-          </table>
-        </div>
-      </section>
-    </div>
-    <section class="tournament-schedule">
-      <div class="schedule-heading"><div><p class="panel-kicker">Lịch thi đấu và trận đấu</p></div><span class="schedule-caption">Theo dõi từng vòng và kết quả</span></div>
-      <div id="td-schedule"></div>
-    </section>
-  </div>
+  <div class="page-fragment" data-page-fragment="/views/pages/tournament-detail.html" data-page-root="tournament-detail"></div>
 
   <!-- REPLAY VIEWER -->
-  <div id="replay-view" class="page">
-    <div class="replay-header replay-match-header">
-      <div class="replay-heading-row">
-        <div>
-          <p class="section-kicker" id="replay-view-kicker">XEM LẠI TRẬN ĐẤU</p>
-          <h2 id="replay-view-title">Diễn biến từng nước</h2>
-        </div>
-        <span class="replay-status-badge" id="replay-status-badge">Đã hoàn thành</span>
-      </div>
-      <div class="replay-header-subline">
-        <button class="tournament-view-btn replay-back-link" id="close-replay" type="button"><svg class="ui-icon" aria-hidden="true"><use href="#icon-arrow-left"></use></svg>Quay lại giải đấu</button>
-        <span id="replay-context-note">Bản ghi trận đấu</span>
-      </div>
-      <p id="r-result-text" class="replay-result" aria-live="polite"></p>
-    </div>
-    <div id="replay-loading" class="replay-loading" role="status" aria-live="polite" hidden>Đang tải bản xem lại trận
-      đấu…</div>
-    <div id="replay-error" class="replay-error-panel" role="alert" hidden><span id="replay-error-message"></span><button
-        id="replay-retry" class="secondary-btn" type="button">Thử lại</button></div>
-    <section class="replay-series-card" id="replay-series-card" hidden aria-label="Tỷ số trận đấu">
-      <div class="replay-players" aria-label="Hai người chơi">
-        <div class="replay-player-a-label replay-player-identity"><span class="replay-player-name"
-            id="r-p1-name">Người chơi A</span><span class="replay-player-bot" id="r-p1-bot"></span><span
-            class="replay-player-pieces" id="r-p1-pieces"></span><span class="replay-player-score" id="r-p1-score">0</span></div>
-        <span class="replay-versus" aria-hidden="true">—</span>
-        <div class="replay-player-b-label replay-player-identity"><span class="replay-player-name"
-            id="r-p2-name">Người chơi B</span><span class="replay-player-bot" id="r-p2-bot"></span><span
-            class="replay-player-pieces" id="r-p2-pieces"></span><span class="replay-player-score" id="r-p2-score">0</span></div>
-      </div>
-      <div id="replay-series-slot"></div>
-    </section>
-    <div id="replay-content" class="replay-layout" hidden>
-      <section class="replay-board-panel" aria-label="Bàn cờ trận đấu">
-        <div class="replay-panel-heading">
-          <h3 id="replay-board-title">Ván 1 · Diễn biến</h3>
-          <span id="r-turn-display" class="replay-panel-count" aria-live="polite">0 / 0 lượt</span>
-        </div>
-        <div class="replay-board-wrap">
-          <div class="coord-header" id="coord-header"></div>
-          <div class="replay-board-row">
-            <div class="coord-side" id="coord-side"></div>
-            <div class="replay-board" id="r-board" role="grid" aria-label="Bàn cờ xem lại 9 x 9"></div>
-          </div>
-        </div>
-        <p id="r-current-move" class="replay-current-move" aria-live="polite">Vị trí ban đầu</p>
-        <label class="replay-scrubber-label" for="replay-scrubber">Vị trí xem lại</label>
-        <input id="replay-scrubber" type="range" min="-1" value="-1" step="1" aria-label="Chọn vị trí xem lại">
-        <div class="replay-controls" aria-label="Điều khiển xem lại"><button class="icon-btn replay-control" id="btn-replay-start"
-            type="button" aria-label="Về đầu" title="Về đầu (Home)"><svg class="ui-icon" aria-hidden="true"><use href="#icon-skip-back"></use></svg></button><button class="icon-btn replay-control" id="btn-replay-prev" type="button"
-            aria-label="Lùi một nước" title="Lùi một nước (←)"><svg class="ui-icon" aria-hidden="true"><use href="#icon-step-back"></use></svg></button><button class="primary-btn replay-play replay-control" id="btn-replay-play"
-            type="button" aria-label="Phát" title="Phát / Tạm dừng (Space)" aria-pressed="false"><svg class="ui-icon" aria-hidden="true"><use href="#icon-play"></use></svg><span class="replay-control-label">Phát</span></button><button class="icon-btn replay-control" id="btn-replay-next" type="button"
-            aria-label="Tiến một nước" title="Tiến một nước (→)"><svg class="ui-icon" aria-hidden="true"><use href="#icon-step-forward"></use></svg></button><button class="icon-btn replay-control" id="btn-replay-end" type="button"
-            aria-label="Đến cuối" title="Đến cuối (End)"><svg class="ui-icon" aria-hidden="true"><use href="#icon-skip-forward"></use></svg></button><label class="replay-speed-label" for="replay-speed">Tốc độ phát<select id="replay-speed">
-              <option value="1200">Chậm</option>
-              <option value="800" selected>Bình thường</option>
-              <option value="400">Nhanh</option>
-            </select></label></div>
-        <div class="replay-shortcuts-hint" aria-hidden="true">
-          <span><kbd>Space</kbd> Phát / Dừng</span>
-          <span><kbd>←</kbd> <kbd>→</kbd> Lùi / Tiến</span>
-          <span><kbd>Home</kbd> <kbd>End</kbd> Đầu / Cuối</span>
-        </div>
-      </section>
-      <aside class="replay-timeline-panel">
-        <div class="replay-panel-heading"><h3 id="replay-history-title">Lịch sử nước đi</h3><span id="replay-history-count" class="replay-panel-count">0 lượt</span></div>
-        <p id="r-selected-move" class="replay-selected-move" aria-live="polite">Vị trí ban đầu</p>
-        <div id="replay-timeline" class="replay-timeline" aria-live="polite"></div>
-        <div class="replay-details" aria-label="Thông tin trận đấu">
-          <div class="replay-detail"><small>Người thắng</small><strong id="r-winner">—</strong></div>
-          <div class="replay-detail"><small>Kết thúc</small><strong id="r-termination">—</strong></div>
-          <div class="replay-detail"><small>Giao thức</small><strong id="r-protocol">—</strong></div>
-          <div class="replay-detail replay-match-id-detail"><small>Mã trận</small><div class="replay-match-id-value"><strong id="r-match-id">—</strong><button class="icon-btn replay-copy-id" id="copy-replay-match-id" type="button" aria-label="Sao chép mã trận" title="Sao chép mã trận"><svg class="ui-icon" aria-hidden="true"><use href="#icon-copy"></use></svg></button></div></div>
-        </div>
-      </aside>
-    </div>
-  </div>
+  <div class="page-fragment" data-page-fragment="/views/pages/replay.html" data-page-root="replay-view"></div>
 
 
   <!-- MODALS -->
@@ -8183,7 +7638,7 @@ return legal_moves[0]</pre>
       <div id="registration-fields" hidden>
         <p id="registration-revision-summary" class="field-help" aria-live="polite">Chưa chọn Bot và revision</p>
         <div class="form-group"><label for="reg-part-name">Tên hiển thị người tham gia</label><input type="text"
-            id="reg-part-name" class="input-shell" style="width: 100%" required autocomplete="nickname"
+            id="reg-part-name" class="input-shell" style="width: 100%" required autocomplete="name"
             aria-describedby="reg-part-name-help registration-form-error"></div>
         <small id="reg-part-name-help" class="field-help">Tên này được hiển thị trong danh sách và kết quả của giải
           đấu.</small>
@@ -8201,6 +7656,11 @@ return legal_moves[0]</pre>
         </div>
         <p id="registration-form-error" class="form-error" role="alert" hidden></p>
       </div>
+      <section id="registration-submission-status" class="registration-submission-status" role="status" aria-live="polite" hidden>
+        <strong id="registration-submission-title">Yêu cầu đã được tiếp nhận</strong>
+        <p id="registration-submission-state">Đang đưa revision vào hàng đợi kiểm tra.</p>
+        <p id="registration-submission-diagnostic" class="field-help" hidden></p>
+      </section>
       <div class="dialog-actions"><button class="secondary-btn" type="button"
           data-close-modal="register-bot-tourney-modal">Hủy</button><button class="primary-btn" id="submit-registration"
           type="button" hidden>Đăng ký Bot</button></div>
@@ -8399,7 +7859,7 @@ return legal_moves[0]</pre>
     </defs>
   </svg>
 
-  <script src="app.js?v=retry-flow-5"></script>
+    <script src="/js/page-loader.js?v=fragment-loader-3"></script>
 </body>
 
 </html>

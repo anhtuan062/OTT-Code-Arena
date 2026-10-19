@@ -126,6 +126,22 @@ describe('Tournament Persistence', () => {
     expect(() => JSON.stringify(loaded)).not.toThrow();
   });
 
+  it('serializes parallel list reads with saves without exposing recovery-window races', async () => {
+    const initial = createTestTournament('parallel-list-save');
+    await repository.save(initial);
+
+    const saves = Array.from({ length: 24 }, (_, index) => {
+      const next = createTestTournament('parallel-list-save');
+      next.name = `revision-${index}`;
+      return repository.save(next);
+    });
+    const reads = Array.from({ length: 24 }, () => repository.list());
+    const results = await Promise.all([...saves, ...reads]);
+
+    expect(results.slice(24).every(list => list.some(item => item.tournamentId === 'parallel-list-save'))).toBe(true);
+    expect((await repository.load('parallel-list-save'))?.name).toMatch(/^revision-/);
+  });
+
   describe('FileTournamentRepository', () => {
     it('should save and load tournament', async () => {
       const tournament = createTestTournament('tourney-1');

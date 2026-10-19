@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
+import { readAssembledFrontendMarkup } from './frontend-fixtures';
 
 const read = (name: string) => readFile(resolve(process.cwd(), name), 'utf8');
 
@@ -14,7 +15,7 @@ describe('SPA rendering and request foundations', () => {
   });
 
   it('keeps authentication views exclusive and keyboard reachable', async () => {
-    const [app, page] = await Promise.all([read('app.js'), read('index.html')]);
+    const [app, page] = await Promise.all([read('app.js'), readAssembledFrontendMarkup()]);
     expect(app).toContain('function setAuthMode');
     expect(app).toContain('loginForm.hidden = !loginMode');
     expect(app).toContain('registerForm.hidden = loginMode');
@@ -33,18 +34,18 @@ describe('SPA rendering and request foundations', () => {
   });
 
   it('guards async updates and responsive navigation by current view/session', async () => {
-    const [app, page] = await Promise.all([read('app.js'), read('index.html')]);
+    const [app, page] = await Promise.all([read('app.js'), readAssembledFrontendMarkup()]);
     expect(app).toContain('authRevision');
     expect(app).toContain('viewRevision');
     expect(app).toContain('isCurrentView');
     expect(app).toContain('function toggleMobileNavigation');
     expect(app).toContain("state.tournamentScope = button.dataset.target === 'my-tournaments' ? 'mine' : 'discoverable'");
     expect(page).toContain('id="sidebar-backdrop"');
-    expect(page).toContain('id="my-tournaments"');
+    expect(page).toContain('id="tournament-tab-mine"');
   });
 
   it('keeps dashboard queue data organizer-only and role-specific', async () => {
-    const [app, page] = await Promise.all([read('app.js'), read('index.html')]);
+    const [app, page] = await Promise.all([read('app.js'), readAssembledFrontendMarkup()]);
     expect(app).toContain('if (queueCard) queueCard.hidden = competitor');
     expect(app).toContain("competitor ? '/tournaments/discoverable' : '/tournaments'");
     expect(app).toContain("id: 'dashboard-username'");
@@ -53,7 +54,7 @@ describe('SPA rendering and request foundations', () => {
   });
 
   it('keeps Bot editing safe, bounded, searchable, and revision-aware', async () => {
-    const [app, page] = await Promise.all([read('app.js'), read('index.html')]);
+    const [app, page] = await Promise.all([read('app.js'), readAssembledFrontendMarkup()]);
     expect(app).toContain('function renderBotList');
     expect(app).toContain('function botSourceInput');
     expect(app).toContain("new TextEncoder().encode(source).byteLength > 64 * 1024");
@@ -65,7 +66,7 @@ describe('SPA rendering and request foundations', () => {
   });
 
   it('keeps tournament actions and detail rendering guarded', async () => {
-    const [app, page] = await Promise.all([read('app.js'), read('index.html')]);
+    const [app, page] = await Promise.all([read('app.js'), readAssembledFrontendMarkup()]);
     expect(app).toContain("/tournaments/${tournamentId}/action");
     expect(app).toContain("isCurrentView('tournament-detail'");
     expect(app).toContain('function renderTournamentLifecycle');
@@ -76,7 +77,7 @@ describe('SPA rendering and request foundations', () => {
   });
 
   it('keeps replay stepping, playback cleanup, and participant projections safe', async () => {
-    const [app, page] = await Promise.all([read('app.js'), read('index.html')]);
+    const [app, page] = await Promise.all([read('app.js'), readAssembledFrontendMarkup()]);
     expect(app).toContain('function buildStateAt');
     expect(app).toContain('clearTimeout(state.replayTimer)');
     expect(app).toContain('state.replayPlaybackToken');
@@ -99,7 +100,7 @@ describe('SPA rendering and request foundations', () => {
   });
 
   it('keeps registration, cancellation, and authorized POST mutation flows actionable', async () => {
-    const [app, page] = await Promise.all([read('app.js'), read('index.html')]);
+    const [app, page] = await Promise.all([read('app.js'), readAssembledFrontendMarkup()]);
     expect(app).toContain('showRegistrationErrorState');
     expect(app).toContain('body: JSON.stringify({ participantName, botId, revisionId })');
     expect(app).toContain("await api(endpoint, { method: 'POST'");

@@ -11,7 +11,7 @@ import * as path from 'path';
 import * as fs from 'fs/promises';
 import { randomUUID } from 'crypto';
 
-export const CURRENT_SCHEMA_VERSION = 5;
+export const CURRENT_SCHEMA_VERSION = 8;
 
 export interface DatabaseConfig {
   path: string;
@@ -196,7 +196,53 @@ function getMigrations(): string[] {
     CREATE INDEX IF NOT EXISTS idx_spectator_entitlements_tournament
       ON spectator_entitlements(tournament_id, revoked_at);
     CREATE INDEX IF NOT EXISTS idx_spectator_entitlements_viewer
-      ON spectator_entitlements(viewer_id, revoked_at);`];
+      ON spectator_entitlements(viewer_id, revoked_at);`, `
+    CREATE TABLE IF NOT EXISTS bot_preflight_validations (
+      validation_id TEXT PRIMARY KEY,
+      revision_id TEXT NOT NULL,
+      source_digest TEXT NOT NULL,
+      runtime_id TEXT NOT NULL,
+      execution_mode TEXT NOT NULL,
+      sdk_version TEXT,
+      sdk_digest TEXT,
+      protocol_version TEXT NOT NULL,
+      checker_version TEXT NOT NULL,
+      environment_key TEXT NOT NULL,
+      status TEXT NOT NULL CHECK (status IN ('pending', 'passed', 'failed', 'expired')),
+      error_code TEXT,
+      diagnostic_json TEXT,
+      requested_at TEXT NOT NULL,
+      completed_at TEXT,
+      expires_at TEXT,
+      UNIQUE (revision_id, source_digest, runtime_id, execution_mode, sdk_version, sdk_digest, protocol_version, checker_version, environment_key),
+      FOREIGN KEY (revision_id) REFERENCES bot_revisions(revision_id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_bot_preflight_revision
+      ON bot_preflight_validations(revision_id, requested_at DESC);`, `
+    ALTER TABLE bot_preflight_validations ADD COLUMN attempt_count INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE bot_preflight_validations ADD COLUMN next_attempt_at TEXT;`, `
+    CREATE TABLE IF NOT EXISTS tournament_match_jobs (
+      job_id TEXT PRIMARY KEY,
+      tournament_id TEXT NOT NULL,
+      pairing_id TEXT NOT NULL,
+      match_id TEXT NOT NULL,
+      idempotency_key TEXT NOT NULL UNIQUE,
+      status TEXT NOT NULL CHECK (status IN ('queued', 'running', 'completed', 'failed', 'cancelled')),
+      attempt_count INTEGER NOT NULL DEFAULT 0,
+      lease_owner TEXT,
+      lease_expires_at TEXT,
+      fencing_token INTEGER NOT NULL DEFAULT 0,
+      last_error TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      started_at TEXT,
+      completed_at TEXT,
+      UNIQUE (tournament_id, pairing_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_match_jobs_claimable
+      ON tournament_match_jobs(status, lease_expires_at, updated_at);
+    CREATE INDEX IF NOT EXISTS idx_match_jobs_tournament
+      ON tournament_match_jobs(tournament_id, status);`];
 }
 
 export async function initializeDatabase(config: DatabaseConfig): Promise<DatabaseWrapper> {

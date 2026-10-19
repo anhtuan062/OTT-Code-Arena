@@ -102,6 +102,11 @@ export { ChildProcessExecutor, createChildProcessExecutor } from './child-proces
 export { DockerExecutor, createDockerExecutor, isSafeExecutionId } from './docker-executor.js';
 export { BotRunnerAdapter, createBotRunnerAdapter } from './bot-runner-adapter.js';
 export { ExecutionQueue, createExecutionQueue } from './execution-queue.js';
+export {
+  DockerExecutionLimiter,
+  DEFAULT_DOCKER_EXECUTION_CONCURRENCY,
+  globalDockerExecutionLimiter,
+} from './docker-execution-limiter.js';
 export { ExecutionAuditLogger, createAuditLogger } from './audit-logger.js';
 export { configuredDockerImage, validateDockerImage, isProductionImagePolicy } from './image-config.js';
 export {
@@ -117,6 +122,7 @@ export {
   buildStrategyPythonRuntimeDockerArgs,
   resolveCppCompilationBackend,
   WorkspacePreparationError,
+  ownershipLabels,
   parseRevisionBotResult,
 } from './revision-docker-executor.js';
 export { STRATEGY_SDK_VERSION, getStrategySdkIdentity, materializeStrategySdk, strategySdkRoot } from './strategy-sdk.js';

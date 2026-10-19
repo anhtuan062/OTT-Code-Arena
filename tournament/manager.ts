@@ -28,6 +28,10 @@ import {
   DEFAULT_SCORING_CONFIG,
   VALID_STATUS_TRANSITIONS,
   MIN_PARTICIPANTS,
+  MAX_PARTICIPANTS,
+  MAX_PARTICIPANTS_BY_FORMAT,
+  getMaxParticipants,
+  TournamentUpdateDetails,
 } from './types.js';
 
 import {
@@ -73,6 +77,25 @@ import type { SourceRevisionExecution } from '@match-runner/types.js';
 import { createSeededInitialPieces } from '@engine/index.js';
 import { createHash, randomUUID } from 'crypto';
 import { gameWinnerForParticipants, getSeriesSides, seriesScore, seriesWinner } from './series.js';
+import {
+  isMultiStageTournament,
+  createMultiStageTournament,
+  commitMatchResultAndResolveSlots,
+  canPairingExecute,
+  getCurrentStage,
+  getExecutablePairings,
+  isTournamentComplete,
+  getAllTournamentPairings,
+  findPairingInTournament,
+  isSlotPlaceholder,
+} from './multi-stage.js';
+import { MatchScheduler } from './match-scheduler.js';
+import type { MatchSchedulerCheckpoint } from './match-scheduler.js';
+import { isPairingDispatchEligible } from './match-scheduler.js';
+import { TournamentCommitCoordinator } from './commit-coordinator.js';
+import type { MatchJobClaim, MatchJobStore } from './match-job-store.js';
+import { FairMatchDispatcher } from './fair-match-dispatcher.js';
+import type { FairMatchQuantum } from './fair-match-dispatcher.js';
 
 const BO3_GAME_TRANSITION_DELAY_MS = 2500;
 
@@ -95,8 +118,21 @@ function classifyMatchExecutionFailure(error: unknown): { code: PairingFailureCo
   if (/pinned source revision|source revision|integrity/i.test(message)) {
     return { code: 'SOURCE_REVISION', reason: 'Pinned source revision unavailable or failed integrity validation' };
   }
+  if (/timed?\s*out|timeout|time limit/i.test(message)) {
+    return { code: 'TIMEOUT', reason: 'Match execution timed out' };
+  }
   return { code: 'EXECUTION', reason: 'Match execution failed' };
 }
+
+type SchedulerCompletedData = ExecutedMatchResult & {
+  /** BO1 commits are completed by the scheduler callback; series commits are already durable. */
+  tournamentMatchRecord?: TournamentMatchRecord;
+  committed?: boolean;
+};
+
+type SchedulerExecution =
+  | { kind: 'completed'; data: SchedulerCompletedData }
+  | { kind: 'failed'; error: unknown };
 
 /**
  * Tournament application configuration
@@ -109,8 +145,63 @@ export interface TournamentAppConfig {
   storageDir?: string;
   persistenceTimeoutMs?: number;
   validateSourceRevision?: (execution: SourceRevisionExecution) => Promise<boolean>;
+  validateTournamentRevisions?: (executions: SourceRevisionExecution[]) => Promise<{ valid: boolean; pending: boolean; error?: string }>;
   resolveSourceRevision?: (execution: SourceRevisionExecution) => Promise<Buffer | null>;
   sourceRevisionExecutor?: SourceRevisionExecutor;
+  enableMultiStage?: boolean;
+  concurrencyLimit?: number;
+  /** Opt-in BO1 scheduler path. It defaults to one worker. */
+  enableBo1MatchScheduler?: boolean;
+  /** QA-only scheduler override. Omitted in production; accepted value is 2. */
+  qaMaxActiveMatches?: 2;
+  /** Explicit series scheduler concurrency. Defaults to one active pairing. */
+  seriesMatchConcurrency?: 1 | 2;
+  /** Required safety gate when seriesMatchConcurrency is 2. */
+  enableSeriesConcurrency2?: boolean;
+  matchJobStore?: MatchJobStore;
+  matchJobWorkerId?: string;
+  matchJobLeaseMs?: number;
+  /** Optional diagnostics for the opt-in BO1 scheduler path. */
+  onBo1SchedulerCheckpoint?: (checkpoint: MatchSchedulerCheckpoint) => void;
+}
+
+export interface SeriesSchedulerRuntimeConfig {
+  enabled: boolean;
+  concurrency: 1 | 2;
+  concurrency2Enabled: boolean;
+}
+
+/**
+ * Resolve the production opt-in from environment configuration.
+ * A value of 2 is rejected unless both scheduler opt-ins are explicit.
+ * Configuration is read when the manager is created; changing environment
+ * variables does not interrupt an already-running scheduler.
+ */
+export function resolveSeriesSchedulerRuntimeConfig(
+  env: NodeJS.ProcessEnv = process.env,
+): SeriesSchedulerRuntimeConfig {
+  const enabledValue = env.OTT_ENABLE_SERIES_SCHEDULER?.trim().toLowerCase();
+  const concurrencyValue = env.OTT_SERIES_MATCH_CONCURRENCY?.trim() || '1';
+  const concurrency2Value = env.OTT_ENABLE_SERIES_CONCURRENCY_2?.trim().toLowerCase();
+  if (enabledValue && enabledValue !== 'true' && enabledValue !== 'false') {
+    throw new Error('OTT_ENABLE_SERIES_SCHEDULER must be true or false');
+  }
+  if (concurrency2Value && concurrency2Value !== 'true' && concurrency2Value !== 'false') {
+    throw new Error('OTT_ENABLE_SERIES_CONCURRENCY_2 must be true or false');
+  }
+  if (concurrencyValue !== '1' && concurrencyValue !== '2') {
+    throw new Error('OTT_SERIES_MATCH_CONCURRENCY must be 1 or 2');
+  }
+  const enabled = enabledValue === 'true';
+  const concurrency = Number(concurrencyValue) as 1 | 2;
+  const concurrency2Enabled = concurrency2Value === 'true';
+  if (concurrency === 2 && (!enabled || !concurrency2Enabled)) {
+    throw new Error(
+      'Concurrency 2 requires OTT_ENABLE_SERIES_SCHEDULER=true and ' +
+      'OTT_ENABLE_SERIES_CONCURRENCY_2=true',
+    );
+  }
+  return { enabled, concurrency, concurrency2Enabled };
 }
 
 /**
@@ -130,32 +221,101 @@ export class TournamentManager {
   private executor: MatchExecutor;
   private defaultMatchConfig: TournamentMatchConfig;
   private defaultScoringConfig: TournamentScoringConfig;
+  private readonly enableMultiStage: boolean;
+  private readonly concurrencyLimit: number;
+  private readonly enableBo1MatchScheduler: boolean;
+  private readonly qaMaxActiveMatches: 1 | 2;
+  private readonly onBo1SchedulerCheckpoint?: (checkpoint: MatchSchedulerCheckpoint) => void;
+  private readonly commitCoordinator: TournamentCommitCoordinator;
+  private readonly activeSchedulers = new Map<string, { cancel(reason?: unknown): void; stopDispatching?(): void }>();
   private readonly cancelledTournaments = new Set<string>();
+  private readonly activePairingExecutions = new Set<string>();
   private readonly pendingResultWrites = new Map<string, Set<Promise<void>>>();
   private readonly terminalTransitionLocks = new Map<string, Promise<void>>();
   private readonly tournamentWriteLocks = new Map<string, Promise<void>>();
   private readonly tournamentMutationLocks = new Map<string, Promise<void>>();
   private readonly persistenceTimeoutMs: number;
   private readonly validateSourceRevision?: (execution: SourceRevisionExecution) => Promise<boolean>;
+  private readonly validateTournamentRevisions?: (executions: SourceRevisionExecution[]) => Promise<{ valid: boolean; pending: boolean; error?: string }>;
   private readonly resolveSourceRevision?: (execution: SourceRevisionExecution) => Promise<Buffer | null>;
   private readonly sourceRevisionExecutor?: SourceRevisionExecutor;
+  private matchJobStore?: MatchJobStore;
+  private matchJobWorkerId = `manager-${randomUUID()}`;
+  private matchJobLeaseMs = 5 * 60_000;
+  private fairMatchDispatcher?: FairMatchDispatcher<ExecutedMatchResult>;
+  private matchAdmissionController?: (activeDispatches: number) => boolean;
+  private projectionInvalidator?: (tournamentId: string, scope: 'tournament' | 'live') => void;
+  private readonly fairRegionCursors = new Map<string, number>();
   private readonly liveSnapshots = new Map<string, { tournamentId: string; snapshot: LiveMatchSnapshot; expiresAt: number }>();
   private readonly liveHistories = new Map<string, LiveMatchSnapshot[]>();
   private readonly liveSubscribers = new Map<string, Set<(snapshot: LiveMatchSnapshot) => void>>();
+  private shuttingDown = false;
 
   constructor(config: TournamentAppConfig) {
     this.repository = config.repository;
     this.executor = config.executor;
     this.defaultMatchConfig = { ...DEFAULT_TOURNAMENT_MATCH_CONFIG, ...config.defaultMatchConfig };
     this.defaultScoringConfig = { ...DEFAULT_SCORING_CONFIG, ...config.defaultScoringConfig };
+    this.enableMultiStage = config.enableMultiStage ?? false;
+    this.concurrencyLimit = config.concurrencyLimit && config.concurrencyLimit > 0 ? config.concurrencyLimit : 1;
+    this.enableBo1MatchScheduler = config.enableBo1MatchScheduler ?? false;
+    const requestedConcurrency = config.seriesMatchConcurrency ?? (config.qaMaxActiveMatches === 2 ? 2 : 1);
+    if (requestedConcurrency !== 1 && requestedConcurrency !== 2) {
+      throw new RangeError('Series match concurrency must be 1 or 2');
+    }
+    const concurrency2Enabled = config.enableSeriesConcurrency2 === true || config.qaMaxActiveMatches === 2;
+    if (requestedConcurrency === 2 && !concurrency2Enabled) {
+      throw new Error('Series match concurrency 2 requires explicit enableSeriesConcurrency2=true');
+    }
+    this.qaMaxActiveMatches = requestedConcurrency;
+    this.onBo1SchedulerCheckpoint = config.onBo1SchedulerCheckpoint;
+    this.commitCoordinator = new TournamentCommitCoordinator(this.repository);
     this.persistenceTimeoutMs = config.persistenceTimeoutMs ?? 5000;
     this.validateSourceRevision = config.validateSourceRevision;
+    this.validateTournamentRevisions = config.validateTournamentRevisions;
     this.resolveSourceRevision = config.resolveSourceRevision;
     this.sourceRevisionExecutor = config.sourceRevisionExecutor;
+    this.matchJobStore = config.matchJobStore;
+    this.matchJobWorkerId = config.matchJobWorkerId ?? this.matchJobWorkerId;
+    this.matchJobLeaseMs = Math.max(1_000, config.matchJobLeaseMs ?? this.matchJobLeaseMs);
+  }
+
+  setMatchJobStore(store: MatchJobStore, workerId: string, leaseMs = this.matchJobLeaseMs): void {
+    this.matchJobStore = store;
+    this.matchJobWorkerId = workerId;
+    this.matchJobLeaseMs = Math.max(1_000, leaseMs);
+  }
+
+  setFairMatchDispatcher(dispatcher: FairMatchDispatcher<ExecutedMatchResult>): void {
+    this.fairMatchDispatcher = dispatcher;
+  }
+
+  setMatchAdmissionController(admission: ((activeDispatches: number) => boolean) | undefined): void {
+    this.matchAdmissionController = admission;
+  }
+
+  setProjectionInvalidator(invalidator: ((tournamentId: string, scope: 'tournament' | 'live') => void) | undefined): void {
+    this.projectionInvalidator = invalidator;
+  }
+
+  isMultiStageEnabled(): boolean {
+    return this.enableMultiStage;
   }
 
   /** Release repository ownership after callers have stopped submitting work. */
+  beginShutdown(): void {
+    if (this.shuttingDown) return;
+    this.shuttingDown = true;
+    for (const scheduler of this.activeSchedulers.values()) scheduler.stopDispatching?.();
+    this.fairMatchDispatcher?.stopDispatching();
+  }
+
+  get isShuttingDown(): boolean {
+    return this.shuttingDown;
+  }
+
   close(): void {
+    this.beginShutdown();
     this.liveSnapshots.clear();
     this.liveHistories.clear();
     this.liveSubscribers.clear();
@@ -194,8 +354,15 @@ export class TournamentManager {
     else history.push(snapshot);
     while (history.length > 512) history.shift();
     this.liveHistories.set(key, history);
+    this.projectionInvalidator?.(tournamentId, 'live');
     while (this.liveSnapshots.size > 64) {
-      const oldest = [...this.liveSnapshots.entries()].sort((a, b) => a[1].expiresAt - b[1].expiresAt)[0];
+      const entries = [...this.liveSnapshots.entries()];
+      // 1. Prioritize evicting inactive/finished matches first
+      const inactive = entries.filter(([, entry]) => entry.snapshot.status !== 'in_progress');
+      // 2. If all are in_progress, prefer evicting active matches with NO active subscribers
+      const unsubscribedActive = entries.filter(([k, entry]) => entry.snapshot.status === 'in_progress' && !(this.liveSubscribers.get(k)?.size));
+      const pool = inactive.length > 0 ? inactive : unsubscribedActive.length > 0 ? unsubscribedActive : entries;
+      const oldest = pool.sort((a, b) => a[1].expiresAt - b[1].expiresAt)[0];
       if (!oldest) break;
       this.liveSnapshots.delete(oldest[0]);
     }
@@ -245,6 +412,7 @@ export class TournamentManager {
     await previous;
     try {
       await this.repository.save(tournament);
+      this.projectionInvalidator?.(tournament.tournamentId, 'tournament');
     } finally {
       release();
       if (this.tournamentWriteLocks.get(tournament.tournamentId) === current) {
@@ -294,6 +462,111 @@ export class TournamentManager {
     }
   }
 
+  private findTournamentPairing(tournament: Tournament, pairingId: string): TournamentPairing | null {
+    if (isMultiStageTournament(tournament)) {
+      return findPairingInTournament(tournament, pairingId)?.pairing ?? null;
+    }
+    return findPairing(tournament.rounds, pairingId);
+  }
+
+  private getAllPairings(tournament: Tournament): TournamentPairing[] {
+    if (isMultiStageTournament(tournament)) {
+      return getAllTournamentPairings(tournament);
+    }
+    return tournament.rounds.flatMap(round => round.pairings);
+  }
+
+  private markPairingInProgress(tournament: Tournament, pairing: TournamentPairing, matchId: string): boolean {
+    if (isMultiStageTournament(tournament)) {
+      if (pairing.status !== 'scheduled') return false;
+      pairing.status = 'in_progress';
+      pairing.matchId = matchId;
+      pairing.startedAt = new Date().toISOString();
+      return true;
+    }
+    return markPairingInProgress(tournament.rounds, pairing.pairingId, matchId);
+  }
+
+  private markPairingCompleted(tournament: Tournament, pairing: TournamentPairing, record: TournamentMatchRecord): void {
+    if (isMultiStageTournament(tournament)) {
+      commitMatchResultAndResolveSlots(tournament, pairing.pairingId, record);
+    } else {
+      markPairingCompleted(tournament.rounds, pairing.pairingId, record);
+    }
+  }
+
+  private getNextPairing(tournament: Tournament): TournamentPairing | null {
+    if (isMultiStageTournament(tournament)) {
+      const currentStage = getCurrentStage(tournament);
+      if (!currentStage || currentStage.status === 'completed') {
+        return null;
+      }
+      if (currentStage.regions) {
+        for (const region of currentStage.regions) {
+          if (region.status !== 'completed') {
+            for (const round of region.rounds) {
+              for (const pairing of round.pairings) {
+                if (canPairingExecute(pairing)) return pairing;
+              }
+            }
+          }
+        }
+      }
+      if (currentStage.groups) {
+        for (const group of currentStage.groups) {
+          if (group.status !== 'completed') {
+            for (const round of group.rounds) {
+              for (const pairing of round.pairings) {
+                if (canPairingExecute(pairing)) return pairing;
+              }
+            }
+          }
+        }
+      }
+      if (currentStage.rounds) {
+        for (const round of currentStage.rounds) {
+          for (const pairing of round.pairings) {
+            if (canPairingExecute(pairing)) return pairing;
+          }
+        }
+      }
+      return null;
+    }
+    return getNextEligiblePairing(tournament.rounds);
+  }
+
+  /** Select one eligible region at a time in round-robin order. */
+  private getNextFairPairing(tournament: Tournament): TournamentPairing | null {
+    if (!isMultiStageTournament(tournament)) return this.getNextPairing(tournament);
+    const currentStage = getCurrentStage(tournament);
+    if (!currentStage || currentStage.status === 'completed') return null;
+    const regions = currentStage.regions ?? [];
+    if (regions.length === 0) return this.getNextPairing(tournament);
+
+    const start = this.fairRegionCursors.get(tournament.tournamentId) ?? 0;
+    for (let offset = 0; offset < regions.length; offset += 1) {
+      const index = (start + offset) % regions.length;
+      const region = regions[index]!;
+      if (region.status === 'completed') continue;
+      for (const round of region.rounds) {
+        for (const pairing of round.pairings) {
+          if (isPairingDispatchEligible(tournament, pairing)) {
+            this.fairRegionCursors.set(tournament.tournamentId, (index + 1) % regions.length);
+            return pairing;
+          }
+        }
+      }
+    }
+    return this.getNextPairing(tournament);
+  }
+
+  private isTournamentFinished(tournament: Tournament): boolean {
+    if (isMultiStageTournament(tournament)) {
+      return isTournamentComplete(tournament);
+    }
+    return isScheduleComplete(tournament.rounds);
+  }
+
   /**
    * Create a new tournament
    */
@@ -304,6 +577,10 @@ export class TournamentManager {
     matchConfig?: Partial<TournamentMatchConfig>,
     scoringConfig?: Partial<TournamentScoringConfig>
   ): Promise<TournamentOperationResult<Tournament>> {
+    if (format === 'multi_stage' && !this.enableMultiStage) {
+      return { success: false, error: 'Multi-stage tournament format is disabled by feature flag' };
+    }
+
     // Check if tournament already exists
     if (await this.repository.exists(tournamentId)) {
       return { success: false, error: `Tournament ${tournamentId} already exists` };
@@ -365,13 +642,35 @@ export class TournamentManager {
 
   async updateTournamentDetails(
     tournamentId: string,
-    name: string
+    details: string | TournamentUpdateDetails
   ): Promise<TournamentOperationResult<Tournament>> {
+    const update = typeof details === 'string' ? { name: details } : details;
     return this.mutateTournament(tournamentId, async tournament => {
       if (tournament.status !== 'draft' && tournament.status !== 'registration_open') {
         return { success: false, error: `Cannot edit: tournament status is ${tournament.status}` };
       }
-      tournament.name = name;
+      if (update.name !== undefined) {
+        const trimmed = update.name.trim();
+        if (!trimmed || trimmed.length > 100) {
+          return { success: false, error: 'Tournament name must be between 1 and 100 characters' };
+        }
+        tournament.name = trimmed;
+      }
+      if (update.description !== undefined) {
+        tournament.description = typeof update.description === 'string' ? update.description.trim().slice(0, 2000) : '';
+      }
+      if (update.organizerInfo !== undefined) {
+        tournament.organizerInfo = typeof update.organizerInfo === 'string' ? update.organizerInfo.trim().slice(0, 500) : '';
+      }
+      if (update.contactInfo !== undefined) {
+        tournament.contactInfo = typeof update.contactInfo === 'string' ? update.contactInfo.trim().slice(0, 500) : '';
+      }
+      if (update.rulesNotes !== undefined) {
+        tournament.rulesNotes = typeof update.rulesNotes === 'string' ? update.rulesNotes.trim().slice(0, 2000) : '';
+      }
+      if (update.policyNotes !== undefined) {
+        tournament.policyNotes = typeof update.policyNotes === 'string' ? update.policyNotes.trim().slice(0, 2000) : '';
+      }
       await this.saveTournament(tournament);
       return { success: true, data: tournament };
     });
@@ -380,6 +679,7 @@ export class TournamentManager {
   async deleteTournament(tournamentId: string): Promise<TournamentOperationResult<null>> {
     return this.mutateTournament(tournamentId, async tournament => {
       await this.repository.delete(tournamentId);
+      this.projectionInvalidator?.(tournamentId, 'tournament');
       return { success: true, data: null };
     });
   }
@@ -397,7 +697,9 @@ export class TournamentManager {
       if (tournament.status !== 'draft' && tournament.status !== 'registration_open') {
         return { success: false, error: `Cannot register: tournament status is ${tournament.status}` };
       }
-      if (tournament.participants.length >= 64) return { success: false, error: 'Maximum participants reached' };
+      if (tournament.participants.length >= getMaxParticipants(tournament.format)) {
+        return { success: false, error: 'Maximum participants reached' };
+      }
       if (tournament.participants.some(p => p.participantId === participantId)) {
         return { success: false, error: `Participant ${participantId} already registered` };
       }
@@ -462,6 +764,9 @@ export class TournamentManager {
    */
   async generateSchedule(tournamentId: string): Promise<TournamentOperationResult<Tournament>> {
     return this.mutateTournament(tournamentId, async tournament => {
+      if (tournament.format === 'multi_stage' && !this.enableMultiStage) {
+        return { success: false, error: 'Multi-stage tournament format is disabled by feature flag' };
+      }
       if (tournament.status !== 'registration_open' && tournament.status !== 'registration_closed') {
         return { success: false, error: `Cannot generate schedule: tournament status is ${tournament.status}` };
       }
@@ -471,6 +776,45 @@ export class TournamentManager {
       if (tournament.participants.length < minParticipants) {
         return { success: false, error: `Need at least ${minParticipants} participants for ${tournament.format}` };
       }
+      const maxParticipants = getMaxParticipants(tournament.format);
+      if (tournament.participants.length > maxParticipants) {
+        return { success: false, error: `Too many participants for ${tournament.format} (max ${maxParticipants})` };
+      }
+      if (this.validateTournamentRevisions) {
+        const revisions = tournament.participants.flatMap(participant => {
+          const execution = participant.bot.execution;
+          return execution?.kind === 'source-revision' ? [execution] : [];
+        });
+        const validation = await this.validateTournamentRevisions(revisions);
+        if (!validation.valid) {
+          return { success: false, error: validation.error ?? (validation.pending ? 'Bot preflight validation is still running' : 'One or more Bot revisions failed preflight validation') };
+        }
+      }
+
+      if (tournament.format === 'multi_stage') {
+        const configuredRegionCount = Number(tournament.metadata?.regionCount);
+        const configuredQualifiersPerRegion = Number(tournament.metadata?.qualifiersPerRegion);
+        const multiStage = createMultiStageTournament({
+          tournamentId: tournament.tournamentId,
+          name: tournament.name,
+          participants: tournament.participants,
+          matchConfig: tournament.matchConfig,
+          scoringConfig: tournament.scoringConfig,
+          options: {
+            ...(Number.isInteger(configuredRegionCount) && configuredRegionCount > 0 ? { regionCount: configuredRegionCount } : {}),
+            ...(Number.isInteger(configuredQualifiersPerRegion) && configuredQualifiersPerRegion > 0 ? { qualifiersPerRegion: configuredQualifiersPerRegion } : {}),
+          },
+          metadata: tournament.metadata,
+        });
+        tournament.stages = multiStage.stages;
+        tournament.rounds = [];
+        tournament.status = 'registration_closed';
+        tournament.registrationClosedAt = tournament.registrationClosedAt ?? new Date().toISOString();
+        tournament.standings = computeStandings(tournament.participants, [], tournament.scoringConfig);
+        await this.saveTournament(tournament);
+        return { success: true, data: tournament };
+      }
+
       const rounds = generateRoundRobinSchedule(tournament.participants);
       const validation = validateRoundRobinSchedule(tournament.participants, rounds);
       if (!validation.valid) return { success: false, error: `Schedule validation failed: ${validation.errors.join(', ')}` };
@@ -493,10 +837,13 @@ export class TournamentManager {
    */
   async startTournament(tournamentId: string): Promise<TournamentOperationResult<Tournament>> {
     return this.mutateTournament(tournamentId, async tournament => {
-      if (tournament.status !== 'registration_closed' && !(tournament.status === 'registration_open' && tournament.rounds.length === 0)) {
+      const hasSchedule = isMultiStageTournament(tournament)
+        ? Boolean(tournament.stages && tournament.stages.length > 0)
+        : tournament.rounds.length > 0;
+      if (tournament.status !== 'registration_closed' && !(tournament.status === 'registration_open' && !hasSchedule)) {
         return { success: false, error: `Cannot start: tournament status is ${tournament.status}` };
       }
-      if (tournament.rounds.length === 0) return { success: false, error: 'No schedule generated. Call generateSchedule first.' };
+      if (!hasSchedule) return { success: false, error: 'No schedule generated. Call generateSchedule first.' };
       tournament.status = 'running';
       tournament.startedAt = new Date().toISOString();
       await this.saveTournament(tournament);
@@ -513,7 +860,7 @@ export class TournamentManager {
       const requests = tournament.participationRequests ?? (tournament.participationRequests = []);
       const duplicate = requests.find(existing => existing.competitorId === request.competitorId && existing.botId === request.botId && (existing.status === 'pending' || existing.status === 'approved'));
       if (duplicate) return { success: false, error: 'An active participation request already exists' };
-      if (tournament.participants.length + requests.filter(item => item.status === 'pending' || item.status === 'approved').length >= 64) {
+      if (tournament.participants.length + requests.filter(item => item.status === 'pending' || item.status === 'approved').length >= getMaxParticipants(tournament.format)) {
         return { success: false, error: 'Maximum participants reached' };
       }
       const created: ParticipationRequest = {
@@ -554,7 +901,10 @@ export class TournamentManager {
       if (tournament.status !== 'registration_open' && tournament.status !== 'registration_closed') {
         return { success: false, error: `Cannot review participation requests while tournament status is ${tournament.status}` };
       }
-      if (tournament.rounds.length > 0) return { success: false, error: 'Participation requests cannot be reviewed after scheduling' };
+      const hasSchedule = isMultiStageTournament(tournament)
+        ? Boolean(tournament.stages && tournament.stages.length > 0)
+        : tournament.rounds.length > 0;
+      if (hasSchedule) return { success: false, error: 'Participation requests cannot be reviewed after scheduling' };
       const request = (tournament.participationRequests ?? []).find(item => item.requestId === requestId);
       if (!request) return { success: false, error: 'Participation request not found' };
       if (request.status !== 'pending') return { success: false, error: 'Participation request has already been reviewed' };
@@ -568,7 +918,10 @@ export class TournamentManager {
             sourceExecution.sdkVersion !== request.sdkVersion || sourceExecution.sdkDigest !== request.sdkDigest) {
           return { success: false, error: 'Participation request revision metadata is inconsistent' };
         }
-        if (this.validateSourceRevision && !await this.validateSourceRevision(sourceExecution)) {
+        if (!this.validateSourceRevision) {
+          return { success: false, error: 'Source revision approval requires Bot preflight validation' };
+        }
+        if (!await this.validateSourceRevision(sourceExecution)) {
           return { success: false, error: 'Pinned source revision is unavailable or failed integrity validation' };
         }
       }
@@ -592,10 +945,44 @@ export class TournamentManager {
     });
   }
 
+  async undoParticipationRequestReview(
+    tournamentId: string,
+    requestId: string,
+    reviewerId: string
+  ): Promise<TournamentOperationResult<Tournament>> {
+    return this.mutateTournament(tournamentId, async tournament => {
+      if (tournament.status !== 'registration_open' && tournament.status !== 'registration_closed') {
+        return { success: false, error: `Cannot undo participation request review while tournament status is ${tournament.status}` };
+      }
+      const hasSchedule = isMultiStageTournament(tournament)
+        ? Boolean(tournament.stages && tournament.stages.length > 0)
+        : tournament.rounds.length > 0;
+      if (hasSchedule) return { success: false, error: 'Participation request reviews cannot be undone after scheduling' };
+      const request = (tournament.participationRequests ?? []).find(item => item.requestId === requestId);
+      if (!request) return { success: false, error: 'Participation request not found' };
+      if (request.status !== 'approved' && request.status !== 'rejected') {
+        return { success: false, error: 'Only approved or rejected participation requests can be undone' };
+      }
+      if (request.status === 'approved') {
+        const participantId = `p-${request.requestId}`;
+        const participantIndex = tournament.participants.findIndex(participant => participant.participantId === participantId);
+        if (participantIndex < 0) return { success: false, error: 'Approved participant not found' };
+        tournament.participants.splice(participantIndex, 1);
+      }
+      request.status = 'pending';
+      request.reviewedAt = null;
+      request.reviewedBy = null;
+      request.rejectionReason = null;
+      await this.saveTournament(tournament);
+      return { success: true, data: tournament };
+    });
+  }
+
   /**
    * Run the next eligible match
    */
   async runNextMatch(tournamentId: string, signal?: AbortSignal): Promise<TournamentOperationResult<ExecutedMatchResult>> {
+    if (this.shuttingDown) return { success: false, error: 'Tournament execution paused for shutdown' };
     const loadResult = await this.loadTournament(tournamentId);
     if (!loadResult.success || !loadResult.data) {
       return { success: false, error: loadResult.error };
@@ -607,7 +994,7 @@ export class TournamentManager {
       return { success: false, error: `Tournament not running (status: ${tournament.status})` };
     }
 
-    const pairing = getNextEligiblePairing(tournament.rounds);
+    const pairing = this.getNextPairing(tournament);
     if (!pairing) {
       return { success: false, error: 'No pending matches to run' };
     }
@@ -634,12 +1021,22 @@ export class TournamentManager {
     }
 
     await this.reconcileInterruptedPairings(tournament);
+    // Persist reconciliation before selecting the next pairing. In batch mode
+    // the start transition is intentionally not persisted for every match;
+    // therefore a committed result may otherwise be applied only in memory and
+    // be lost again if the process restarts before the next save.
+    await this.saveTournament(tournament);
 
     // A new explicit run request is the retry boundary for failed attempts.
     // Do not retry them inside the same invocation, which could loop forever
     // on a persistent Docker or infrastructure failure.
-    const failedPairings = tournament.rounds.flatMap(round => round.pairings)
-      .filter(pairing => pairing.status === 'failed');
+    // Note: Do NOT automatically retry pairings with unresolved elimination draws (tiebreakers pending).
+    const allPairings = this.getAllPairings(tournament);
+    const failedPairings = allPairings.filter(pairing =>
+      pairing.status === 'failed' &&
+      pairing.failureCode !== 'UNRESOLVED_DRAW' &&
+      pairing.tiebreakerStatus !== 'pending'
+    );
     if (failedPairings.length > 0) {
       for (const failedPairing of failedPairings) {
         failedPairing.status = 'scheduled';
@@ -649,77 +1046,420 @@ export class TournamentManager {
       await this.saveTournament(tournament);
     }
 
-    const results: ExecutedMatchResult[] = [];
-    const failures: string[] = [];
-    let pairing = getNextEligiblePairing(tournament.rounds);
+    if (this.matchJobStore) {
+      const committed = await this.repository.listMatchResults(tournamentId);
+      await this.matchJobStore.ensureForTournament(tournamentId, allPairings);
+      await this.matchJobStore.reconcile(tournamentId, allPairings, committed.filter(record => !record.seriesGameOf).map(record => record.pairingId));
+    }
 
-    while (pairing) {
-      if (signal?.aborted || this.cancelledTournaments.has(tournamentId)) {
+    if (this.fairMatchDispatcher) {
+      const dispatched = await this.fairMatchDispatcher.submit(
+        tournamentId,
+        signal => this.runFairMatchQuantum(tournamentId, signal),
+        signal,
+      );
+      if (dispatched.cancelled || signal?.aborted || this.cancelledTournaments.has(tournamentId)) {
         return { success: false, error: 'Tournament execution cancelled' };
       }
-      const result = await this.runPairing(tournament, pairing, signal);
+      if (dispatched.failures.length > 0) {
+        return { success: false, error: `${dispatched.failures.length} match(es) failed. Review the failed pairings and run execution again to retry.` };
+      }
+      return { success: true, data: dispatched.results };
+    }
+
+    const useSeriesScheduler = this.enableBo1MatchScheduler &&
+      (tournament.matchConfig.bestOf === 2 || tournament.matchConfig.bestOf === 3 || isMultiStageTournament(tournament));
+    if (this.enableBo1MatchScheduler && (useSeriesScheduler || (tournament.matchConfig.bestOf === 1 && !isMultiStageTournament(tournament)))) {
+      return this.runAllMatchesWithScheduler(tournamentId, tournament, signal, useSeriesScheduler);
+    }
+
+    const results: ExecutedMatchResult[] = [];
+    const failures: string[] = [];
+    let pairing = this.getNextPairing(tournament);
+
+    while (pairing) {
+      if (this.shuttingDown || signal?.aborted || this.cancelledTournaments.has(tournamentId)) {
+        return { success: false, error: 'Tournament execution cancelled' };
+      }
+      const result = await this.runPairingWithDurableJob(tournament, pairing, signal);
+      if (result.error === 'CAPACITY_ADMISSION_PAUSED') {
+        await new Promise<void>(resolve => setTimeout(resolve, 250));
+        continue;
+      }
       if (result.success && result.data) {
         results.push(result.data);
-        // Reload tournament to get updated state
-        const reload = await this.loadTournament(tournamentId);
-        if (!reload.success || !reload.data) {
-          break;
-        }
-        tournament.rounds = reload.data.rounds;
-        tournament.standings = reload.data.standings;
-        if (signal?.aborted || this.cancelledTournaments.has(tournamentId)) {
+        if (this.shuttingDown || signal?.aborted || this.cancelledTournaments.has(tournamentId)) {
           return { success: false, error: 'Tournament execution cancelled' };
         }
-        pairing = getNextEligiblePairing(tournament.rounds);
+        pairing = this.getNextPairing(tournament);
       } else {
         if (signal?.aborted || this.cancelledTournaments.has(tournamentId) || result.error === 'Tournament execution cancelled') {
           return { success: false, error: 'Tournament execution cancelled' };
         }
         failures.push(result.error ?? `Pairing ${pairing.pairingId} failed`);
-        const reload = await this.loadTournament(tournamentId);
-        if (!reload.success || !reload.data) {
-          return { success: false, error: result.error };
-        }
-        tournament.rounds = reload.data.rounds;
-        tournament.standings = reload.data.standings;
-        pairing = getNextEligiblePairing(tournament.rounds);
+        pairing = this.getNextPairing(tournament);
       }
     }
 
-    if (failures.length > 0) {
+    const updatedAllPairings = this.getAllPairings(tournament);
+    const pendingTiebreakers = updatedAllPairings.filter(p => p.status === 'pending_tiebreaker' || p.tiebreakerStatus === 'pending');
+    if (failures.length > 0 || pendingTiebreakers.length > 0) {
+      if (pendingTiebreakers.length > 0 && failures.length === 0) {
+        return { success: false, error: `${pendingTiebreakers.length} match(es) require tiebreaker resolution` };
+      }
       return { success: false, error: `${failures.length} match(es) failed. Review the failed pairings and run execution again to retry.` };
     }
 
     // Check if tournament is complete
-    if (!signal?.aborted && !this.cancelledTournaments.has(tournamentId) && isScheduleComplete(tournament.rounds)) {
+    if (!signal?.aborted && !this.cancelledTournaments.has(tournamentId) && this.isTournamentFinished(tournament)) {
       await this.completeTournament(tournamentId);
     }
 
     return { success: true, data: results };
   }
 
+  private async runFairMatchQuantum(tournamentId: string, signal?: AbortSignal): Promise<FairMatchQuantum<ExecutedMatchResult>> {
+    if (this.shuttingDown) return { done: true, error: 'Tournament execution paused for shutdown' };
+    const loaded = await this.loadTournament(tournamentId);
+    if (!loaded.success || !loaded.data) return { done: true, error: loaded.error ?? `Tournament ${tournamentId} not found` };
+    const tournament = loaded.data;
+    if (tournament.status !== 'running') return { done: true, error: `Tournament not running (status: ${tournament.status})` };
+    if (this.matchAdmissionController && !this.matchAdmissionController(0)) {
+      return { done: false, deferred: true, retryAfterMs: 250 };
+    }
+    const pairing = this.getNextFairPairing(tournament);
+    if (!pairing) {
+      const pendingTiebreakers = this.getAllPairings(tournament).filter(p => p.status === 'pending_tiebreaker' || p.tiebreakerStatus === 'pending');
+      if (pendingTiebreakers.length > 0) return { done: true, error: `${pendingTiebreakers.length} match(es) require tiebreaker resolution` };
+      if (!this.cancelledTournaments.has(tournamentId) && this.isTournamentFinished(tournament)) await this.completeTournament(tournamentId);
+      return { done: true };
+    }
+    const result = await this.runPairingWithDurableJob(tournament, pairing, signal);
+    if (result.error === 'CAPACITY_ADMISSION_PAUSED') return { done: false, deferred: true, retryAfterMs: 250 };
+    if (result.success && result.data) return { done: false, result: result.data };
+    if (signal?.aborted || this.cancelledTournaments.has(tournamentId) || result.error === 'Tournament execution cancelled') {
+      return { done: true, error: 'Tournament execution cancelled' };
+    }
+    return { done: false, error: result.error ?? `Pairing ${pairing.pairingId} failed` };
+  }
+
+  private async runPairingWithDurableJob(
+    tournament: Tournament,
+    pairing: TournamentPairing,
+    signal?: AbortSignal,
+  ): Promise<TournamentOperationResult<ExecutedMatchResult>> {
+    if (this.shuttingDown) return { success: false, error: 'Tournament execution paused for shutdown' };
+    if (!this.matchJobStore) return this.runPairing(tournament, pairing, signal, { persistStart: false });
+    if (this.matchAdmissionController && !this.matchAdmissionController(0)) {
+      return { success: false, error: 'CAPACITY_ADMISSION_PAUSED' };
+    }
+    const claim = await this.matchJobStore.claim(tournament.tournamentId, pairing.pairingId, this.matchJobWorkerId, this.matchJobLeaseMs);
+    if (!claim) return { success: false, error: `Pairing ${pairing.pairingId} is already claimed or completed` };
+    const heartbeat = setInterval(() => { void this.matchJobStore?.renew(claim, this.matchJobLeaseMs); }, Math.max(1_000, Math.floor(this.matchJobLeaseMs / 3)));
+    heartbeat.unref?.();
+    try {
+      if (!(await this.matchJobStore.assertLease(claim))) return { success: false, error: `Pairing ${pairing.pairingId} lease expired` };
+      const result = await this.runPairing(tournament, pairing, signal, {
+        persistStart: false,
+        assertLease: async () => this.matchJobStore!.assertLease(claim),
+      });
+      if (result.success) await this.matchJobStore.complete(claim);
+      else await this.matchJobStore.release(claim, result.error);
+      return result;
+    } finally {
+      clearInterval(heartbeat);
+    }
+  }
+
+  /**
+   * Opt-in BO1 path. Execution, durable claiming, and durable commit are
+   * deliberately separate operations so runPairing remains the legacy/series
+   * implementation and cannot duplicate result or replay writes.
+   */
+  private async runAllMatchesWithScheduler(
+    tournamentId: string,
+    initialTournament: Tournament,
+    signal?: AbortSignal,
+    seriesAware = false,
+  ): Promise<TournamentOperationResult<ExecutedMatchResult[]>> {
+    let authoritative: Tournament | null = initialTournament;
+    const jobClaims = new Map<string, MatchJobClaim>();
+    const jobHeartbeats = new Map<string, ReturnType<typeof setInterval>>();
+    const scheduler = new MatchScheduler<SchedulerExecution>(
+      {
+        execute: async (pairing, schedulerSignal) => {
+          const tournament = seriesAware ? await this.repository.load(tournamentId) : authoritative;
+          if (!tournament) throw new Error('Authoritative tournament snapshot is unavailable');
+
+          const claimedPairing = seriesAware ? this.findTournamentPairing(tournament, pairing.pairingId) : pairing;
+          if (!claimedPairing) {
+            return { kind: 'failed', error: new Error(`Pairing ${pairing.pairingId} is missing from the authoritative snapshot`) };
+          }
+
+          if (seriesAware) {
+            const participantA = tournament.participants.find(p => p.participantId === claimedPairing.participantA);
+            const participantB = claimedPairing.participantB === null
+              ? null
+              : tournament.participants.find(p => p.participantId === claimedPairing.participantB);
+            if (!participantA || !participantB) {
+              return { kind: 'failed', error: new Error(`Participants for pairing ${claimedPairing.pairingId} are unavailable`) };
+            }
+            const format = this.getPairingSeriesFormat(tournament, claimedPairing);
+            if (format === 'bo1') {
+              return { kind: 'failed', error: new Error(`Series scheduler received BO1 pairing ${claimedPairing.pairingId}`) };
+            }
+            const result = await this.runSeriesPairing(
+              tournament,
+              claimedPairing,
+              participantA,
+              participantB,
+              format,
+              schedulerSignal,
+              {
+                claimed: true,
+                coordinatorCommit: true,
+                assertLease: jobClaims.has(claimedPairing.pairingId)
+                  ? async () => this.matchJobStore!.assertLease(jobClaims.get(claimedPairing.pairingId)!)
+                  : undefined,
+              },
+            );
+            if (!result.success || !result.data) {
+              return { kind: 'failed', error: new Error(result.error ?? `Series ${claimedPairing.pairingId} failed`) };
+            }
+            return { kind: 'completed', data: { ...result.data, committed: true } };
+          }
+
+          const participantA = tournament.participants.find(p => p.participantId === pairing.participantA);
+          const participantB = tournament.participants.find(p => p.participantId === pairing.participantB);
+          if (!participantA || !participantB) {
+            return { kind: 'failed', error: new Error('Participant not found') };
+          }
+
+          const matchId = createMatchId(tournamentId, pairing.pairingId);
+          const botA: BotDefinition = {
+            botId: participantA.bot.botId,
+            player: 'A',
+            command: participantA.bot.command,
+            args: participantA.bot.args,
+            env: participantA.bot.env,
+            execution: participantA.bot.execution,
+          };
+          const botB: BotDefinition = {
+            botId: participantB.bot.botId,
+            player: 'B',
+            command: participantB.bot.command,
+            args: participantB.bot.args,
+            env: participantB.bot.env,
+            execution: participantB.bot.execution,
+          };
+          const matchConfig: MatchConfig = {
+            matchId,
+            protocolVersion: tournament.matchConfig.protocolVersion,
+            maxTurns: tournament.matchConfig.maxTurns,
+            turnTimeoutMs: tournament.matchConfig.turnTimeoutMs,
+            maxStdoutBytes: tournament.matchConfig.maxStdoutBytes,
+            maxStderrBytes: tournament.matchConfig.maxStderrBytes,
+            failurePolicy: tournament.matchConfig.failurePolicy,
+            maxRetries: tournament.matchConfig.maxRetries,
+            logRequests: tournament.matchConfig.logRequests,
+            logResponses: tournament.matchConfig.logResponses,
+            logStates: tournament.matchConfig.logStates,
+          };
+
+          try {
+            const matchResult = await this.executor.executeMatch(
+              matchId,
+              botA,
+              botB,
+              matchConfig,
+              { onSnapshot: snapshot => this.publishLiveSnapshot(tournamentId, snapshot) },
+              schedulerSignal
+            );
+            if (schedulerSignal.aborted || this.cancelledTournaments.has(tournamentId)) {
+              return { kind: 'failed', error: new Error('Tournament execution cancelled') };
+            }
+
+            const tournamentMatchRecord: TournamentMatchRecord = {
+              matchId,
+              pairingId: pairing.pairingId,
+              participantA: pairing.participantA,
+              participantB: pairing.participantB,
+              winner: matchResult.winner,
+              terminationReason: matchResult.terminationReason,
+              turnCount: matchResult.turnCount,
+              durationMs: matchResult.durationMs,
+              replayRef: matchId,
+              completedAt: new Date().toISOString(),
+              executionProvenance: matchResult.metadata?.sourceRevisions as import('@match-runner/types.js').ExecutionProvenance[] | undefined,
+              executionDiagnostics: matchResult.metadata?.executionDiagnostics,
+            };
+            return {
+              kind: 'completed',
+              data: { matchResult, replay: MatchRunner.createReplay(matchResult), tournamentMatchRecord },
+            };
+          } catch (error) {
+            return { kind: 'failed', error };
+          }
+        },
+      },
+      {
+        concurrency: this.qaMaxActiveMatches,
+        signal,
+        onCheckpoint: this.onBo1SchedulerCheckpoint,
+        claim: async pairing => {
+          if (this.shuttingDown) return false;
+          let jobClaim: MatchJobClaim | null = null;
+          if (this.matchJobStore) {
+            jobClaim = await this.matchJobStore.claim(tournamentId, pairing.pairingId, this.matchJobWorkerId, this.matchJobLeaseMs);
+            if (!jobClaim) return false;
+            jobClaims.set(pairing.pairingId, jobClaim);
+            const heartbeat = setInterval(() => { void this.matchJobStore?.renew(jobClaim!, this.matchJobLeaseMs); }, Math.max(1_000, Math.floor(this.matchJobLeaseMs / 3)));
+            heartbeat.unref?.();
+            jobHeartbeats.set(pairing.pairingId, heartbeat);
+          }
+          const claimed = await this.commitCoordinator.claimPairing({
+            tournamentId,
+            pairingId: pairing.pairingId,
+            matchId: createMatchId(tournamentId, pairing.pairingId),
+          });
+          if (jobClaim && !claimed.success) {
+            await this.matchJobStore?.release(jobClaim, 'Tournament pairing claim was rejected');
+            return false;
+          }
+          return {
+            claimId: claimed.matchId,
+            pairing: claimed.pairing,
+            ...(jobClaim ? { jobId: jobClaim.jobId, fencingToken: jobClaim.fencingToken } : {}),
+          };
+        },
+        refresh: async () => {
+          const fresh = await this.repository.load(tournamentId);
+          if (!fresh) throw new Error(`Tournament ${tournamentId} not found`);
+          authoritative = fresh;
+          return fresh;
+        },
+        onComplete: async (pairing, execution) => {
+          const jobClaim = jobClaims.get(pairing.pairingId);
+          if (jobClaim && !(await this.matchJobStore!.assertLease(jobClaim))) {
+            throw new Error(`Durable match job lease expired for ${pairing.pairingId}`);
+          }
+          if (execution.kind === 'completed') {
+            if (execution.data.committed) {
+              if (jobClaim) await this.matchJobStore!.complete(jobClaim);
+              return;
+            }
+            if (!execution.data.tournamentMatchRecord) {
+              throw new Error(`Scheduler completed pairing ${pairing.pairingId} without a match record`);
+            }
+            await this.commitCoordinator.commitMatchResult({
+              tournamentId,
+              pairingId: pairing.pairingId,
+              matchResult: execution.data.tournamentMatchRecord,
+              replay: execution.data.replay,
+            });
+            if (jobClaim) await this.matchJobStore!.complete(jobClaim);
+            return;
+          }
+
+          if (signal?.aborted || this.cancelledTournaments.has(tournamentId)) return;
+          const matchId = createMatchId(tournamentId, pairing.pairingId);
+          await this.commitCoordinator.releasePairingClaim({ tournamentId, pairingId: pairing.pairingId, matchId });
+          if (jobClaim) await this.matchJobStore!.release(jobClaim, execution.error);
+          const fresh = await this.repository.load(tournamentId);
+          const failedPairing = fresh && this.findTournamentPairing(fresh, pairing.pairingId);
+          if (fresh && failedPairing && failedPairing.status === 'scheduled') {
+            const failure = classifyMatchExecutionFailure(execution.error);
+            failedPairing.status = 'failed';
+            failedPairing.failureCode = failure.code;
+            failedPairing.failureReason = failure.reason;
+            failedPairing.matchId = null;
+            failedPairing.startedAt = null;
+            await this.saveTournament(fresh);
+          }
+        },
+        cleanup: async pairing => {
+          const heartbeat = jobHeartbeats.get(pairing.pairingId);
+          if (heartbeat) clearInterval(heartbeat);
+          jobHeartbeats.delete(pairing.pairingId);
+          jobClaims.delete(pairing.pairingId);
+        },
+      }
+    );
+
+    this.activeSchedulers.set(tournamentId, scheduler);
+    let scheduleResult;
+    try {
+      scheduleResult = await scheduler.run(initialTournament);
+    } finally {
+      this.activeSchedulers.delete(tournamentId);
+    }
+
+    if (scheduleResult.cancelled || this.shuttingDown || signal?.aborted || this.cancelledTournaments.has(tournamentId)) {
+      return { success: false, error: 'Tournament execution cancelled' };
+    }
+
+    const failures = [
+      ...scheduleResult.failures.map(failure => failure.error),
+      ...scheduleResult.completed
+        .map(item => item.result)
+        .filter((result): result is Extract<SchedulerExecution, { kind: 'failed' }> => result.kind === 'failed')
+        .map(result => result.error),
+    ];
+    if (failures.length > 0) {
+      const detail = failures[0] instanceof Error ? ` Details: ${failures[0].message}` : '';
+      return { success: false, error: `${failures.length} match(es) failed. Review the failed pairings and run execution again to retry.${detail}` };
+    }
+
+    const fresh = await this.repository.load(tournamentId);
+    if (!fresh) return { success: false, error: `Tournament ${tournamentId} not found` };
+    const pendingTiebreakers = this.getAllPairings(fresh).filter(
+      p => p.status === 'pending_tiebreaker' || p.tiebreakerStatus === 'pending'
+    );
+    if (pendingTiebreakers.length > 0) {
+      return { success: false, error: `${pendingTiebreakers.length} match(es) require tiebreaker resolution` };
+    }
+    if (!this.cancelledTournaments.has(tournamentId) && this.isTournamentFinished(fresh)) {
+      await this.completeTournament(tournamentId);
+    }
+
+    return {
+      success: true,
+      data: scheduleResult.completed
+        .map(item => item.result)
+        .filter((result): result is Extract<SchedulerExecution, { kind: 'completed' }> => result.kind === 'completed')
+        .map(result => result.data),
+    };
+  }
+
   /**
    * Run a specific pairing by ID
    */
   async runPairingById(tournamentId: string, pairingId: string): Promise<TournamentOperationResult<ExecutedMatchResult>> {
+    if (this.shuttingDown) return { success: false, error: 'Tournament execution paused for shutdown' };
     const loadResult = await this.loadTournament(tournamentId);
     if (!loadResult.success || !loadResult.data) {
       return { success: false, error: loadResult.error };
     }
 
     const tournament = loadResult.data;
-    const pairing = findPairing(tournament.rounds, pairingId);
+    const pairing = this.findTournamentPairing(tournament, pairingId);
 
     if (!pairing) {
       return { success: false, error: `Pairing ${pairingId} not found` };
     }
 
-    if (pairing.status !== 'scheduled') {
-      return { success: false, error: `Pairing not in scheduled state (current: ${pairing.status})` };
-    }
+    if (isMultiStageTournament(tournament)) {
+      if (!canPairingExecute(pairing)) {
+        return { success: false, error: `Pairing not in scheduled state (current: ${pairing.status})` };
+      }
+    } else {
+      if (pairing.status !== 'scheduled') {
+        return { success: false, error: `Pairing not in scheduled state (current: ${pairing.status})` };
+      }
 
-    if (pairing.participantB === null) {
-      return { success: false, error: 'Cannot run bye pairing' };
+      if (pairing.participantB === null) {
+        return { success: false, error: 'Cannot run bye pairing' };
+      }
     }
 
     return this.runPairing(tournament, pairing);
@@ -733,12 +1473,12 @@ export class TournamentManager {
     if (tournament.status !== 'running' && tournament.status !== 'completed') {
       return { success: false, error: `Tournament cannot be rerun (status: ${tournament.status})` };
     }
-    const pairing = findPairing(tournament.rounds, pairingId);
+    const pairing = this.findTournamentPairing(tournament, pairingId);
     if (!pairing) return { success: false, error: `Pairing ${pairingId} not found` };
     if (pairing.status === 'completed') {
       return { success: false, error: 'Completed pairing rerun requires an explicit attempt policy' };
     }
-    if (pairing.status !== 'failed') {
+    if (pairing.status !== 'failed' && pairing.status !== 'pending_tiebreaker') {
       return { success: false, error: `Pairing cannot be retried (current: ${pairing.status})` };
     }
     if (pairing.participantB === null) return { success: false, error: 'Cannot retry bye pairing' };
@@ -754,6 +1494,7 @@ export class TournamentManager {
     pairing.status = 'scheduled';
     pairing.failureReason = null;
     pairing.failureCode = null;
+    pairing.tiebreakerStatus = null;
     pairing.matchId = null;
     pairing.matchResult = null;
     pairing.startedAt = null;
@@ -761,6 +1502,103 @@ export class TournamentManager {
     pairing.seriesProgress = null;
     await this.saveTournament(tournament);
     return { success: true, data: null };
+  }
+
+  /**
+   * Resolve an elimination tiebreaker where a match ended in a draw.
+   */
+  async resolveTiebreaker(
+    tournamentId: string,
+    pairingId: string,
+    winner: 'A' | 'B',
+    reason?: string,
+    resolvedBy?: string
+  ): Promise<TournamentOperationResult<Tournament>> {
+    return this.mutateTournament(tournamentId, async tournament => {
+      if (tournament.status !== 'running' && !(tournament.status === 'completed' && isMultiStageTournament(tournament))) {
+        return { success: false, error: `Tournament is not running (status: ${tournament.status})` };
+      }
+      const pairing = this.findTournamentPairing(tournament, pairingId);
+      if (!pairing) {
+        return { success: false, error: `Pairing ${pairingId} not found` };
+      }
+
+      // Idempotency: if already resolved with the same winner, return cleanly
+      if (pairing.status === 'completed' && pairing.tiebreakerStatus === 'resolved') {
+        if (pairing.matchResult?.winner === winner) {
+          return { success: true, data: tournament };
+        }
+        return { success: false, error: `Pairing ${pairingId} is already resolved with conflicting winner` };
+      }
+
+      if (pairing.status !== 'pending_tiebreaker' && pairing.failureCode !== 'UNRESOLVED_DRAW' && pairing.tiebreakerStatus !== 'pending') {
+        return { success: false, error: `Pairing ${pairingId} is not in pending tiebreaker state (current status: ${pairing.status})` };
+      }
+      if (!pairing.matchResult) {
+        return { success: false, error: `Pairing ${pairingId} has no recorded match result to resolve` };
+      }
+
+      const now = new Date().toISOString();
+      const resolutionReason = reason ?? 'Tiebreaker resolved';
+      const actor = resolvedBy ?? 'organizer';
+
+      const matchId = pairing.matchId ?? pairing.matchResult.matchId ?? pairingId;
+      // Update match result with decisive winner
+      const updatedRecord: TournamentMatchRecord = {
+        ...pairing.matchResult,
+        matchId,
+        replayRef: pairing.matchResult.replayRef ?? matchId,
+        winner,
+        completedAt: now,
+      };
+
+      // Persist updated match result in repository
+      const replay = await this.repository.loadReplay(tournamentId, matchId);
+      const updatedReplay = replay ? { ...replay, matchId, winner } : { matchId, winner };
+      await this.repository.saveMatchResult(
+        tournamentId,
+        matchId,
+        updatedRecord,
+        updatedReplay
+      );
+
+      pairing.tiebreakerStatus = 'resolved';
+      pairing.failureCode = null;
+      pairing.failureReason = resolutionReason;
+      pairing.tiebreakerResolution = {
+        winner,
+        resolvedBy: actor,
+        resolvedAt: now,
+        reason: resolutionReason,
+      };
+      pairing.status = 'scheduled';
+      pairing.matchResult = null;
+
+      // Record tiebreaker decision in durable tournament metadata audit
+      const metadata = tournament.metadata ?? (tournament.metadata = {});
+      const tiebreakerAudit = Array.isArray(metadata.tiebreakerAudit) ? (metadata.tiebreakerAudit as any[]) : [];
+      tiebreakerAudit.push({
+        pairingId,
+        winner,
+        resolvedBy: actor,
+        resolvedAt: now,
+        reason: resolutionReason,
+      });
+      metadata.tiebreakerAudit = tiebreakerAudit;
+
+      // Commit match result and advance winner slot
+      commitMatchResultAndResolveSlots(tournament, pairingId, updatedRecord);
+
+      if (this.isTournamentFinished(tournament)) {
+        tournament.status = 'completed';
+        tournament.completedAt = now;
+        const allMatchRecords = await this.repository.listMatchResults(tournamentId);
+        tournament.standings = computeStandings(tournament.participants, allMatchRecords, tournament.scoringConfig);
+      }
+
+      await this.saveTournament(tournament);
+      return { success: true, data: tournament };
+    });
   }
 
   /** Retry one failed pairing without changing the rest of the schedule. */
@@ -775,206 +1613,269 @@ export class TournamentManager {
   /**
    * Internal method to execute a pairing
    */
+  private getPairingSeriesFormat(tournament: Tournament, pairing: TournamentPairing): 'bo1' | 'bo2' | 'bo3' {
+    if (pairing.seriesProgress?.format) return pairing.seriesProgress.format;
+    if (isMultiStageTournament(tournament)) {
+      const stage = getCurrentStage(tournament);
+      const stagePairing = getAllTournamentPairings(tournament).find(candidate => candidate.pairingId === pairing.pairingId);
+      if (stagePairing?.stageId === 'stage-group' || stage?.stageId === 'stage-group') return 'bo2';
+      if (stagePairing?.stageId === 'stage-preliminary' || stagePairing?.stageId === 'stage-knockout') return 'bo3';
+    }
+    const configured = tournament.matchConfig.bestOf ?? 1;
+    return configured === 2 ? 'bo2' : configured === 3 ? 'bo3' : 'bo1';
+  }
+
   private async runPairing(
     tournament: Tournament,
     pairing: TournamentPairing,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    options?: { persistStart?: boolean; assertLease?: () => Promise<boolean> }
   ): Promise<TournamentOperationResult<ExecutedMatchResult>> {
     if (signal?.aborted || this.cancelledTournaments.has(tournament.tournamentId)) {
       return { success: false, error: 'Tournament execution cancelled' };
     }
-    const participantA = tournament.participants.find(p => p.participantId === pairing.participantA);
-    const participantB = tournament.participants.find(p => p.participantId === pairing.participantB!);
-
-    if (!participantA || !participantB) {
-      return { success: false, error: 'Participant not found' };
+    const executionKey = `${tournament.tournamentId}:${pairing.pairingId}`;
+    if (this.activePairingExecutions.has(executionKey)) {
+      return { success: false, error: `Pairing ${pairing.pairingId} is already being executed` };
     }
+    this.activePairingExecutions.add(executionKey);
 
-    if (tournament.matchConfig.bestOf === 3) {
-      return this.runBestOfThreePairing(tournament, pairing, participantA, participantB, signal);
-    }
-
-    const matchId = createMatchId(tournament.tournamentId, pairing.pairingId);
-
-    // Mark pairing as in progress
-    if (!markPairingInProgress(tournament.rounds, pairing.pairingId, matchId)) {
-      return { success: false, error: `Pairing ${pairing.pairingId} is not available` };
-    }
-
-    // Persist ownership of the pairing before starting any external work.
-    // If this fails, no Docker execution may begin for an untracked match.
     try {
-      await this.saveTournament(tournament);
-    } catch (error) {
-      return { success: false, error: `Unable to persist match start: ${error}` };
-    }
+      const participantA = tournament.participants.find(p => p.participantId === pairing.participantA);
+      const participantB = tournament.participants.find(p => p.participantId === pairing.participantB!);
 
-    // Convert tournament bots to match runner bot definitions
-    const botA: import('@match-runner/types.js').BotDefinition = {
-      botId: participantA.bot.botId,
-      player: 'A',
-      command: participantA.bot.command,
-      args: participantA.bot.args,
-      env: participantA.bot.env,
-      execution: participantA.bot.execution,
-    };
-
-    const botB: import('@match-runner/types.js').BotDefinition = {
-      botId: participantB.bot.botId,
-      player: 'B',
-      command: participantB.bot.command,
-      args: participantB.bot.args,
-      env: participantB.bot.env,
-      execution: participantB.bot.execution,
-    };
-
-    // Execute match
-    let matchResult: MatchResult;
-    try {
-      const matchConfig: MatchConfig = {
-        matchId,
-        protocolVersion: tournament.matchConfig.protocolVersion,
-        maxTurns: tournament.matchConfig.maxTurns,
-        turnTimeoutMs: tournament.matchConfig.turnTimeoutMs,
-        maxStdoutBytes: tournament.matchConfig.maxStdoutBytes,
-        maxStderrBytes: tournament.matchConfig.maxStderrBytes,
-        failurePolicy: tournament.matchConfig.failurePolicy,
-        maxRetries: tournament.matchConfig.maxRetries,
-        logRequests: tournament.matchConfig.logRequests,
-        logResponses: tournament.matchConfig.logResponses,
-        logStates: tournament.matchConfig.logStates,
-      };
-      matchResult = await this.executor.executeMatch(
-        matchId,
-        botA,
-        botB,
-        matchConfig,
-        { onSnapshot: snapshot => this.publishLiveSnapshot(tournament.tournamentId, snapshot) },
-        signal
-      );
-    } catch (error) {
-      if (isExecutionCancelledError(error) || signal?.aborted || this.cancelledTournaments.has(tournament.tournamentId)) {
-        const live = this.getLiveMatchSnapshot(tournament.tournamentId, matchId);
-        if (live) this.publishLiveSnapshot(tournament.tournamentId, { ...live, status: 'cancelled', sequence: live.sequence + 1, updatedAt: new Date().toISOString(), error: 'Tournament execution cancelled' });
-        return { success: false, error: 'Tournament execution cancelled' };
+      if (!participantA || !participantB) {
+        return { success: false, error: 'Participant not found' };
       }
-      // Persist an explicit retryable failure. A later explicit run request
-      // resets failed pairings; this attempt never silently disappears.
-      pairing.status = 'failed';
-      const failure = classifyMatchExecutionFailure(error);
-      pairing.failureCode = failure.code;
-      pairing.failureReason = failure.reason;
-      pairing.matchId = null;
-      pairing.startedAt = null;
-      const live = this.getLiveMatchSnapshot(tournament.tournamentId, matchId);
-      if (live) this.publishLiveSnapshot(tournament.tournamentId, { ...live, status: 'failed', sequence: live.sequence + 1, updatedAt: new Date().toISOString(), error: failure.reason });
-      await this.saveTournament(tournament);
-      return { success: false, error: `Match execution failed: ${error}` };
-    }
 
-    if (signal?.aborted || this.cancelledTournaments.has(tournament.tournamentId)) {
-      return { success: false, error: 'Tournament execution cancelled' };
-    }
+      const seriesFormat = this.getPairingSeriesFormat(tournament, pairing);
+      if (seriesFormat !== 'bo1') {
+        return await this.runSeriesPairing(tournament, pairing, participantA, participantB, seriesFormat, signal, {
+          assertLease: options?.assertLease,
+        });
+      }
 
-    // Create tournament match record
-    const tournamentMatchRecord: TournamentMatchRecord = {
-      matchId,
-      pairingId: pairing.pairingId,
-      participantA: pairing.participantA,
-      participantB: pairing.participantB,
-      winner: matchResult.winner,
-      terminationReason: matchResult.terminationReason,
-      turnCount: matchResult.turnCount,
-      durationMs: matchResult.durationMs,
-      replayRef: matchId, // Reference for loading replay
-      completedAt: new Date().toISOString(),
-      executionProvenance: (matchResult.metadata?.sourceRevisions as import('@match-runner/types.js').ExecutionProvenance[] | undefined),
-      executionDiagnostics: matchResult.metadata?.executionDiagnostics,
-    };
+      const matchId = createMatchId(tournament.tournamentId, pairing.pairingId);
 
-    // Create replay
-    const replay = MatchRunner.createReplay(matchResult);
+      // Mark pairing as in progress
+      if (!this.markPairingInProgress(tournament, pairing, matchId)) {
+        return { success: false, error: `Pairing ${pairing.pairingId} is not available` };
+      }
 
-    // Save match result and replay
-    if (signal?.aborted || this.cancelledTournaments.has(tournament.tournamentId)) {
-      return { success: false, error: 'Tournament execution cancelled' };
-    }
-    const resultWrite = this.repository.saveMatchResult(
-      tournament.tournamentId,
-      matchId,
-      tournamentMatchRecord,
-      replay
-    );
-    const writes = this.pendingResultWrites.get(tournament.tournamentId) ?? new Set<Promise<void>>();
-    writes.add(resultWrite);
-    this.pendingResultWrites.set(tournament.tournamentId, writes);
-    try {
-      await resultWrite;
-    } catch (error) {
-      if (!this.cancelledTournaments.has(tournament.tournamentId)) {
+      // Persist ownership of the pairing before starting any external work.
+      // If this fails, no Docker execution may begin for an untracked match.
+      if (options?.persistStart !== false) {
+        try {
+          await this.saveTournament(tournament);
+        } catch (error) {
+          return { success: false, error: `Unable to persist match start: ${error}` };
+        }
+      }
+
+      // Convert tournament bots to match runner bot definitions
+      const botA: import('@match-runner/types.js').BotDefinition = {
+        botId: participantA.bot.botId,
+        player: 'A',
+        command: participantA.bot.command,
+        args: participantA.bot.args,
+        env: participantA.bot.env,
+        execution: participantA.bot.execution,
+      };
+
+      const botB: import('@match-runner/types.js').BotDefinition = {
+        botId: participantB.bot.botId,
+        player: 'B',
+        command: participantB.bot.command,
+        args: participantB.bot.args,
+        env: participantB.bot.env,
+        execution: participantB.bot.execution,
+      };
+
+      // Execute match
+      let matchResult: MatchResult;
+      try {
+        const matchConfig: MatchConfig = {
+          matchId,
+          protocolVersion: tournament.matchConfig.protocolVersion,
+          maxTurns: tournament.matchConfig.maxTurns,
+          turnTimeoutMs: tournament.matchConfig.turnTimeoutMs,
+          maxStdoutBytes: tournament.matchConfig.maxStdoutBytes,
+          maxStderrBytes: tournament.matchConfig.maxStderrBytes,
+          failurePolicy: tournament.matchConfig.failurePolicy,
+          maxRetries: tournament.matchConfig.maxRetries,
+          logRequests: tournament.matchConfig.logRequests,
+          logResponses: tournament.matchConfig.logResponses,
+          logStates: tournament.matchConfig.logStates,
+        };
+        matchResult = await this.executor.executeMatch(
+          matchId,
+          botA,
+          botB,
+          matchConfig,
+          { onSnapshot: snapshot => this.publishLiveSnapshot(tournament.tournamentId, snapshot) },
+          signal
+        );
+      } catch (error) {
+        if (isExecutionCancelledError(error) || signal?.aborted || this.cancelledTournaments.has(tournament.tournamentId)) {
+          const live = this.getLiveMatchSnapshot(tournament.tournamentId, matchId);
+          if (live) this.publishLiveSnapshot(tournament.tournamentId, { ...live, status: 'cancelled', sequence: live.sequence + 1, updatedAt: new Date().toISOString(), error: 'Tournament execution cancelled' });
+          return { success: false, error: 'Tournament execution cancelled' };
+        }
+        // Persist an explicit retryable failure. A later explicit run request
+        // resets failed pairings; this attempt never silently disappears.
         pairing.status = 'failed';
-        pairing.failureReason = 'Match result persistence failed';
-        pairing.failureCode = 'PERSISTENCE';
+        const failure = classifyMatchExecutionFailure(error);
+        pairing.failureCode = failure.code;
+        pairing.failureReason = failure.reason;
         pairing.matchId = null;
         pairing.startedAt = null;
+        const live = this.getLiveMatchSnapshot(tournament.tournamentId, matchId);
+        if (live) this.publishLiveSnapshot(tournament.tournamentId, { ...live, status: 'failed', sequence: live.sequence + 1, updatedAt: new Date().toISOString(), error: failure.reason });
         await this.saveTournament(tournament);
+        return { success: false, error: `Match execution failed: ${error}` };
       }
-      return { success: false, error: `Match result persistence failed: ${error}` };
+
+      if (signal?.aborted || this.cancelledTournaments.has(tournament.tournamentId)) {
+        return { success: false, error: 'Tournament execution cancelled' };
+      }
+
+      // Create tournament match record
+      const tournamentMatchRecord: TournamentMatchRecord = {
+        matchId,
+        pairingId: pairing.pairingId,
+        participantA: pairing.participantA,
+        participantB: pairing.participantB,
+        winner: matchResult.winner,
+        terminationReason: matchResult.terminationReason,
+        turnCount: matchResult.turnCount,
+        durationMs: matchResult.durationMs,
+        replayRef: matchId, // Reference for loading replay
+        completedAt: new Date().toISOString(),
+        executionProvenance: (matchResult.metadata?.sourceRevisions as import('@match-runner/types.js').ExecutionProvenance[] | undefined),
+        executionDiagnostics: matchResult.metadata?.executionDiagnostics,
+      };
+
+      // Create replay
+      const replay = MatchRunner.createReplay(matchResult);
+
+      // Save match result and replay
+      if (signal?.aborted || this.cancelledTournaments.has(tournament.tournamentId)) {
+        return { success: false, error: 'Tournament execution cancelled' };
+      }
+      if (options?.assertLease && !(await options.assertLease())) {
+        return { success: false, error: `Pairing ${pairing.pairingId} lease expired` };
+      }
+      const resultWrite = this.repository.saveMatchResult(
+        tournament.tournamentId,
+        matchId,
+        tournamentMatchRecord,
+        replay
+      );
+      const writes = this.pendingResultWrites.get(tournament.tournamentId) ?? new Set<Promise<void>>();
+      writes.add(resultWrite);
+      this.pendingResultWrites.set(tournament.tournamentId, writes);
+      try {
+        await resultWrite;
+      } catch (error) {
+        if (!this.cancelledTournaments.has(tournament.tournamentId)) {
+          pairing.status = 'failed';
+          pairing.failureReason = 'Match result persistence failed';
+          pairing.failureCode = 'PERSISTENCE';
+          pairing.matchId = null;
+          pairing.startedAt = null;
+          await this.saveTournament(tournament);
+        }
+        return { success: false, error: `Match result persistence failed: ${error}` };
+      } finally {
+        writes.delete(resultWrite);
+        if (writes.size === 0) {
+          this.pendingResultWrites.delete(tournament.tournamentId);
+        }
+      }
+
+      if (signal?.aborted || this.cancelledTournaments.has(tournament.tournamentId)) {
+        return { success: false, error: 'Tournament execution cancelled' };
+      }
+
+      const isElimination = this.isEliminationPairing(tournament, pairing);
+      if (isElimination && matchResult.winner !== 'A' && matchResult.winner !== 'B') {
+        pairing.status = 'pending_tiebreaker';
+        pairing.failureCode = 'UNRESOLVED_DRAW';
+        pairing.failureReason = 'Elimination match ended in a draw without a decisive winner; tiebreaker pending';
+        pairing.tiebreakerStatus = 'pending';
+        pairing.matchId = matchId;
+        pairing.matchResult = tournamentMatchRecord;
+        pairing.completedAt = tournamentMatchRecord.completedAt;
+        const live = this.getLiveMatchSnapshot(tournament.tournamentId, matchId);
+        if (live) this.publishLiveSnapshot(tournament.tournamentId, { ...live, status: 'finished', sequence: live.sequence + 1, updatedAt: new Date().toISOString() });
+        await this.saveTournament(tournament);
+        return { success: false, error: 'Elimination match ended in a draw without a decisive winner (tiebreaker pending)' };
+      }
+
+      // Mark pairing completed
+      this.markPairingCompleted(tournament, pairing, tournamentMatchRecord);
+
+      // Recompute standings from all recorded results (idempotent)
+      if (!isMultiStageTournament(tournament) || this.isTournamentFinished(tournament)) {
+        const allMatchRecords = await this.repository.listMatchResults(tournament.tournamentId);
+        tournament.standings = computeStandings(tournament.participants, allMatchRecords, tournament.scoringConfig);
+      }
+
+      // Save updated tournament
+      if (signal?.aborted || this.cancelledTournaments.has(tournament.tournamentId)) {
+        return { success: false, error: 'Tournament execution cancelled' };
+      }
+      if (options?.assertLease && !(await options.assertLease())) {
+        return { success: false, error: `Pairing ${pairing.pairingId} lease expired` };
+      }
+      await this.saveTournament(tournament);
+
+      return {
+        success: true,
+        data: { matchResult, replay },
+      };
     } finally {
-      writes.delete(resultWrite);
-      if (writes.size === 0) {
-        this.pendingResultWrites.delete(tournament.tournamentId);
-      }
+      this.activePairingExecutions.delete(executionKey);
     }
-
-    if (signal?.aborted || this.cancelledTournaments.has(tournament.tournamentId)) {
-      return { success: false, error: 'Tournament execution cancelled' };
-    }
-
-    // Mark pairing completed
-    markPairingCompleted(tournament.rounds, pairing.pairingId, tournamentMatchRecord);
-
-    // Recompute standings from all recorded results (idempotent)
-    const allMatchRecords = await this.repository.listMatchResults(tournament.tournamentId);
-    tournament.standings = computeStandings(tournament.participants, allMatchRecords, tournament.scoringConfig);
-
-    // Save updated tournament
-    if (signal?.aborted || this.cancelledTournaments.has(tournament.tournamentId)) {
-      return { success: false, error: 'Tournament execution cancelled' };
-    }
-    await this.saveTournament(tournament);
-
-    return {
-      success: true,
-      data: { matchResult, replay },
-    };
   }
 
-  /** Execute a pairing as a durable best-of-three series. */
-  private async runBestOfThreePairing(
+  /** Execute a pairing as a durable BO2 or conditional BO3 series. */
+  private async runSeriesPairing(
     tournament: Tournament,
     pairing: TournamentPairing,
     participantA: TournamentParticipant,
     participantB: TournamentParticipant,
+    format: 'bo2' | 'bo3',
     signal?: AbortSignal,
+    options: { claimed?: boolean; coordinatorCommit?: boolean; assertLease?: () => Promise<boolean> } = {},
   ): Promise<TournamentOperationResult<ExecutedMatchResult>> {
     const seriesMatchId = createMatchId(tournament.tournamentId, pairing.pairingId);
     const progress: TournamentSeriesProgress = pairing.seriesProgress ?? {
-      format: 'bo3', bestOf: 3, seed: randomUUID(), nextGame: 1, winsA: 0, winsB: 0, games: [],
+      format, bestOf: format === 'bo2' ? 2 : 3, seed: randomUUID(), nextGame: 1, winsA: 0, winsB: 0, games: [],
     };
+    if (progress.format !== format || progress.bestOf !== (format === 'bo2' ? 2 : 3)) {
+      return { success: false, error: `Pairing ${pairing.pairingId} has incompatible persisted series format` };
+    }
     pairing.seriesProgress = progress;
 
-    if (!markPairingInProgress(tournament.rounds, pairing.pairingId, seriesMatchId)) {
-      return { success: false, error: `Pairing ${pairing.pairingId} is not available` };
-    }
-    try {
-      await this.saveTournament(tournament);
-    } catch (error) {
-      return { success: false, error: `Unable to persist series start: ${error}` };
+    if (options.claimed) {
+      if (pairing.status !== 'in_progress' || pairing.matchId !== seriesMatchId) {
+        return { success: false, error: `Pairing ${pairing.pairingId} does not hold the durable series claim` };
+      }
+    } else {
+      if (!this.markPairingInProgress(tournament, pairing, seriesMatchId)) {
+        return { success: false, error: `Pairing ${pairing.pairingId} is not available` };
+      }
+      try {
+        await this.saveTournament(tournament);
+      } catch (error) {
+        return { success: false, error: `Unable to persist series start: ${error}` };
+      }
     }
 
     try {
-      for (let gameNumber = progress.nextGame; gameNumber <= 3; gameNumber++) {
+      const totalGames = format === 'bo2' ? 2 : 3;
+      for (let gameNumber = progress.nextGame; gameNumber <= totalGames; gameNumber++) {
         if (signal?.aborted || this.cancelledTournaments.has(tournament.tournamentId)) {
           return { success: false, error: 'Tournament execution cancelled' };
         }
@@ -1010,29 +1911,23 @@ export class TournamentManager {
             replayRef: gameId,
             completedAt: new Date().toISOString(),
           }, numberedGame, sides);
-          await this.repository.saveMatchResult(tournament.tournamentId, gameId, {
-            matchId: gameRecord.matchId,
-            pairingId: pairing.pairingId,
-            participantA: gameRecord.participantA,
-            participantB: gameRecord.participantB,
-            winner: gameRecord.winner,
-            terminationReason: gameRecord.terminationReason,
-            turnCount: gameRecord.turnCount,
-            durationMs: gameRecord.durationMs,
-            replayRef: gameRecord.replayRef,
-            completedAt: gameRecord.completedAt,
-            seriesGameOf: seriesMatchId,
-          }, replay);
         }
 
         if (!gameRecord) throw new Error(`Series game ${numberedGame} could not be recorded`);
-        progress.games = [...progress.games.filter(game => game.gameNumber !== numberedGame), gameRecord]
-          .sort((left, right) => left.gameNumber - right.gameNumber);
-        progress.winsA = progress.games.filter(game => game.winnerParticipantId === participantA.participantId).length;
-        progress.winsB = progress.games.filter(game => game.winnerParticipantId === participantB.participantId).length;
-        progress.nextGame = (numberedGame < 3 ? numberedGame + 1 : 3) as 1 | 2 | 3;
+        if (options.assertLease && !(await options.assertLease())) {
+          return { success: false, error: `Pairing ${pairing.pairingId} lease expired` };
+        }
+        const checkpoint = await this.commitCoordinator.checkpointSeriesGame({
+          tournamentId: tournament.tournamentId,
+          pairingId: pairing.pairingId,
+          gameRecord,
+          replay,
+          format,
+        });
+        Object.assign(progress, checkpoint.seriesProgress);
         pairing.seriesProgress = progress;
-        await this.saveTournament(tournament);
+        pairing.status = checkpoint.pairing.status;
+        pairing.matchId = checkpoint.pairing.matchId;
 
         // The runner emits the finished-game snapshot before the durable
         // series progress is updated. Republish it after saving so spectators
@@ -1047,11 +1942,18 @@ export class TournamentManager {
           });
         }
 
-        if (progress.winsA >= 2 || progress.winsB >= 2) break;
+        // BO2 always plays both games. For the regional/elimination BO3,
+        // the first two games decide the series unless their score is tied
+        // (for example 1-0 after one win and one draw). Only then is Game 3
+        // required.
+        if (format === 'bo3' && numberedGame >= 2) {
+          const firstTwoScore = seriesScore(progress.games.slice(0, 2), participantA.participantId, participantB.participantId);
+          if (firstTwoScore.winsA !== firstTwoScore.winsB) break;
+        }
 
         // Give spectators a clear transition window and avoid starting the
         // next game immediately after the previous game's result is saved.
-        if (numberedGame < 3) {
+        if (format === 'bo3' && tournament.matchConfig.bestOf === 3 && !isMultiStageTournament(tournament) && numberedGame < 3) {
           await new Promise<void>(resolve => setTimeout(resolve, BO3_GAME_TRANSITION_DELAY_MS));
           if (signal?.aborted || this.cancelledTournaments.has(tournament.tournamentId)) {
             return { success: false, error: 'Tournament execution cancelled' };
@@ -1086,7 +1988,7 @@ export class TournamentManager {
         terminationReason: games.at(-1)?.terminationReason ?? null,
         metadata: { ...firstReplay.metadata, sourceRevisions: provenance },
         series: {
-          format: 'bo3', bestOf: 3, seed: progress.seed, winsA: score.winsA, winsB: score.winsB, winner,
+          format, bestOf: format === 'bo2' ? 2 : 3, seed: progress.seed, winsA: score.winsA, winsB: score.winsB, winner,
           games: replayGames.map(({ game, replay: gameReplay }) => ({
             gameNumber: game.gameNumber,
             participantA: game.participantA,
@@ -1109,13 +2011,61 @@ export class TournamentManager {
         replayRef: seriesMatchId,
         completedAt: new Date().toISOString(),
         executionProvenance: provenance,
-        series: { format: 'bo3', bestOf: 3, seed: progress.seed, games, winsA: score.winsA, winsB: score.winsB, winner },
+        series: { format, bestOf: format === 'bo2' ? 2 : 3, seed: progress.seed, games, winsA: score.winsA, winsB: score.winsB, winner },
       };
-      await this.repository.saveMatchResult(tournament.tournamentId, seriesMatchId, aggregateRecord, seriesReplay);
-      markPairingCompleted(tournament.rounds, pairing.pairingId, aggregateRecord);
-      const allMatchRecords = await this.repository.listMatchResults(tournament.tournamentId);
-      tournament.standings = computeStandings(tournament.participants, allMatchRecords, tournament.scoringConfig);
-      await this.saveTournament(tournament);
+      if (!options.coordinatorCommit) {
+        await this.repository.saveMatchResult(tournament.tournamentId, seriesMatchId, aggregateRecord, seriesReplay);
+      }
+
+      const isElimination = this.isEliminationPairing(tournament, pairing);
+      if (isElimination && winner !== 'A' && winner !== 'B') {
+        if (options.coordinatorCommit) {
+          await this.repository.saveMatchResult(tournament.tournamentId, seriesMatchId, aggregateRecord, seriesReplay);
+          const drawCommit = await this.mutateTournament(tournament.tournamentId, async fresh => {
+            const freshPairing = this.findTournamentPairing(fresh, pairing.pairingId);
+            if (!freshPairing) return { success: false, error: `Pairing ${pairing.pairingId} is missing during draw recovery` };
+            freshPairing.status = 'pending_tiebreaker';
+            freshPairing.failureCode = 'UNRESOLVED_DRAW';
+            freshPairing.failureReason = 'Elimination series ended in a draw without a decisive winner; tiebreaker pending';
+            freshPairing.tiebreakerStatus = 'pending';
+            freshPairing.matchId = seriesMatchId;
+            freshPairing.matchResult = aggregateRecord;
+            freshPairing.completedAt = aggregateRecord.completedAt;
+            await this.saveTournament(fresh);
+            return { success: false, error: 'Elimination series ended in a draw without a decisive winner (tiebreaker pending)' };
+          });
+          return { success: false, error: drawCommit.error ?? 'Elimination series ended in a draw without a decisive winner (tiebreaker pending)' };
+        }
+        pairing.status = 'pending_tiebreaker';
+        pairing.failureCode = 'UNRESOLVED_DRAW';
+        pairing.failureReason = 'Elimination series ended in a draw without a decisive winner; tiebreaker pending';
+        pairing.tiebreakerStatus = 'pending';
+        pairing.matchId = seriesMatchId;
+        pairing.matchResult = aggregateRecord;
+        pairing.completedAt = aggregateRecord.completedAt;
+        await this.saveTournament(tournament);
+        return { success: false, error: 'Elimination series ended in a draw without a decisive winner (tiebreaker pending)' };
+      }
+
+      if (options.coordinatorCommit) {
+        if (options.assertLease && !(await options.assertLease())) {
+          return { success: false, error: `Pairing ${pairing.pairingId} lease expired` };
+        }
+        const commit = await this.commitCoordinator.commitMatchResult({
+          tournamentId: tournament.tournamentId,
+          pairingId: pairing.pairingId,
+          matchResult: aggregateRecord,
+          replay: seriesReplay,
+        });
+        if (!commit.success) return { success: false, error: `Unable to commit series ${seriesMatchId}` };
+      } else {
+        this.markPairingCompleted(tournament, pairing, aggregateRecord);
+        if (!isMultiStageTournament(tournament) || this.isTournamentFinished(tournament)) {
+          const allMatchRecords = await this.repository.listMatchResults(tournament.tournamentId);
+          tournament.standings = computeStandings(tournament.participants, allMatchRecords, tournament.scoringConfig);
+        }
+        await this.saveTournament(tournament);
+      }
 
       const lastResult = lastReplay;
       return {
@@ -1138,14 +2088,30 @@ export class TournamentManager {
       if (isExecutionCancelledError(error) || signal?.aborted || this.cancelledTournaments.has(tournament.tournamentId)) {
         return { success: false, error: 'Tournament execution cancelled' };
       }
-      pairing.status = 'failed';
       const failure = classifyMatchExecutionFailure(error);
       console.error(`[tournament] series execution failed for ${seriesMatchId}`, error);
-      pairing.failureCode = failure.code;
-      pairing.failureReason = failure.reason;
-      pairing.matchId = null;
-      pairing.startedAt = null;
-      await this.saveTournament(tournament);
+      if (options.claimed) {
+        await this.commitCoordinator.releasePairingClaim({
+          tournamentId: tournament.tournamentId,
+          pairingId: pairing.pairingId,
+          matchId: seriesMatchId,
+        });
+        const fresh = await this.repository.load(tournament.tournamentId);
+        const failedPairing = fresh && this.findTournamentPairing(fresh, pairing.pairingId);
+        if (fresh && failedPairing && failedPairing.status === 'scheduled') {
+          failedPairing.status = 'failed';
+          failedPairing.failureCode = failure.code;
+          failedPairing.failureReason = failure.reason;
+          await this.saveTournament(fresh);
+        }
+      } else {
+        pairing.status = 'failed';
+        pairing.failureCode = failure.code;
+        pairing.failureReason = failure.reason;
+        pairing.matchId = null;
+        pairing.startedAt = null;
+        await this.saveTournament(tournament);
+      }
       return { success: false, error: `Series execution failed: ${error}` };
     }
   }
@@ -1234,16 +2200,20 @@ export class TournamentManager {
 
     const tournament = loadResult.data;
 
-    if (tournament.status !== 'running') {
+    if (tournament.status !== 'running' && !(tournament.status === 'completed' && isMultiStageTournament(tournament))) {
       return { success: false, error: `Cannot complete: tournament status is ${tournament.status}` };
     }
 
-    if (!isScheduleComplete(tournament.rounds)) {
+    if (!this.isTournamentFinished(tournament)) {
       return { success: false, error: 'Not all matches completed' };
     }
 
     tournament.status = 'completed';
     tournament.completedAt = new Date().toISOString();
+    if (isMultiStageTournament(tournament)) {
+      const allMatchRecords = await this.repository.listMatchResults(tournament.tournamentId);
+      tournament.standings = computeStandings(tournament.participants, allMatchRecords, tournament.scoringConfig);
+    }
     if (this.cancelledTournaments.has(tournamentId)) {
       return { success: false, error: 'Tournament execution cancelled' };
     }
@@ -1263,11 +2233,11 @@ export class TournamentManager {
       if (tournament.status !== 'completed') {
         return { success: false, error: `Cannot publish results while tournament status is ${tournament.status}` };
       }
-      if (!tournament.completedAt || !isScheduleComplete(tournament.rounds)) {
+      if (!tournament.completedAt || !this.isTournamentFinished(tournament)) {
         return { success: false, error: 'Tournament results are incomplete' };
       }
 
-      const expectedPairings = tournament.rounds.flatMap(round => round.pairings)
+      const expectedPairings = this.getAllPairings(tournament)
         .filter(pairing => pairing.participantB !== null);
       if (expectedPairings.some(pairing => pairing.status !== 'completed' || !pairing.matchId || !pairing.matchResult)) {
         return { success: false, error: 'Tournament results are incomplete' };
@@ -1293,7 +2263,7 @@ export class TournamentManager {
           }
           const replay = await this.repository.loadReplay(tournamentId, pairing.matchId!);
           const seriesValid = record.series && replay?.series
-            && replay.series.format === 'bo3'
+            && replay.series.format === record.series.format
             && replay.series.seed === record.series.seed
             && replay.series.winsA === record.series.winsA
             && replay.series.winsB === record.series.winsB
@@ -1309,7 +2279,7 @@ export class TournamentManager {
             });
           // A Bot forfeit has an official match winner, but the engine state
           // may correctly retain winner=null because no legal move ended the
-          // board game. BO1 uses the historical checks; BO3 additionally
+          // board game. BO1 uses the historical checks; series additionally
           // validates every embedded game and its deterministic seed/score.
           const replayValid = replay && replay.matchId === pairing.matchId &&
             replay.winner === record.winner && replay.terminationReason === record.terminationReason &&
@@ -1339,6 +2309,7 @@ export class TournamentManager {
    */
   async cancelTournament(tournamentId: string): Promise<TournamentOperationResult<Tournament>> {
     this.cancelledTournaments.add(tournamentId);
+    this.activeSchedulers.get(tournamentId)?.cancel('Tournament execution cancelled');
     try {
       return await this.withTerminalTransitionLock(tournamentId, async () => {
         const writes = this.pendingResultWrites.get(tournamentId);
@@ -1430,7 +2401,10 @@ export class TournamentManager {
     }
     const tournamentResult = await this.loadTournament(tournamentId);
     const tournament = tournamentResult.success ? tournamentResult.data : null;
-    const pairing = tournament?.rounds.flatMap(round => round.pairings).find(item => item.matchId === matchId);
+    const allPairings = tournament ? this.getAllPairings(tournament) : [];
+    const pairing = allPairings.find(item => item.matchId === matchId)
+      ?? allPairings.find(item => item.matchResult?.series?.games.some(game => game.matchId === matchId)
+        || item.seriesProgress?.games.some(game => game.matchId === matchId));
     if (!tournament || !pairing) return { success: true, data: replay };
     const byId = new Map(tournament.participants.map(participant => [participant.participantId, participant]));
     const identity = (participantId: string | null) => {
@@ -1445,27 +2419,52 @@ export class TournamentManager {
         ...(execution?.kind === 'source-revision' ? { runtimeId: execution.runtimeId } : {}),
       };
     };
+    type ReplaySeriesGameWithId = NonNullable<MatchReplay['series']>['games'][number] & { matchId?: string };
+    // A BO2/BO3 game is persisted as its own replay artifact.  That artifact
+    // does not necessarily carry the aggregate series envelope, so recover the
+    // envelope from the pairing when the request targets game 2/3 directly.
+    const seriesSource = replay.series ?? pairing.matchResult?.series;
+    const replaySeriesGames = (seriesSource?.games ?? []) as ReplaySeriesGameWithId[];
+    const seriesGame = replaySeriesGames.find(game => game.matchId === matchId)
+      ?? pairing.matchResult?.series?.games.find(game => game.matchId === matchId)
+      ?? pairing.seriesProgress?.games.find(game => game.matchId === matchId);
+    // The selected game may swap its temporary A/B sides. The replay header
+    // and aggregate score must stay anchored to the pairing participants;
+    // game-local sides are retained inside each game record for board colors.
+    const participantA = pairing.participantA;
+    const participantB = pairing.participantB;
+    const enrichedSeriesGames = seriesSource
+      ? await Promise.all(replaySeriesGames.map(async game => {
+        // The aggregate is a presentation envelope. Prefer the durable game
+        // artifact so a partial embedded replay cannot reach the viewer.
+        const storedGameReplay = game.matchId
+          ? await this.repository.loadReplay(tournamentId, game.matchId).catch(() => null)
+          : null;
+        const gameReplay = storedGameReplay ?? game.replay ?? replay;
+        return {
+          ...game,
+          replay: gameReplay ? {
+            ...gameReplay,
+            participantIdentities: {
+              A: identity(game.participantA),
+              B: identity(game.participantB),
+            },
+          } : gameReplay,
+        };
+      }))
+      : undefined;
     return {
       success: true,
       data: {
         ...replay,
         participantIdentities: {
-          A: identity(pairing.participantA),
-          B: identity(pairing.participantB),
+          A: identity(participantA),
+          B: identity(participantB),
         },
-        ...(replay.series ? {
+        ...(seriesSource && enrichedSeriesGames ? {
           series: {
-            ...replay.series,
-            games: replay.series.games.map(game => ({
-              ...game,
-              replay: {
-                ...game.replay,
-                participantIdentities: {
-                  A: identity(game.participantA),
-                  B: identity(game.participantB),
-                },
-              },
-            })),
+            ...seriesSource,
+            games: enrichedSeriesGames,
           },
         } : {}),
       },
@@ -1483,7 +2482,7 @@ export class TournamentManager {
 
     const tournament = loadResult.data;
     const matchRecords = await this.repository.listMatchResults(tournamentId);
-     return { success: true, data: getTournamentStats(tournament.participants, matchRecords, tournament.rounds.flatMap(round => round.pairings)) };
+    return { success: true, data: getTournamentStats(tournament.participants, matchRecords, this.getAllPairings(tournament)) };
   }
 
   /**
@@ -1523,10 +2522,8 @@ export class TournamentManager {
 
     const tournament = loadResult.data;
 
-    // Load all match results and recompute standings (idempotent)
+    // Load all match results and reconcile durable pairing state
     const matchRecords = await this.repository.listMatchResults(tournamentId);
-    tournament.standings = computeStandings(tournament.participants, matchRecords, tournament.scoringConfig);
-
     await this.reconcileInterruptedPairings(tournament, matchRecords);
 
     await this.saveTournament(tournament);
@@ -1542,12 +2539,30 @@ export class TournamentManager {
     const tournaments = await this.repository.list();
     let recovered = 0;
     for (const tournament of tournaments) {
-      if (tournament.status !== 'running') continue;
-      const hasInterruptedPairing = tournament.rounds.some(round =>
-        round.pairings.some(pairing => pairing.status === 'in_progress'));
-      if (!hasInterruptedPairing) continue;
+      const allPairings = this.getAllPairings(tournament);
+      const hasInterruptedPairing = allPairings.some(pairing => pairing.status === 'in_progress');
       const matchRecords = await this.repository.listMatchResults(tournament.tournamentId);
-      tournament.standings = computeStandings(tournament.participants, matchRecords, tournament.scoringConfig);
+      const pairingRecords = matchRecords.filter(record => !record.seriesGameOf);
+      const pairingById = new Map(allPairings.map(pairing => [pairing.pairingId, pairing]));
+      const hasUnappliedCommittedResult = pairingRecords.some(record => {
+        const pairing = pairingById.get(record.pairingId);
+        return pairing !== undefined && (
+          pairing.status !== 'completed' || pairing.matchResult?.matchId !== record.matchId
+        );
+      });
+      if (this.matchJobStore) {
+        await this.matchJobStore.ensureForTournament(tournament.tournamentId, allPairings);
+        await this.matchJobStore.reconcile(
+          tournament.tournamentId,
+          allPairings,
+          pairingRecords.map(record => record.pairingId),
+        );
+      }
+      // A series can have advanced the in-memory stage/tournament status before
+      // the final snapshot save fails. Its durable result must still be
+      // reconciled after restart even when that snapshot says "completed".
+      if (tournament.status !== 'running' && !hasUnappliedCommittedResult) continue;
+      if (!hasInterruptedPairing && !hasUnappliedCommittedResult) continue;
       await this.reconcileInterruptedPairings(tournament, matchRecords);
       await this.saveTournament(tournament);
       recovered += 1;
@@ -1563,35 +2578,177 @@ export class TournamentManager {
    * persisted, so it becomes eligible again after the previous writer has
    * released storage ownership.
    */
+  /**
+   * Reconcile durable pairing state with committed match results.
+   *
+   * A committed result is authoritative. An in-progress pairing without a
+   * committed result belongs to an execution interrupted after its start was
+   * persisted, so it becomes eligible again after the previous writer has
+   * released storage ownership.
+   *
+   * Hardened multi-pass reconciliation resolves slots topologically regardless of
+   * filesystem readdir record order, preserving downstream winner slots and detecting
+   * conflicting or deadlock states.
+   */
   private async reconcileInterruptedPairings(
     tournament: Tournament,
     matchRecords?: TournamentMatchRecord[]
   ): Promise<void> {
-    const records = matchRecords ?? await this.repository.listMatchResults(tournament.tournamentId);
-    const completedPairingIds = new Set(records.map(record => record.pairingId));
+    const rawRecords = matchRecords ?? await this.repository.listMatchResults(tournament.tournamentId);
+    // Series game checkpoints share the pairingId with the aggregate result,
+    // but they must not complete the pairing or affect standings individually.
+    // The aggregate record is the only pairing-level reconciliation record.
+    const pairingRecords = rawRecords.filter(record => !record.seriesGameOf);
+    const completedPairingIds = new Set(pairingRecords.map(record => record.pairingId));
+    const allPairings = this.getAllPairings(tournament);
+    const pairingMap = new Map<string, TournamentPairing>();
+    for (const p of allPairings) {
+      pairingMap.set(p.pairingId, p);
+    }
 
-    for (const round of tournament.rounds) {
-      for (const pairing of round.pairings) {
-        if (pairing.status === 'in_progress' && !completedPairingIds.has(pairing.pairingId)) {
-          pairing.status = 'scheduled';
-          pairing.matchId = null;
-          pairing.matchResult = null;
-          pairing.startedAt = null;
-          pairing.completedAt = null;
+    for (const pairing of allPairings) {
+      if (pairing.status === 'in_progress' && !completedPairingIds.has(pairing.pairingId)) {
+        pairing.status = 'scheduled';
+        pairing.matchId = null;
+        pairing.matchResult = null;
+        pairing.startedAt = null;
+        pairing.completedAt = null;
+      }
+    }
+
+    if (pairingRecords.length === 0) return;
+
+    // Helper: build stage topological index map
+    const stageOrderMap = new Map<string, number>();
+    if (isMultiStageTournament(tournament) && tournament.stages) {
+      for (const stage of tournament.stages) {
+        stageOrderMap.set(stage.stageId, stage.order);
+      }
+    }
+
+    // Initial topological sort: Stage hierarchy -> Round hierarchy -> Timestamp
+    const records = [...pairingRecords].sort((a, b) => {
+      const foundA = findPairingInTournament(tournament, a.pairingId);
+      const foundB = findPairingInTournament(tournament, b.pairingId);
+      const stageA = foundA?.stage ? (stageOrderMap.get(foundA.stage.stageId) ?? foundA.stage.order ?? 0) : 0;
+      const stageB = foundB?.stage ? (stageOrderMap.get(foundB.stage.stageId) ?? foundB.stage.order ?? 0) : 0;
+      if (stageA !== stageB) return stageA - stageB;
+
+      const roundA = foundA?.round?.roundNumber ?? foundA?.pairing?.roundNumber ?? 0;
+      const roundB = foundB?.round?.roundNumber ?? foundB?.pairing?.roundNumber ?? 0;
+      if (roundA !== roundB) return roundA - roundB;
+
+      const timeA = a.completedAt ? new Date(a.completedAt).getTime() : 0;
+      const timeB = b.completedAt ? new Date(b.completedAt).getTime() : 0;
+      return timeA - timeB;
+    });
+
+    // Multi-pass reconciliation loop with progress detection
+    let remaining = [...records];
+    let pass = 0;
+    const maxPasses = remaining.length + 1;
+
+    while (remaining.length > 0 && pass < maxPasses) {
+      pass++;
+      let progress = false;
+      const nextRemaining: TournamentMatchRecord[] = [];
+
+      for (const record of remaining) {
+        const pairing = pairingMap.get(record.pairingId);
+        if (!pairing) {
+          throw new Error(`Match record references unknown pairing: ${record.pairingId}`);
+        }
+
+        // Idempotency & Conflict Check on already-completed pairings
+        if (pairing.status === 'completed' && pairing.matchResult) {
+          if (
+            pairing.matchResult.matchId === record.matchId &&
+            pairing.matchResult.winner === record.winner
+          ) {
+            // Already committed identically - idempotent pass-through
+            progress = true;
+            continue;
+          }
+          throw new Error(
+            `Pairing ${pairing.pairingId} is already completed with conflicting result (existing winner: ${pairing.matchResult.winner}, incoming: ${record.winner})`
+          );
+        }
+
+        const isElimination = this.isEliminationPairing(tournament, pairing);
+
+        if (isMultiStageTournament(tournament)) {
+          // Check if pairing dependencies are satisfied before committing
+          const isReady = this.isPairingReadyForReconcile(pairing);
+          if (!isReady) {
+            // Dependencies not yet resolved; defer to next pass
+            nextRemaining.push(record);
+            continue;
+          }
+        }
+
+        // Handle elimination draw -> pending_tiebreaker
+        if (isElimination && record.winner !== 'A' && record.winner !== 'B') {
+          pairing.status = 'pending_tiebreaker';
+          pairing.failureCode = 'UNRESOLVED_DRAW';
+          pairing.failureReason = 'Elimination match ended in a draw without a decisive winner; tiebreaker pending';
+          pairing.tiebreakerStatus = 'pending';
+          pairing.matchId = record.matchId;
+          pairing.matchResult = record;
+          pairing.completedAt = record.completedAt;
+          progress = true;
+          continue;
+        }
+
+        if (isMultiStageTournament(tournament)) {
+          commitMatchResultAndResolveSlots(tournament, record.pairingId, record);
+          progress = true;
+        } else {
+          pairing.status = 'completed';
+          pairing.matchId = record.matchId;
+          pairing.matchResult = record;
+          pairing.startedAt = record.completedAt;
+          pairing.completedAt = record.completedAt;
+          progress = true;
         }
       }
-    }
 
-    for (const record of records) {
-      const pairing = findPairing(tournament.rounds, record.pairingId);
-      if (pairing && pairing.status !== 'completed') {
-        pairing.status = 'completed';
-        pairing.matchId = record.matchId;
-        pairing.matchResult = record;
-        pairing.startedAt = record.completedAt;
-        pairing.completedAt = record.completedAt;
+      remaining = nextRemaining;
+      if (!progress && remaining.length > 0) {
+        const unresolvable = remaining.map(r => r.pairingId).join(', ');
+        throw new Error(
+          `Tournament recovery deadlock: unable to reconcile ${remaining.length} match record(s) due to unresolvable slot dependencies: [${unresolvable}]`
+        );
       }
     }
+
+    if (!isMultiStageTournament(tournament) || this.isTournamentFinished(tournament)) {
+      tournament.standings = computeStandings(tournament.participants, pairingRecords, tournament.scoringConfig);
+    } else if (isMultiStageTournament(tournament)) {
+      tournament.standings = [];
+    }
+  }
+
+  private isEliminationPairing(tournament: Tournament, pairing: TournamentPairing): boolean {
+    if (!isMultiStageTournament(tournament)) {
+      return false;
+    }
+    const found = findPairingInTournament(tournament, pairing.pairingId);
+    if (found?.stage?.stageType) {
+      return found.stage.stageType === 'preliminary' || found.stage.stageType === 'knockout';
+    }
+    return pairing.stageId === 'stage-preliminary' || pairing.stageId === 'stage-knockout';
+  }
+
+  private isPairingReadyForReconcile(pairing: TournamentPairing): boolean {
+    const aReady = Boolean(
+      pairing.participantA &&
+      !isSlotPlaceholder(pairing.participantA) &&
+      (!pairing.slotA || pairing.slotA.participantId !== null)
+    );
+    const bReady =
+      !pairing.participantB ||
+      (!isSlotPlaceholder(pairing.participantB) && (!pairing.slotB || pairing.slotB.participantId !== null));
+    return aReady && bReady;
   }
 }
 
@@ -1605,7 +2762,14 @@ export async function createTournamentManager(
   executorConfig?: import('@bot-executor/index.js').ExecutorFactoryConfig,
   validateSourceRevision?: (execution: SourceRevisionExecution) => Promise<boolean>,
   resolveSourceRevision?: (execution: SourceRevisionExecution) => Promise<Buffer | null>,
-  sourceRevisionExecutor?: SourceRevisionExecutor
+  sourceRevisionExecutor?: SourceRevisionExecutor,
+  enableMultiStage?: boolean,
+  enableBo1MatchScheduler = false,
+  onBo1SchedulerCheckpoint?: TournamentAppConfig['onBo1SchedulerCheckpoint'],
+  qaMaxActiveMatches: 1 | 2 = 1,
+  seriesMatchConcurrency: 1 | 2 = 1,
+  enableSeriesConcurrency2 = false,
+  validateTournamentRevisions?: (executions: SourceRevisionExecution[]) => Promise<{ valid: boolean; pending: boolean; error?: string }>,
 ): Promise<TournamentManager> {
   const repository = new FileTournamentRepository({ baseDir: storageDir });
   await repository.initialize();
@@ -1613,6 +2777,9 @@ export async function createTournamentManager(
   try {
     const effectiveExecutionPolicy = executionPolicy ?? (
       process.env.NODE_ENV?.trim().toLowerCase() === 'production' ? 'sandbox-required' : 'development'
+    );
+    const effectiveMultiStage = enableMultiStage ?? (
+      process.env.ENABLE_MULTI_STAGE?.trim().toLowerCase() === 'true'
     );
     let matchExecutor = executor;
     if (!matchExecutor) {
@@ -1637,7 +2804,21 @@ export async function createTournamentManager(
       matchExecutor = await createMatchRunnerExecutor(DEFAULT_MATCH_CONFIG, botExecutor, sourceRevisionExecutor, resolveSourceRevision);
     }
 
-    return new TournamentManager({ repository, executor: matchExecutor, storageDir, validateSourceRevision, resolveSourceRevision, sourceRevisionExecutor });
+    return new TournamentManager({
+      repository,
+      executor: matchExecutor,
+      storageDir,
+      validateSourceRevision,
+      validateTournamentRevisions,
+      resolveSourceRevision,
+      sourceRevisionExecutor,
+      enableMultiStage: effectiveMultiStage,
+      enableBo1MatchScheduler,
+      ...(qaMaxActiveMatches === 2 ? { qaMaxActiveMatches: 2 as const } : {}),
+      seriesMatchConcurrency: qaMaxActiveMatches === 2 ? 2 : seriesMatchConcurrency,
+      enableSeriesConcurrency2,
+      onBo1SchedulerCheckpoint,
+    });
   } catch (error) {
     repository.close();
     throw error;
@@ -1648,10 +2829,12 @@ export async function createTournamentManager(
  * Create a TournamentManager with mock executor for testing
  */
 export function createMockTournamentManager(
-  repository: TournamentRepository
+  repository: TournamentRepository,
+  config?: Partial<TournamentAppConfig>
 ): TournamentManager {
   return new TournamentManager({
     repository,
     executor: new MockMatchExecutor(),
+    ...config,
   });
 }

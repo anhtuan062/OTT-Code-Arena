@@ -35,9 +35,16 @@ export function seriesScore(games: TournamentSeriesGameRecord[], participantA: s
 }
 
 export function shouldPlayNextGame(games: TournamentSeriesGameRecord[]): boolean {
-  const wins = new Map<string, number>();
-  for (const game of games) if (game.winnerParticipantId) wins.set(game.winnerParticipantId, (wins.get(game.winnerParticipantId) ?? 0) + 1);
-  return games.length < 3 && Math.max(0, ...wins.values()) < 2;
+  if (games.length >= 3) return false;
+  // The first two games establish the series result. A third game is only
+  // needed when those two games are still tied (including 0-0 or 1-1).
+  if (games.length < 2) return true;
+  const score = games.reduce((result, game) => {
+    if (game.winnerParticipantId === game.participantA) result.a += 1;
+    if (game.winnerParticipantId === game.participantB) result.b += 1;
+    return result;
+  }, { a: 0, b: 0 });
+  return score.a === score.b;
 }
 
 export function gameWinnerForParticipants(winner: Player | 'draw' | null, playerA: string, playerB: string): string | null {

@@ -33,6 +33,8 @@ describe('published tournament result access', () => {
       matchId, pairingId, participantA: 'P1', participantB: 'P2', winner: 'A' as const,
       terminationReason: 'goal_reached' as const, turnCount: 1, durationMs: 10,
       replayRef: matchId, completedAt: new Date().toISOString(),
+      executionProvenance: [{ competitorId: 'private-competitor', botId: 'private-bot', revisionId: 'private-revision', runtimeId: 'cpp', sourceDigest: 'private-digest' }],
+      executionDiagnostics: [{ player: 'A' as const, runtimeId: 'cpp' as const, executionMode: 'strategy' as const, exitCode: 1, outputProduced: true, engineAcceptedMove: false }],
     };
     tournament.rounds = [{ roundNumber: 1, pairings: [{ pairingId, roundNumber: 1, participantA: 'P1', participantB: 'P2', status: 'completed', matchId, matchResult: result, startedAt: result.completedAt, completedAt: result.completedAt }] }];
     tournament.standings = computeStandings(tournament.participants, [result], tournament.scoringConfig);
@@ -42,6 +44,7 @@ describe('published tournament result access', () => {
       moves: [],
       finalState: { turn: 1, currentPlayer: 'A', status: 'finished', winner: 'A', winReason: 'goal_reached', pieces: [], lastMove: null, positionHistory: [] },
       winner: 'A', terminationReason: 'goal_reached',
+      metadata: { sourceRevisions: result.executionProvenance, executionDiagnostics: result.executionDiagnostics },
     };
     const tournamentDir = path.join(dir, tournamentId);
     await fs.mkdir(tournamentDir, { recursive: true });
@@ -85,13 +88,25 @@ describe('published tournament result access', () => {
     expect(detail.body).not.toHaveProperty('matchConfig');
 
     expect((await competitor.get('/api/tournaments/public-published/standings')).status).toBe(200);
-    expect((await competitor.get('/api/tournaments/public-published/results/m-public-results')).status).toBe(200);
+    const publicResult = await competitor.get('/api/tournaments/public-published/results/m-public-results');
+    expect(publicResult.status).toBe(200);
+    expect(publicResult.body).not.toHaveProperty('executionProvenance');
+    expect(publicResult.body).not.toHaveProperty('executionDiagnostics');
+    const organizerResult = await organizer.get('/api/tournaments/public-published/results/m-public-results');
+    expect(organizerResult.status).toBe(200);
+    expect(organizerResult.body.executionProvenance).toHaveLength(1);
+    expect(organizerResult.body.executionDiagnostics).toHaveLength(1);
+    const authoritative = JSON.parse(await fs.readFile(path.join(dir, 'public-published', 'match-m-public-results.json'), 'utf8'));
+    expect(authoritative.executionProvenance).toHaveLength(1);
+    expect(authoritative.executionDiagnostics).toHaveLength(1);
     const replay = await competitor.get('/api/tournaments/public-published/replays/m-public-results');
     expect(replay.status).toBe(200);
     expect(replay.body.participantIdentities).toMatchObject({
-      A: { participantId: 'P1', participantName: 'Player One', botId: 'bot-one' },
-      B: { participantId: 'P2', participantName: 'Player Two', botId: 'bot-two' },
+      A: { participantId: 'P1', participantName: 'Player One' },
+      B: { participantId: 'P2', participantName: 'Player Two' },
     });
+    expect(replay.body.participantIdentities.A).not.toHaveProperty('botId');
+    expect(replay.body.participantIdentities.B).not.toHaveProperty('botId');
     expect((await competitor.get('/api/tournaments/public-unpublished')).status).toBe(200);
     expect((await competitor.get('/api/tournaments/public-unpublished/standings')).status).toBe(403);
     expect((await competitor.get('/api/tournaments/private-published')).status).toBe(200);

@@ -348,6 +348,35 @@ describe('Tournament Manager', () => {
       expect(persisted.participationRequests?.[0]).toMatchObject({ status: 'pending', reviewedAt: null, reviewedBy: null });
     });
 
+    it('undoes approved and rejected reviews before scheduling', async () => {
+      const manager = new TournamentManager({ repository, executor: mockExecutor });
+      await createTestTournament(manager, 'review-undo', 'Review undo');
+      await manager.openRegistration('review-undo');
+
+      const approved = await manager.submitParticipationRequest('review-undo', {
+        competitorId: 'competitor-approved',
+        botId: 'bot-approved',
+        participantName: 'Approved Bot',
+        botSnapshot: { botId: 'bot-approved', command: 'node', args: ['bot.js'] },
+      });
+      await manager.reviewParticipationRequest('review-undo', approved.data!.requestId, 'organizer', 'approve');
+      const undoApproved = await manager.undoParticipationRequestReview('review-undo', approved.data!.requestId, 'organizer');
+      expect(undoApproved.success).toBe(true);
+      expect(undoApproved.data?.participants).toHaveLength(0);
+      expect(undoApproved.data?.participationRequests?.[0]).toMatchObject({ status: 'pending', reviewedAt: null, reviewedBy: null });
+
+      const rejected = await manager.submitParticipationRequest('review-undo', {
+        competitorId: 'competitor-rejected',
+        botId: 'bot-rejected',
+        participantName: 'Rejected Bot',
+        botSnapshot: { botId: 'bot-rejected', command: 'node', args: ['bot.js'] },
+      });
+      await manager.reviewParticipationRequest('review-undo', rejected.data!.requestId, 'organizer', 'reject');
+      const undoRejected = await manager.undoParticipationRequestReview('review-undo', rejected.data!.requestId, 'organizer');
+      expect(undoRejected.success).toBe(true);
+      expect(undoRejected.data?.participationRequests?.find(request => request.requestId === rejected.data!.requestId)?.status).toBe('pending');
+    });
+
     it('should run next match', async () => {
       const manager = new TournamentManager({
         repository,

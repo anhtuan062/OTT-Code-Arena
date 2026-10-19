@@ -1,0 +1,77 @@
+<!-- REPLAY VIEWER -->
+  <div id="replay-view" class="page">
+    <div class="replay-header replay-match-header">
+      <div class="replay-heading-row">
+        <div>
+          <p class="section-kicker" id="replay-view-kicker">XEM LẠI TRẬN ĐẤU</p>
+          <h2 id="replay-view-title">Diễn biến từng nước</h2>
+        </div>
+        <span class="replay-status-badge" id="replay-status-badge">Đã hoàn thành</span>
+      </div>
+      <div class="replay-header-subline">
+        <button class="tournament-view-btn replay-back-link" id="close-replay" type="button"><svg class="ui-icon" aria-hidden="true"><use href="#icon-arrow-left"></use></svg><span id="replay-back-label">Quay lại chi tiết giải đấu</span></button>
+        <span id="replay-context-note">Bản ghi trận đấu</span>
+      </div>
+      <p id="r-result-text" class="replay-result" aria-live="polite"></p>
+    </div>
+    <div id="replay-loading" class="replay-loading" role="status" aria-live="polite" hidden>Đang tải bản xem lại trận
+      đấu…</div>
+    <div id="replay-error" class="replay-error-panel" role="alert" hidden><span id="replay-error-message"></span><button
+        id="replay-retry" class="secondary-btn" type="button">Thử lại</button></div>
+    <section class="replay-series-card" id="replay-series-card" hidden aria-label="Tỷ số trận đấu">
+      <div class="replay-players" aria-label="Hai người chơi">
+        <div class="replay-player-a-label replay-player-identity"><span class="replay-player-name"
+            id="r-p1-name">Người chơi A</span><span class="replay-player-bot" id="r-p1-bot"></span><span
+            class="replay-player-pieces" id="r-p1-pieces"></span><span class="replay-player-score" id="r-p1-score">0</span></div>
+        <span class="replay-versus" aria-hidden="true">—</span>
+        <div class="replay-player-b-label replay-player-identity"><span class="replay-player-name"
+            id="r-p2-name">Người chơi B</span><span class="replay-player-bot" id="r-p2-bot"></span><span
+            class="replay-player-pieces" id="r-p2-pieces"></span><span class="replay-player-score" id="r-p2-score">0</span></div>
+      </div>
+      <div id="replay-series-slot"></div>
+    </section>
+    <div id="replay-content" class="replay-layout" hidden>
+      <section class="replay-board-panel" aria-label="Bàn cờ trận đấu">
+        <div class="replay-panel-heading">
+          <h3 id="replay-board-title">Ván 1 · Diễn biến</h3>
+          <span id="r-turn-display" class="replay-panel-count" aria-live="polite">0 / 0 lượt</span>
+        </div>
+        <div class="replay-board-wrap">
+          <div class="coord-header" id="coord-header"></div>
+          <div class="replay-board-row">
+            <div class="coord-side" id="coord-side"></div>
+            <div class="replay-board" id="r-board" role="grid" aria-label="Bàn cờ xem lại 9 x 9"></div>
+          </div>
+        </div>
+        <p id="r-current-move" class="replay-current-move" aria-live="polite">Vị trí ban đầu</p>
+        <label class="replay-scrubber-label" for="replay-scrubber">Vị trí xem lại</label>
+        <input id="replay-scrubber" type="range" min="-1" value="-1" step="1" aria-label="Chọn vị trí xem lại">
+        <div class="replay-controls" aria-label="Điều khiển xem lại"><button class="icon-btn replay-control" id="btn-replay-start"
+            type="button" aria-label="Về đầu" title="Về đầu (Home)"><svg class="ui-icon" aria-hidden="true"><use href="#icon-skip-back"></use></svg></button><button class="icon-btn replay-control" id="btn-replay-prev" type="button"
+            aria-label="Lùi một nước" title="Lùi một nước (←)"><svg class="ui-icon" aria-hidden="true"><use href="#icon-step-back"></use></svg></button><button class="primary-btn replay-play replay-control" id="btn-replay-play"
+            type="button" aria-label="Phát" title="Phát / Tạm dừng (Space)" aria-pressed="false"><svg class="ui-icon" aria-hidden="true"><use href="#icon-play"></use></svg><span class="replay-control-label">Phát</span></button><button class="icon-btn replay-control" id="btn-replay-next" type="button"
+            aria-label="Tiến một nước" title="Tiến một nước (→)"><svg class="ui-icon" aria-hidden="true"><use href="#icon-step-forward"></use></svg></button><button class="icon-btn replay-control" id="btn-replay-end" type="button"
+            aria-label="Đến cuối" title="Đến cuối (End)"><svg class="ui-icon" aria-hidden="true"><use href="#icon-skip-forward"></use></svg></button><label class="replay-speed-label" for="replay-speed">Tốc độ phát<select id="replay-speed">
+              <option value="1200">Chậm</option>
+              <option value="800" selected>Bình thường</option>
+              <option value="400">Nhanh</option>
+            </select></label></div>
+        <div class="replay-shortcuts-hint" aria-hidden="true">
+          <span><kbd>Space</kbd> Phát / Dừng</span>
+          <span><kbd>←</kbd> <kbd>→</kbd> Lùi / Tiến</span>
+          <span><kbd>Home</kbd> <kbd>End</kbd> Đầu / Cuối</span>
+        </div>
+      </section>
+      <aside class="replay-timeline-panel">
+        <div class="replay-panel-heading"><h3 id="replay-history-title">Lịch sử nước đi</h3><span id="replay-history-count" class="replay-panel-count">0 lượt</span></div>
+        <p id="r-selected-move" class="replay-selected-move" aria-live="polite">Vị trí ban đầu</p>
+        <div id="replay-timeline" class="replay-timeline" aria-live="polite"></div>
+        <div class="replay-details" aria-label="Thông tin trận đấu">
+          <div class="replay-detail"><small>Người thắng</small><strong id="r-winner">—</strong></div>
+          <div class="replay-detail"><small>Kết thúc</small><strong id="r-termination">—</strong></div>
+          <div class="replay-detail"><small>Giao thức</small><strong id="r-protocol">—</strong></div>
+          <div class="replay-detail replay-match-id-detail"><small>Mã trận</small><div class="replay-match-id-value"><strong id="r-match-id">—</strong><button class="icon-btn replay-copy-id" id="copy-replay-match-id" type="button" aria-label="Sao chép mã trận" title="Sao chép mã trận"><svg class="ui-icon" aria-hidden="true"><use href="#icon-copy"></use></svg></button></div></div>
+        </div>
+      </aside>
+    </div>
+  </div>

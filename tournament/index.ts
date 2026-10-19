@@ -8,6 +8,8 @@ export * from './scoring.js';
 export * from './executor.js';
 export * from './persistence.js';
 export * from './manager.js';
+export * from './auto-format.js';
+export * from './multi-stage.js';
 
 import { TournamentManager, createTournamentManager, createMockTournamentManager } from './manager.js';
 import type { TournamentAppConfig } from './manager.js';
@@ -37,6 +39,8 @@ import {
   VALID_STATUS_TRANSITIONS,
   MIN_PARTICIPANTS,
   MAX_PARTICIPANTS,
+  MAX_PARTICIPANTS_BY_FORMAT,
+  getMaxParticipants,
 } from './types.js';
 
 export {
@@ -48,6 +52,8 @@ export {
   VALID_STATUS_TRANSITIONS,
   MIN_PARTICIPANTS,
   MAX_PARTICIPANTS,
+  MAX_PARTICIPANTS_BY_FORMAT,
+  getMaxParticipants,
 };
 
 export type {

@@ -1,5 +1,6 @@
 import { readFile } from 'node:fs/promises';
 import { describe, expect, it } from 'vitest';
+import { readAssembledFrontendMarkup } from './frontend-fixtures';
 
 async function source(file: string): Promise<string> {
   return readFile(new URL(`../../${file}`, import.meta.url), 'utf8');
@@ -8,7 +9,7 @@ async function source(file: string): Promise<string> {
 describe('UX.5 tournament discovery, management, and registration', () => {
   it('uses the supported role projections and distinguishes search/filter empty states', async () => {
     const app = await source('app.js');
-    const page = await source('index.html');
+    const page = await readAssembledFrontendMarkup();
     expect(app).toContain("state.tournamentScope === 'mine' ? '/my/tournaments' : '/tournaments/discoverable'");
     expect(app).toContain('state.tournamentStatusFilter === \'all\'');
     expect(app).toContain('Không tìm thấy giải đấu phù hợp');
@@ -28,7 +29,7 @@ describe('UX.5 tournament discovery, management, and registration', () => {
   });
 
   it('shows tournament, immutable revision, runtime/mode, and returned registration identity', async () => {
-    const [app, page] = await Promise.all([source('app.js'), source('index.html')]);
+    const [app, page] = await Promise.all([source('app.js'), readAssembledFrontendMarkup()]);
     expect(page).toContain('id="registration-tournament-context"');
     expect(page).toContain('id="registration-revision-summary"');
     expect(app).toContain('Revision bất biến');
@@ -48,7 +49,7 @@ describe('UX.5 tournament discovery, management, and registration', () => {
 
   it('renders authoritative schedule statuses, conditional replay, and standings columns safely', async () => {
     const app = await source('app.js');
-    const page = await source('index.html');
+    const page = await readAssembledFrontendMarkup();
     expect(app).toContain('statusBadge(pairing.status)');
     expect(app).toContain('if (pairing.matchId)');
     expect(app).toContain('textCell(standing.matchesPlayed)');

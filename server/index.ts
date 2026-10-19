@@ -2,8 +2,8 @@ import express from 'express';
 import cors from 'cors';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { createTournamentManager } from '../tournament/manager.js';
-import { createExecutor, clearExecutorCache, configuredRuntimeImageRegistry, createRevisionDockerExecutor, resolveCppCompilationBackend } from '../bot-executor/index.js';
+import { createTournamentManager, resolveSeriesSchedulerRuntimeConfig } from '../tournament/manager.js';
+import { createExecutor, clearExecutorCache, configuredRuntimeImageRegistry, RevisionDockerExecutor, createRevisionDockerExecutor, resolveCppCompilationBackend } from '../bot-executor/index.js';
 import { configuredDockerImage } from '../bot-executor/image-config.js';
 import { createExecutionQueue } from '../bot-executor/execution-queue.js';
 import * as fs from 'fs/promises';
@@ -16,17 +16,35 @@ import { SqlBotRevisionRepository, SUPPORTED_SOURCE_RUNTIMES, MAX_SOURCE_BYTES, 
 import { isUserRole, SqlUserRepository, type UserRole } from './repositories/user-repository.js';
 import { SqlSessionRepository } from './repositories/session-repository.js';
 import { SqlRateLimitRepository } from './repositories/rate-limit-repository.js';
-import { projectSpectatorLive, projectSpectatorReplay } from './spectator.js';
+import { SqlBotPreflightRepository } from './repositories/bot-preflight-repository.js';
+import { SqlTournamentMatchJobRepository } from './repositories/tournament-match-job-repository.js';
+import { FairMatchDispatcher } from '../tournament/fair-match-dispatcher.js';
+import type { ExecutedMatchResult } from '../tournament/executor.js';
+import { BotPreflightService } from './bot-preflight.js';
+import { projectPublicMatchResult, projectSpectatorLive, projectSpectatorReplay } from './spectator.js';
 import type { ExecutionPolicy } from '../bot-executor/types.js';
 import type { SourceRevisionExecutor } from '../bot-executor/types.js';
 import { ExecutionCancelledError } from '../bot-executor/types.js';
 import { getStrategySdkIdentity } from '../bot-executor/strategy-sdk.js';
-import type { Tournament, TournamentBot, ParticipationRequest, SourceRevisionExecution } from '../tournament/types.js';
+import type { Tournament, TournamentBot, ParticipationRequest, SourceRevisionExecution, TournamentRound, TournamentPairing, TournamentStage } from '../tournament/types.js';
+import { isMultiStageTournament, getAllTournamentPairings, normalizeToMultiStageView } from '../tournament/multi-stage.js';
 import type { Server } from 'node:http';
 import { BotProtocol } from '../bot-protocol/index.js';
 import { chooseSystemOpponentMove, createEngine, posToAlgebraic } from '../engine/index.js';
 import { createPracticeScenario, serializePracticeLegalMoves } from '../practice/scenarios.js';
 import { getSeriesSides } from '../tournament/series.js';
+import { applicationMetrics } from '../observability/metrics.js';
+import { ProjectionCache } from './projection-cache.js';
+import { HostCapacityController, hostCapacityThresholdsFromEnv } from '../observability/host-capacity-controller.js';
+import { performance } from 'node:perf_hooks';
+import {
+  isQaFixturesEnabled,
+  listOwnedQaFixtures,
+  getQaFixture,
+  getOwnedQaFixture,
+  resolveQaFixtureTiebreaker,
+  retryQaFixturePairing,
+} from './qa-fixtures.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -38,10 +56,43 @@ const projectRoot = projectRootCandidates.find(root => existsSync(path.join(root
   ?? projectRootCandidates[0]!;
 
 const app = express();
+export function trustedProxyConfig(env: NodeJS.ProcessEnv = process.env): false | string[] {
+  const configured = env.TRUSTED_PROXY_CIDRS?.split(',').map(value => value.trim()).filter(Boolean) ?? [];
+  if (!configured.length) return false;
+  if (configured.some(value => value === '0.0.0.0/0' || value === '::/0' || !/^(?:loopback|linklocal|uniquelocal|\d{1,3}(?:\.\d{1,3}){3}(?:\/\d{1,2})?|[0-9a-fA-F:]+(?:\/\d{1,3})?)$/.test(value))) {
+    throw new Error('TRUSTED_PROXY_CIDRS contains an invalid proxy address');
+  }
+  return configured;
+}
+app.set('trust proxy', trustedProxyConfig());
 app.use(cors({
   origin: process.env.CORS_ORIGIN || false,
   credentials: true,
 }));
+
+// Aggregate API telemetry only. Do not retain URLs, query strings, request
+// bodies, credentials, or user identifiers in the metrics registry.
+app.use((req, res, next) => {
+  if (!req.path.startsWith('/api/')) return next();
+  const startedAt = performance.now();
+  applicationMetrics.increment('api.requests');
+  res.once('finish', () => {
+    const statusCode = res.statusCode;
+    applicationMetrics.observe('api.latency_ms', performance.now() - startedAt);
+    if (statusCode >= 400) applicationMetrics.increment('api.errors');
+    if (statusCode >= 500) applicationMetrics.increment('api.server_errors');
+  });
+  next();
+});
+
+// Shutdown closes admission before touching active workers or storage. Existing
+// requests are allowed to finish; new mutation/job requests fail explicitly.
+app.use((req, res, next) => {
+  if (shuttingDown && ['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method)) {
+    return res.status(503).json({ error: 'Server is shutting down' });
+  }
+  next();
+});
 
 // 1. Strict payload limits and JSON parsing error handling
 app.use(express.json({ limit: '100kb' }));
@@ -53,30 +104,69 @@ app.use((err: any, req: express.Request, res: express.Response, next: express.Ne
 });
 
 // 2. Serve static files explicitly to prevent repository exposure
-app.get('/', (req, res) => res.sendFile(path.join(projectRoot, 'index.html')));
-app.get('/app.js', (req, res) => res.sendFile(path.join(projectRoot, 'app.js')));
+app.get('/', (req, res) => {
+  res.set('Cache-Control', 'no-cache, no-store, must-revalidate');
+  res.set('Pragma', 'no-cache');
+  res.set('Expires', '0');
+  res.sendFile(path.join(projectRoot, 'index.html'));
+});
+app.get('/app.js', (req, res) => {
+  res.set('Cache-Control', 'no-cache, no-store, must-revalidate');
+  res.set('Pragma', 'no-cache');
+  res.set('Expires', '0');
+  res.sendFile(path.join(projectRoot, 'app.js'));
+});
 app.get('/style.css', (req, res) => res.sendFile(path.join(projectRoot, 'style.css')));
+app.get('/favicon.svg', (req, res) => res.sendFile(path.join(projectRoot, 'favicon.svg')));
+app.use('/styles', express.static(path.join(projectRoot, 'styles')));
+app.use('/js', express.static(path.join(projectRoot, 'js')));
+app.use('/views/pages', express.static(path.join(projectRoot, 'views/pages'), { index: false }));
 app.get('/styles/views/replay.css', (req, res) => res.sendFile(path.join(projectRoot, 'styles/views/replay.css')));
 app.get('/styles/views/live.css', (req, res) => res.sendFile(path.join(projectRoot, 'styles/views/live.css')));
 app.get('/styles/components/editor.css', (req, res) => res.sendFile(path.join(projectRoot, 'styles/components/editor.css')));
-app.get('/styles/layout.css', (req, res) => res.sendFile(path.join(projectRoot, 'styles/layout.css')));
+app.get('/styles/components/app-shell.css', (req, res) => res.sendFile(path.join(projectRoot, 'styles/components/app-shell.css')));
 app.get('/styles/views/auth.css', (req, res) => res.sendFile(path.join(projectRoot, 'styles/views/auth.css')));
 // Serve static icons if they were separate, but they are embedded in index.html
 
 // Initialize singleton Tournament Manager
 let manager!: Awaited<ReturnType<typeof createTournamentManager>>;
-let executionQueue = createExecutionQueue({ maxConcurrent: 2, maxQueueLength: 50 });
+let executionQueue = createExecutionQueue({ maxConcurrent: 2, maxQueueLength: 50, metricsName: 'execution' });
 let botRepository: SqlBotRepository;
 let botRevisionRepository: SqlBotRevisionRepository;
 let userRepository: SqlUserRepository;
 let sessionRepository: SqlSessionRepository;
 let rateLimitRepository: SqlRateLimitRepository;
 let sourceRevisionExecutor: SourceRevisionExecutor | undefined;
+let botPreflightService: BotPreflightService | undefined;
+let fairMatchDispatcher = new FairMatchDispatcher<ExecutedMatchResult>(2);
+let hostCapacityController = new HostCapacityController(hostCapacityThresholdsFromEnv());
+let httpServer: Server | undefined;
+let shutdownPromise: Promise<ShutdownResult> | undefined;
+let shuttingDown = false;
+const activeSseResponses = new Set<express.Response>();
+const DEFAULT_SHUTDOWN_TIMEOUT_MS = 30_000;
+
+export interface ShutdownResult {
+  closed: boolean;
+  timedOut: boolean;
+}
+const projectionCache = new ProjectionCache({
+  namespace: 'projection',
+  ttlMs: Number(process.env.OTT_PROJECTION_CACHE_TTL_MS ?? 2_000),
+  maxEntries: Number(process.env.OTT_PROJECTION_CACHE_MAX_ENTRIES ?? 256),
+  maxBytes: Number(process.env.OTT_PROJECTION_CACHE_MAX_BYTES ?? 8 * 1024 * 1024),
+});
 const activePracticeExecutions = new Set<string>();
+const activePracticeByUser = new Map<string, number>();
 const practiceAttempts = new Map<string, number[]>();
 const SESSION_COOKIE = 'ott_session';
 const SESSION_TTL_MS = 24 * 60 * 60 * 1000;
-const production = process.env.NODE_ENV?.trim().toLowerCase() === 'production';
+export function useSecureSessionCookie(req: express.Request, env: NodeJS.ProcessEnv = process.env): boolean {
+  // run-local.cmd uses production execution policy on plain HTTP localhost.
+  // Secure cookies are not sent by browsers over HTTP, so derive this from
+  // the actual request protocol instead of NODE_ENV alone.
+  return env.NODE_ENV?.trim().toLowerCase() === 'production' && req.secure;
+}
 
 export function resolveExecutionPolicy(env: NodeJS.ProcessEnv = process.env): ExecutionPolicy {
   const nodeEnv = env.NODE_ENV?.trim().toLowerCase();
@@ -101,15 +191,30 @@ export function resolveExecutionPolicy(env: NodeJS.ProcessEnv = process.env): Ex
 }
 
 export async function initServer(storageDir?: string) {
+  if (manager || httpServer) {
+    const previousShutdown = await shutdownServer();
+    if (!previousShutdown.closed) throw new Error('Previous server shutdown did not settle active work');
+  }
+  shuttingDown = false;
+  shutdownPromise = undefined;
   const executionPolicy = resolveExecutionPolicy();
+  const seriesSchedulerConfig = resolveSeriesSchedulerRuntimeConfig();
   // Fail configuration before opening persistence or accepting a listener.
   if (executionPolicy === 'sandbox-required') configuredDockerImage(undefined, executionPolicy);
   const dir = storageDir || process.env.TOURNAMENT_DATA_DIR || path.join(projectRoot, 'data/tournaments');
   await fs.mkdir(dir, { recursive: true });
-  executionQueue = createExecutionQueue({ maxConcurrent: 2, maxQueueLength: 50 });
+  executionQueue = createExecutionQueue({ maxConcurrent: 2, maxQueueLength: 50, metricsName: 'execution' });
+  hostCapacityController.stop();
+  hostCapacityController = new HostCapacityController(hostCapacityThresholdsFromEnv());
+  fairMatchDispatcher = new FairMatchDispatcher<ExecutedMatchResult>(2);
+  projectionCache.clear();
   activeTournamentRuns.clear();
   tournamentRunOwners.clear();
+  sourceRevisionExecutor?.close?.();
   sourceRevisionExecutor = undefined;
+  botPreflightService?.close();
+  botPreflightService = undefined;
+  let candidate: RevisionDockerExecutor | undefined;
   const sourceExecutionRequested = process.env.ENABLE_SOURCE_REVISION_EXECUTION?.trim().toLowerCase() === 'true';
   if (sourceExecutionRequested) {
     if (executionPolicy !== 'sandbox-required') {
@@ -117,7 +222,7 @@ export async function initServer(storageDir?: string) {
     }
     const runtimeImages = configuredRuntimeImageRegistry(executionPolicy);
     const cppCompilationBackend = resolveCppCompilationBackend(process.env.BOT_CPP_COMPILATION_BACKEND);
-    const candidate = createRevisionDockerExecutor({
+    candidate = createRevisionDockerExecutor({
       imageRegistry: runtimeImages,
       executionPolicy,
       workingDirBase: process.env.BOT_EXECUTION_WORKDIR ?? path.join(dir, '.source-execution'),
@@ -130,14 +235,18 @@ export async function initServer(storageDir?: string) {
       defaultPreparationTimeoutMs: 10000,
       cppCompilationBackend,
     });
-    if (!(await candidate.isAvailable())) {
-      throw new Error('Source-revision execution requested but configured Docker runtime images are unavailable');
-    }
-    sourceRevisionExecutor = candidate;
   }
-  manager?.close();
+  manager = undefined as any;
   closeSharedDatabase();
   try {
+    applicationMetrics.start();
+    applicationMetrics.setStatus('host.capacity.state', hostCapacityController.currentState);
+    hostCapacityController.onStateChange(state => {
+      applicationMetrics.setStatus('host.capacity.state', state);
+      fairMatchDispatcher.wake();
+    });
+    hostCapacityController.start(() => applicationMetrics.snapshot());
+    fairMatchDispatcher.setAdmissionController(active => hostCapacityController.canAdmitNewMatch(active));
     // Acquire tournament storage ownership before opening any writable
     // database in the shared data directory.
     const resolveSourceRevision = async (execution: SourceRevisionExecution): Promise<Buffer | null> => {
@@ -155,14 +264,68 @@ export async function initServer(storageDir?: string) {
       undefined,
       executionPolicy,
       undefined,
-      async (execution: SourceRevisionExecution) => (await resolveSourceRevision(execution)) !== null,
+      async (execution: SourceRevisionExecution) => botPreflightService?.get(execution)?.status === 'passed',
       resolveSourceRevision,
-      sourceRevisionExecutor,
+      candidate,
+      process.env.ENABLE_MULTI_STAGE?.trim().toLowerCase() === 'false' ? false : true,
+      seriesSchedulerConfig.enabled,
+      undefined,
+      1,
+      seriesSchedulerConfig.concurrency,
+      seriesSchedulerConfig.concurrency2Enabled,
+      async executions => {
+        if (!executions.length) return { valid: true, pending: false };
+        if (!botPreflightService) return { valid: false, pending: false, error: 'Bot preflight validation is unavailable' };
+        let pending = false;
+        for (const execution of executions) {
+          const record = botPreflightService.get(execution);
+          if (!record || record.status === 'expired') { botPreflightService.start(execution); pending = true; continue; }
+          if (record.status === 'pending') { pending = true; continue; }
+          if (record.status !== 'passed') return { valid: false, pending: false, error: `Bot revision preflight failed (${record.errorCode ?? 'unknown'})` };
+        }
+        return pending ? { valid: false, pending: true, error: 'Bot preflight validation is still running' } : { valid: true, pending: false };
+      },
     );
+    if (candidate) {
+      // Startup only needs the C++ toolchain/runtime to accept source Bot
+      // workflows. Python availability is checked when a Python revision is
+      // actually executed, so one unavailable runtime cannot block the other.
+      if (!(await candidate.isAvailable('cpp'))) {
+        throw new Error('Source-revision execution requested but configured Docker runtime images are unavailable');
+      }
+      sourceRevisionExecutor = candidate;
+    }
     const db = await initializeDatabase({ path: path.join(dir, 'arena.sqlite') });
     setSharedDatabase(db);
+    manager.setMatchJobStore(new SqlTournamentMatchJobRepository(db), `match-worker-${process.pid}-${randomUUID()}`);
+    manager.setFairMatchDispatcher(fairMatchDispatcher);
+    manager.setMatchAdmissionController(active => hostCapacityController.canAdmitNewMatch(active));
+    manager.setProjectionInvalidator((tournamentId, scope) => {
+      projectionCache.invalidate(`tournament:${tournamentId}:${scope === 'live' ? 'live:' : ''}`);
+    });
     botRepository = new SqlBotRepository(db);
     botRevisionRepository = new SqlBotRevisionRepository(db, dir);
+    botPreflightService = new BotPreflightService(
+      new SqlBotPreflightRepository(db),
+      candidate,
+      resolveSourceRevision,
+    );
+    const recoverablePreflightExecutions: SourceRevisionExecution[] = [];
+    for (const tournament of await manager.listTournaments()) {
+      const activeExecutions = [
+        ...tournament.participants.map(participant => participant.bot.execution),
+        ...(tournament.participationRequests ?? [])
+          .filter(request => request.status === 'pending' || request.status === 'approved')
+          .map(request => request.botSnapshot.execution),
+      ];
+      for (const execution of activeExecutions) {
+        if (execution?.kind === 'source-revision') recoverablePreflightExecutions.push(execution);
+      }
+    }
+    const recoveredPreflight = await botPreflightService.recoverPending(recoverablePreflightExecutions);
+    if (recoveredPreflight.requeued || recoveredPreflight.failed || recoveredPreflight.expired) {
+      console.log(`Recovered Bot preflight jobs: ${JSON.stringify(recoveredPreflight)}`);
+    }
     userRepository = new SqlUserRepository(db);
     sessionRepository = new SqlSessionRepository(db, SESSION_TTL_MS);
     rateLimitRepository = new SqlRateLimitRepository(db);
@@ -173,19 +336,97 @@ export async function initServer(storageDir?: string) {
     if (recoveredTournaments > 0) console.log(`Recovered ${recoveredTournaments} interrupted tournament(s)`);
     console.log(`Tournament Manager initialized with ${executionPolicy} policy`);
   } catch (error) {
+    candidate?.close?.();
+    sourceRevisionExecutor?.close?.();
+    sourceRevisionExecutor = undefined;
     manager?.close();
+    manager = undefined as any;
     closeSharedDatabase();
     executionQueue.cancelAll();
+    applicationMetrics.stop();
+    hostCapacityController.stop();
     throw error;
   }
 }
 
-export function closeServer(): void {
-  executionQueue.cancelAll();
+export function getTournamentManager(): Awaited<ReturnType<typeof createTournamentManager>> {
+  return manager;
+}
+
+export function closeServer(): Promise<ShutdownResult> {
+  return shutdownServer();
+}
+
+export function isServerShuttingDown(): boolean {
+  return shuttingDown;
+}
+
+function closeHttpServer(): Promise<boolean> {
+  const server = httpServer;
+  if (!server) return Promise.resolve(true);
+  for (const response of activeSseResponses) {
+    if (!response.writableEnded && !response.destroyed) response.end();
+  }
+  return new Promise(resolve => {
+    let settled = false;
+    const finish = (closed: boolean) => {
+      if (settled) return;
+      settled = true;
+      resolve(closed);
+    };
+    // Programmatic callers may already have closed the listener. Treat
+    // ERR_SERVER_NOT_RUNNING as an idempotent success; active SSE responses
+    // were ended above and storage is still drained separately.
+    server.close(error => finish(!error || (error as NodeJS.ErrnoException | undefined)?.code === 'ERR_SERVER_NOT_RUNNING'));
+    server.closeIdleConnections?.();
+  });
+}
+
+async function performShutdown(timeoutMs: number): Promise<ShutdownResult> {
+  shuttingDown = true;
+  executionQueue.stopAccepting();
+  manager?.beginShutdown();
+  fairMatchDispatcher.stopDispatching();
+
+  const httpClosed = closeHttpServer();
+  const drained = await executionQueue.drain(timeoutMs);
+  const httpReady = await Promise.race([
+    httpClosed,
+    new Promise<boolean>(resolve => {
+      const timer = setTimeout(() => resolve(false), Math.max(1, timeoutMs));
+      timer.unref?.();
+    }),
+  ]);
+  if (!drained || !httpReady || activePracticeExecutions.size > 0) {
+    // Do not close the manager/database after a bounded wait. Active workers
+    // retain their leases and heartbeat against the still-open store so a
+    // later operator decision cannot create a duplicate commit.
+    return { closed: false, timedOut: true };
+  }
+
   activeTournamentRuns.clear();
   tournamentRunOwners.clear();
+  activePracticeExecutions.clear();
+  activePracticeByUser.clear();
+  sourceRevisionExecutor?.close?.();
+  sourceRevisionExecutor = undefined;
+  botPreflightService?.close();
+  botPreflightService = undefined;
   manager?.close();
+  manager = undefined as any;
   closeSharedDatabase();
+  applicationMetrics.stop();
+  hostCapacityController.stop();
+  projectionCache.clear();
+  httpServer = undefined;
+  return { closed: true, timedOut: false };
+}
+
+export function shutdownServer(timeoutMs = Number(process.env.OTT_SHUTDOWN_TIMEOUT_MS ?? DEFAULT_SHUTDOWN_TIMEOUT_MS)): Promise<ShutdownResult> {
+  if (!shutdownPromise) {
+    shutdownPromise = performShutdown(Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : DEFAULT_SHUTDOWN_TIMEOUT_MS);
+  }
+  return shutdownPromise;
 }
 
 // ---------------------------------------------------------
@@ -252,6 +493,23 @@ function allowPracticeAttempt(userId: string): boolean {
   return true;
 }
 
+function acquirePracticeSlot(userId: string): boolean {
+  const configuredGlobal = Number(process.env.OTT_PRACTICE_MAX_ACTIVE ?? 2);
+  const globalLimit = Number.isFinite(configuredGlobal) && configuredGlobal > 0 ? Math.floor(configuredGlobal) : 2;
+  const configuredPerUser = Number(process.env.OTT_PRACTICE_MAX_ACTIVE_PER_USER ?? 1);
+  const perUserLimit = Number.isFinite(configuredPerUser) && configuredPerUser > 0 ? Math.floor(configuredPerUser) : 1;
+  if (activePracticeExecutions.size >= globalLimit) return false;
+  if ((activePracticeByUser.get(userId) ?? 0) >= perUserLimit) return false;
+  activePracticeByUser.set(userId, (activePracticeByUser.get(userId) ?? 0) + 1);
+  return true;
+}
+
+function releasePracticeSlot(userId: string): void {
+  const remaining = (activePracticeByUser.get(userId) ?? 1) - 1;
+  if (remaining > 0) activePracticeByUser.set(userId, remaining);
+  else activePracticeByUser.delete(userId);
+}
+
 function localizePracticeError(code: string, compilerDiagnostic: string, runtimeDiagnostic: string, exitCode: number | null): string {
   if (['EXECUTOR_ERROR', 'EXECUTOR_UNAVAILABLE', 'SANDBOX_REQUIRED'].includes(code)) return 'Không thể kết nối môi trường Docker sandbox.';
   if (code === 'COMPILATION_TIMEOUT') return 'Biên dịch C++ quá thời gian cho phép.';
@@ -295,7 +553,7 @@ app.post('/api/auth/register', async (req, res) => {
     const user = userRepository.create({ username, passwordHash: await bcrypt.hash(password, 12) });
     const token = randomBytes(32).toString('base64url'); const csrfToken = randomBytes(32).toString('base64url');
     sessionRepository.create({ userId: user.id, token, csrfToken, userAgent: req.get('user-agent'), ip: req.ip });
-    res.cookie(SESSION_COOKIE, token, { httpOnly: true, sameSite: 'lax', secure: production, maxAge: SESSION_TTL_MS, path: '/' });
+    res.cookie(SESSION_COOKIE, token, { httpOnly: true, sameSite: 'lax', secure: useSecureSessionCookie(req), maxAge: SESSION_TTL_MS, path: '/' });
     res.status(201).json({ user: { id: user.id, username: user.username, role: user.role }, csrfToken });
   } catch (error: any) { if (error?.code?.startsWith('SQLITE_CONSTRAINT')) return res.status(409).json({ error: 'Username unavailable' }); res.status(500).json({ error: 'Unable to register' }); }
 });
@@ -308,10 +566,10 @@ app.post('/api/auth/login', async (req, res) => {
   if (!user || typeof password !== 'string' || !(await bcrypt.compare(password, user.password_hash))) { rateLimitRepository.recordAttempt(key, 5, 900000); return res.status(401).json({ error: 'Tài khoản hoặc mật khẩu không đúng' }); }
   const token = randomBytes(32).toString('base64url'); const csrfToken = randomBytes(32).toString('base64url'); userRepository.setLastLogin(user.id);
   sessionRepository.create({ userId: user.id, token, csrfToken, userAgent: req.get('user-agent'), ip: req.ip });
-  res.cookie(SESSION_COOKIE, token, { httpOnly: true, sameSite: 'lax', secure: production, maxAge: SESSION_TTL_MS, path: '/' }); res.json({ user: { id: user.id, username: user.username, role: user.role }, csrfToken });
+  res.cookie(SESSION_COOKIE, token, { httpOnly: true, sameSite: 'lax', secure: useSecureSessionCookie(req), maxAge: SESSION_TTL_MS, path: '/' }); res.json({ user: { id: user.id, username: user.username, role: user.role }, csrfToken });
 });
 app.get('/api/auth/me', requireAuth, (req, res) => res.json({ user: { id: req.auth!.id, username: req.auth!.username, role: req.auth!.role }, csrfToken: req.auth!.csrf }));
-app.post('/api/auth/logout', requireAuth, requireCsrf, (req, res) => { sessionRepository.deleteByToken(req.auth!.token); res.clearCookie(SESSION_COOKIE, { httpOnly: true, sameSite: 'lax', secure: production, path: '/' }); res.status(204).end(); });
+app.post('/api/auth/logout', requireAuth, requireCsrf, (req, res) => { sessionRepository.deleteByToken(req.auth!.token); res.clearCookie(SESSION_COOKIE, { httpOnly: true, sameSite: 'lax', secure: useSecureSessionCookie(req), path: '/' }); res.status(204).end(); });
 
 app.get('/api/bots', requireAuth, requireRole('competitor'), (req, res) => {
   res.json(botRepository.listByOwner(req.auth!.id).map(apiBot));
@@ -459,9 +717,9 @@ app.post('/api/bots/:id/revisions/:revisionId/test', requireAuth, requireRole('c
   const scenario = createPracticeScenario(scenarioId);
   if (!scenario) return res.status(400).json({ error: 'Invalid practice scenario' });
   if (!allowPracticeAttempt(req.auth!.id)) return res.status(429).json({ error: 'Practice rate limit exceeded' });
-  if (activePracticeExecutions.size >= 2) return res.status(429).json({ error: 'Practice execution capacity is busy' });
   const practiceKey = `${req.auth!.id}:${revision.revision_id}`;
   if (activePracticeExecutions.has(practiceKey)) return res.status(409).json({ error: 'This revision is already being tested' });
+  if (!acquirePracticeSlot(req.auth!.id)) return res.status(429).json({ error: 'Practice execution capacity is busy' });
   activePracticeExecutions.add(practiceKey);
   try {
     const source = Buffer.from(await botRevisionRepository.readSource(revision), 'utf8');
@@ -579,6 +837,7 @@ app.post('/api/bots/:id/revisions/:revisionId/test', requireAuth, requireRole('c
     return res.status(503).json({ error: message.includes('Docker') || message.includes('sandbox') ? message : 'Không thể chạy thử revision.' });
   } finally {
     activePracticeExecutions.delete(practiceKey);
+    releasePracticeSlot(req.auth!.id);
   }
 });
 
@@ -591,9 +850,9 @@ const fixedPracticeMatchHandler = async (req: express.Request, res: express.Resp
   if (!revision) return res.status(404).json({ error: 'Source revision not found' });
   if (!isSupportedSourceRuntime(revision.runtime_id)) return res.status(400).json({ error: 'Only C++17 and Python 3 revisions can be tested' });
   if (!allowPracticeAttempt(req.auth!.id)) return res.status(429).json({ error: 'Practice rate limit exceeded' });
-  if (activePracticeExecutions.size >= 2) return res.status(429).json({ error: 'Practice execution capacity is busy' });
   const practiceKey = `${req.auth!.id}:${revision.revision_id}:match`;
   if (activePracticeExecutions.has(practiceKey)) return res.status(409).json({ error: 'This revision is already being tested' });
+  if (!acquirePracticeSlot(req.auth!.id)) return res.status(429).json({ error: 'Practice execution capacity is busy' });
   activePracticeExecutions.add(practiceKey);
   const revisionScopeId = `practice-match-${randomUUID()}`;
   const controller = new AbortController();
@@ -646,6 +905,7 @@ const fixedPracticeMatchHandler = async (req: express.Request, res: express.Resp
     res.off('close', abortOnDisconnect);
     await sourceRevisionExecutor.releaseRevisionScope?.(revisionScopeId).catch(() => false);
     activePracticeExecutions.delete(practiceKey);
+    releasePracticeSlot(req.auth!.id);
   }
 };
 
@@ -668,11 +928,17 @@ app.post('/api/bots/draft/test-match', requireAuth, requireRole('competitor'), r
 // TOURNAMENTS API
 // ---------------------------------------------------------
 async function ownedTournament(id: string, userId: string) {
+  if (isQaFixturesEnabled()) {
+    const fixture = getOwnedQaFixture(id, userId);
+    if (fixture) return fixture;
+  }
   const result = await manager.loadTournament(id);
   return result.success && result.data?.metadata?.ownerId === userId ? result.data : null;
 }
 
 function safeParticipationRequest(request: ParticipationRequest, includeCompetitorId = false) {
+  const execution = request.botSnapshot.execution?.kind === 'source-revision' ? request.botSnapshot.execution : null;
+  const preflight = execution && botPreflightService ? botPreflightService.get(execution) : null;
   return {
     requestId: request.requestId,
     ...(includeCompetitorId ? { competitorId: request.competitorId } : {}),
@@ -684,6 +950,13 @@ function safeParticipationRequest(request: ParticipationRequest, includeCompetit
     reviewedAt: request.reviewedAt,
     reviewedBy: request.reviewedBy,
     rejectionReason: request.rejectionReason,
+    preflight: execution ? {
+      status: preflight?.status ?? 'not_started',
+      validationId: preflight?.validationId ?? null,
+      errorCode: preflight?.errorCode ?? null,
+      diagnostic: preflight?.diagnostic ?? null,
+      completedAt: preflight?.completedAt ?? null,
+    } : null,
   };
 }
 
@@ -691,6 +964,23 @@ function organizerParticipationRequest(request: ParticipationRequest) {
   const safe = safeParticipationRequest(request, true) as Record<string, unknown>;
   const bot = botRepository.findById(request.botId);
   return bot ? { ...safe, botName: bot.name } : safe;
+}
+
+/**
+ * Start revision preflight after the participation request has been durably
+ * persisted. BotPreflightService.start() only enqueues work and never waits
+ * for Docker, but the guard is still important: a transient queue/database
+ * failure must not turn an already-created participation request into a
+ * misleading submission error. The organizer can retry the pending request
+ * through the existing, authorized retry endpoint.
+ */
+function enqueueParticipationPreflight(execution: SourceRevisionExecution): void {
+  if (!botPreflightService) return;
+  try {
+    botPreflightService.start(execution);
+  } catch (error) {
+    console.error('Unable to enqueue participation Bot preflight:', error);
+  }
 }
 
 function discoverableTournament(tournament: Awaited<ReturnType<typeof manager.loadTournament>>['data'] | null) {
@@ -717,7 +1007,350 @@ function isPublishedTournament(tournament: Tournament): boolean {
   return tournament.status === 'completed' && Boolean(tournament.resultsPublishedAt);
 }
 
+function synthesizeRoundsFromStages(stages: TournamentStage[]): TournamentRound[] {
+  const rounds: TournamentRound[] = [];
+  let currentRoundNumber = 1;
+  const sortedStages = [...stages].sort((a, b) => a.order - b.order);
+  for (const stage of sortedStages) {
+    if (stage.regions) {
+      const sortedRegions = [...stage.regions].sort((a, b) => a.regionIndex - b.regionIndex);
+      for (const region of sortedRegions) {
+        for (const round of region.rounds) {
+          if (round.pairings.length > 0) {
+            rounds.push({
+              roundNumber: currentRoundNumber++,
+              pairings: round.pairings,
+            });
+          }
+        }
+      }
+    }
+    if (stage.groups) {
+      const sortedGroups = [...stage.groups].sort((a, b) => a.groupIndex - b.groupIndex);
+      for (const group of sortedGroups) {
+        for (const round of group.rounds) {
+          if (round.pairings.length > 0) {
+            rounds.push({
+              roundNumber: currentRoundNumber++,
+              pairings: round.pairings,
+            });
+          }
+        }
+      }
+    }
+    if (stage.rounds) {
+      for (const round of stage.rounds) {
+        if (round.pairings.length > 0) {
+          rounds.push({
+            roundNumber: currentRoundNumber++,
+            pairings: round.pairings,
+          });
+        }
+      }
+    }
+  }
+  return rounds;
+}
+
+function safeSpectatorPairing(pairing: TournamentPairing, tournament: Tournament, participantName: (id: string | null) => string) {
+  return {
+    pairingId: pairing.pairingId,
+    roundNumber: pairing.roundNumber,
+    participantA: pairing.participantA,
+    participantB: pairing.participantB,
+    slotA: pairing.slotA,
+    slotB: pairing.slotB,
+    status: pairing.status,
+    matchId: pairing.matchId,
+    startedAt: pairing.startedAt,
+    completedAt: pairing.completedAt,
+    seriesProgress: pairing.seriesProgress ? {
+      format: pairing.seriesProgress.format,
+      bestOf: pairing.seriesProgress.bestOf,
+      nextGame: pairing.seriesProgress.nextGame,
+      winsA: pairing.seriesProgress.winsA,
+      winsB: pairing.seriesProgress.winsB,
+      games: pairing.seriesProgress.games.map(game => ({ gameNumber: game.gameNumber, winner: game.winner, winnerParticipantId: game.winnerParticipantId, durationMs: isPublishedTournament(tournament) ? game.durationMs : null })),
+    } : null,
+    matchResult: pairing.matchResult && isPublishedTournament(tournament) ? {
+      winner: pairing.matchResult.winner,
+      terminationReason: pairing.matchResult.terminationReason,
+      durationMs: pairing.matchResult.durationMs,
+      completedAt: pairing.matchResult.completedAt,
+      series: pairing.matchResult.series ? {
+        winsA: pairing.matchResult.series.winsA,
+        winsB: pairing.matchResult.series.winsB,
+        winner: pairing.matchResult.series.winner,
+        games: pairing.matchResult.series.games.map(game => ({ gameNumber: game.gameNumber, winner: game.winner, winnerParticipantId: game.winnerParticipantId, durationMs: game.durationMs })),
+      } : undefined,
+    } : null,
+    participantNames: { A: participantName(pairing.participantA), B: participantName(pairing.participantB) },
+    tiebreakerStatus: pairing.tiebreakerStatus,
+    tiebreakerResolution: pairing.tiebreakerResolution,
+  };
+}
+
+function safeSpectatorStages(tournament: Tournament, participantName: (id: string | null) => string) {
+  if (!tournament.stages) return undefined;
+  return tournament.stages.map(stage => ({
+    stageId: stage.stageId,
+    stageType: stage.stageType,
+    name: stage.name,
+    order: stage.order,
+    status: stage.status,
+    advancement: stage.advancement,
+    regions: stage.regions?.map(region => ({
+      regionId: region.regionId,
+      regionIndex: region.regionIndex,
+      name: region.name,
+      qualifierLimit: region.qualifierLimit,
+      qualifierCount: region.qualifierCount,
+      advancingParticipantIds: region.advancingParticipantIds,
+      status: region.status,
+      rounds: region.rounds.map(round => ({
+        roundNumber: round.roundNumber,
+        pairings: round.pairings.map(p => safeSpectatorPairing(p, tournament, participantName)),
+      })),
+    })),
+    groups: stage.groups?.map(group => ({
+      groupId: group.groupId,
+      groupIndex: group.groupIndex,
+      name: group.name,
+      participantIds: group.participantIds,
+      status: group.status,
+      standings: group.standings,
+      rounds: group.rounds.map(round => ({
+        roundNumber: round.roundNumber,
+        pairings: round.pairings.map(p => safeSpectatorPairing(p, tournament, participantName)),
+      })),
+    })),
+    rounds: stage.rounds?.map(round => ({
+      roundNumber: round.roundNumber,
+      pairings: round.pairings.map(p => safeSpectatorPairing(p, tournament, participantName)),
+    })),
+  }));
+}
+
+type PairingCollection = {
+  stageId?: string;
+  regionId?: string;
+  groupId?: string;
+  pairings: TournamentPairing[];
+};
+
+function collectStagePairingCollections(tournament: Tournament): PairingCollection[] {
+  if (!tournament.stages) {
+    return [{ pairings: getAllTournamentPairings(tournament) }];
+  }
+
+  const collections: PairingCollection[] = [];
+  for (const stage of tournament.stages) {
+    if (stage.regions) {
+      for (const region of stage.regions) {
+        collections.push({ stageId: stage.stageId, regionId: region.regionId, pairings: region.rounds.flatMap(round => round.pairings) });
+      }
+    }
+    if (stage.groups) {
+      for (const group of stage.groups) {
+        collections.push({ stageId: stage.stageId, groupId: group.groupId, pairings: group.rounds.flatMap(round => round.pairings) });
+      }
+    }
+    if (stage.rounds) {
+      collections.push({ stageId: stage.stageId, pairings: stage.rounds.flatMap(round => round.pairings) });
+    }
+  }
+  return collections;
+}
+
+function pairingStats(pairings: TournamentPairing[]) {
+  const playablePairings = pairings.filter(pairing => pairing.participantB !== null);
+  const stats = { total: playablePairings.length, completed: 0, inProgress: 0, pending: 0, failed: 0, pendingTiebreaker: 0 };
+  for (const pairing of playablePairings) {
+    if (pairing.status === 'completed') stats.completed++;
+    else if (pairing.status === 'in_progress') stats.inProgress++;
+    else if (pairing.status === 'failed') stats.failed++;
+    else if (pairing.status === 'pending_tiebreaker') stats.pendingTiebreaker++;
+    else stats.pending++;
+  }
+  return stats;
+}
+
+function compactStageProgress(tournament: Tournament, includeStandings = true) {
+  const stages = tournament.stages ?? [];
+  return stages.map(stage => {
+    const stagePairings = stage.regions
+      ? stage.regions.flatMap(region => region.rounds.flatMap(round => round.pairings))
+      : stage.groups
+        ? stage.groups.flatMap(group => group.rounds.flatMap(round => round.pairings))
+        : (stage.rounds ?? []).flatMap(round => round.pairings);
+
+    return {
+      stageId: stage.stageId,
+      stageType: stage.stageType,
+      name: stage.name,
+      order: stage.order,
+      status: stage.status,
+      advancement: {
+        advancingCount: stage.advancement.advancingCount,
+        resolvedCount: stage.advancement.advancingParticipantIds.length,
+        isComplete: stage.advancement.isComplete,
+      },
+      progress: pairingStats(stagePairings),
+      regions: stage.regions?.map(region => ({
+        regionId: region.regionId,
+        name: region.name,
+        regionIndex: region.regionIndex,
+        status: region.status,
+        qualifierLimit: region.qualifierLimit,
+        qualifierCount: region.qualifierCount,
+        participantIds: region.participantIds,
+        advancingParticipantIds: region.advancingParticipantIds,
+        participantResults: regionalParticipantResults(region),
+        participantCount: region.participantIds.length,
+        progress: pairingStats(region.rounds.flatMap(round => round.pairings)),
+      })),
+      groups: stage.groups?.map(group => ({
+        groupId: group.groupId,
+        name: group.name,
+        groupIndex: group.groupIndex,
+        status: group.status,
+        participantCount: group.participantIds.length,
+        progress: pairingStats(group.rounds.flatMap(round => round.pairings)),
+        standings: includeStandings ? group.standings : [],
+      })),
+    };
+  });
+}
+
+function regionalParticipantResults(region: NonNullable<TournamentStage['regions']>[number]) {
+  const results = new Map<string, string>();
+  for (const participantId of region.participantIds) results.set(participantId, 'pending');
+
+  for (const round of region.rounds) {
+    for (const pairing of round.pairings) {
+      if (pairing.participantB === null) {
+        results.set(pairing.participantA, 'bye');
+        continue;
+      }
+      if (pairing.status === 'in_progress') {
+        results.set(pairing.participantA, 'in_progress');
+        results.set(pairing.participantB, 'in_progress');
+      } else if (pairing.status === 'completed' && pairing.matchResult?.winner === 'A') {
+        results.set(pairing.participantA, 'won');
+        results.set(pairing.participantB, 'eliminated');
+      } else if (pairing.status === 'completed' && pairing.matchResult?.winner === 'B') {
+        results.set(pairing.participantA, 'eliminated');
+        results.set(pairing.participantB, 'won');
+      } else if (pairing.status === 'failed') {
+        results.set(pairing.participantA, 'failed');
+        results.set(pairing.participantB, 'failed');
+      }
+    }
+  }
+
+  return [...results.entries()].map(([participantId, status]) => ({ participantId, status }));
+}
+
+function parsePageQuery(req: express.Request): { page: number; pageSize: number } | { error: string } {
+  const parsePositive = (value: unknown, fallback: number) => {
+    if (value === undefined) return fallback;
+    if (typeof value !== 'string' || !/^\d+$/.test(value)) return null;
+    const parsed = Number(value);
+    return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null;
+  };
+  const page = parsePositive(req.query.page, 1);
+  const pageSize = parsePositive(req.query.pageSize, 25);
+  if (page === null || pageSize === null) return { error: 'page and pageSize must be positive integers' };
+  if (pageSize > 100) return { error: 'pageSize must not exceed 100' };
+  return { page, pageSize };
+}
+
+function compactPairing(
+  pairing: TournamentPairing,
+  tournament: Tournament,
+  isOwner: boolean,
+  participantName: (id: string | null) => string,
+) {
+  const published = isPublishedTournament(tournament);
+  const canViewResults = isOwner || published;
+  const isGroupPairing = pairing.stageId === 'stage-group' || (pairing.groupId !== null && pairing.groupId !== undefined);
+  const seriesProgress = pairing.seriesProgress
+    ? {
+      format: isGroupPairing ? 'bo2' : pairing.seriesProgress.format,
+      bestOf: isGroupPairing ? 2 : pairing.seriesProgress.bestOf,
+      nextGame: pairing.seriesProgress.nextGame,
+      winsA: pairing.seriesProgress.winsA,
+      winsB: pairing.seriesProgress.winsB,
+      games: pairing.seriesProgress.games.map(game => ({
+        gameNumber: game.gameNumber,
+        matchId: game.matchId,
+        participantA: game.participantA,
+        participantB: game.participantB,
+        participantNames: {
+          A: participantName(game.participantA),
+          B: participantName(game.participantB),
+        },
+        winner: canViewResults ? game.winner : null,
+        winnerParticipantId: canViewResults ? game.winnerParticipantId : null,
+        durationMs: canViewResults ? game.durationMs : null,
+        replayAvailable: Boolean(canViewResults && game.replayRef),
+      })),
+    }
+    : null;
+  const result = pairing.matchResult && (isOwner || published)
+    ? {
+      winner: pairing.matchResult.winner,
+      terminationReason: pairing.matchResult.terminationReason,
+      durationMs: pairing.matchResult.durationMs,
+      completedAt: pairing.matchResult.completedAt,
+      series: pairing.matchResult.series ? {
+        format: pairing.matchResult.series.format ?? (isGroupPairing ? 'bo2' : undefined),
+        bestOf: pairing.matchResult.series.bestOf ?? (isGroupPairing ? 2 : undefined),
+        winsA: pairing.matchResult.series.winsA,
+        winsB: pairing.matchResult.series.winsB,
+        winner: pairing.matchResult.series.winner,
+      } : undefined,
+    }
+    : null;
+  return {
+    pairingId: pairing.pairingId,
+    stageId: pairing.stageId ?? null,
+    regionId: pairing.regionId ?? null,
+    groupId: pairing.groupId ?? null,
+    roundNumber: pairing.roundNumber,
+    participantA: pairing.participantA,
+    participantB: pairing.participantB,
+    participantNames: { A: participantName(pairing.participantA), B: participantName(pairing.participantB) },
+    status: pairing.status,
+    matchId: pairing.matchId,
+    startedAt: pairing.startedAt,
+    completedAt: pairing.completedAt,
+    seriesProgress,
+    matchResult: result,
+    tiebreakerStatus: pairing.tiebreakerStatus ?? null,
+    slotA: pairing.slotA ? {
+      slotId: pairing.slotA.slotId,
+      sourceType: pairing.slotA.sourceType,
+      participantId: pairing.slotA.participantId,
+      placeholder: pairing.slotA.placeholder,
+      sourceRef: pairing.slotA.sourceRef,
+    } : null,
+    slotB: pairing.slotB ? {
+      slotId: pairing.slotB.slotId,
+      sourceType: pairing.slotB.sourceType,
+      participantId: pairing.slotB.participantId,
+      placeholder: pairing.slotB.placeholder,
+      sourceRef: pairing.slotB.sourceRef,
+    } : null,
+  };
+}
+
 function safePublishedTournament(tournament: Tournament) {
+  const rounds = (tournament.rounds && tournament.rounds.length > 0)
+    ? tournament.rounds
+    : (tournament.stages && tournament.stages.length > 0)
+      ? synthesizeRoundsFromStages(tournament.stages)
+      : tournament.rounds;
   return {
     tournamentId: tournament.tournamentId,
     name: tournament.name,
@@ -727,7 +1360,8 @@ function safePublishedTournament(tournament: Tournament) {
       participantId: participant.participantId,
       name: participant.name,
     })),
-    rounds: tournament.rounds,
+    rounds,
+    stages: tournament.stages,
     standings: tournament.standings,
     createdAt: tournament.createdAt,
     registrationOpenedAt: tournament.registrationOpenedAt,
@@ -738,7 +1372,7 @@ function safePublishedTournament(tournament: Tournament) {
   };
 }
 
-function safeSpectatorTournament(tournament: Tournament, viewerId?: string) {
+function safeSpectatorTournament(tournament: Tournament, viewerId?: string, includeRounds = true) {
   const viewerBotIds = new Set((tournament.participationRequests ?? [])
     .filter(request => request.competitorId === viewerId && request.status === 'approved')
     .map(request => request.botId));
@@ -748,6 +1382,13 @@ function safeSpectatorTournament(tournament: Tournament, viewerId?: string) {
   const participantName = (participantId: string | null) => participantId
     ? tournament.participants.find(item => item.participantId === participantId)?.name ?? participantId
     : 'Miễn đấu';
+  const rawRounds = includeRounds
+    ? (tournament.rounds && tournament.rounds.length > 0)
+      ? tournament.rounds
+      : (tournament.stages && tournament.stages.length > 0)
+        ? synthesizeRoundsFromStages(tournament.stages)
+        : []
+    : [];
   return {
     tournamentId: tournament.tournamentId,
     name: tournament.name,
@@ -757,48 +1398,87 @@ function safeSpectatorTournament(tournament: Tournament, viewerId?: string) {
     viewerParticipantIds,
     participantCount: tournament.participants.length,
     participants: tournament.participants.map(participant => ({ participantId: participant.participantId, name: participant.name })),
-    rounds: tournament.rounds.map(round => ({
+    rounds: rawRounds.map(round => ({
       roundNumber: round.roundNumber,
-      pairings: round.pairings.map(pairing => ({
-        pairingId: pairing.pairingId,
-        roundNumber: pairing.roundNumber,
-        participantA: pairing.participantA,
-        participantB: pairing.participantB,
-        status: pairing.status,
-        matchId: pairing.matchId,
-        startedAt: pairing.startedAt,
-        completedAt: pairing.completedAt,
-        seriesProgress: pairing.seriesProgress ? {
-          format: pairing.seriesProgress.format,
-          bestOf: pairing.seriesProgress.bestOf,
-          nextGame: pairing.seriesProgress.nextGame,
-          winsA: pairing.seriesProgress.winsA,
-          winsB: pairing.seriesProgress.winsB,
-          games: pairing.seriesProgress.games.map(game => ({ gameNumber: game.gameNumber, winner: game.winner, winnerParticipantId: game.winnerParticipantId })),
-        } : null,
-        matchResult: pairing.matchResult && isPublishedTournament(tournament) ? {
-          winner: pairing.matchResult.winner,
-          terminationReason: pairing.matchResult.terminationReason,
-          completedAt: pairing.matchResult.completedAt,
-          series: pairing.matchResult.series ? {
-            winsA: pairing.matchResult.series.winsA,
-            winsB: pairing.matchResult.series.winsB,
-            winner: pairing.matchResult.series.winner,
-            games: pairing.matchResult.series.games.map(game => ({ gameNumber: game.gameNumber, winner: game.winner, winnerParticipantId: game.winnerParticipantId })),
-          } : undefined,
-        } : null,
-        participantNames: { A: participantName(pairing.participantA), B: participantName(pairing.participantB) },
-      })),
+      pairings: round.pairings.map(pairing => safeSpectatorPairing(pairing, tournament, participantName)),
     })),
+    stages: safeSpectatorStages(tournament, participantName),
     standings: tournament.standings.map(standing => ({ ...standing })),
     createdAt: tournament.createdAt,
     startedAt: tournament.startedAt,
     completedAt: tournament.completedAt,
     resultsPublishedAt: tournament.resultsPublishedAt ?? null,
+    description: tournament.description,
+    organizerInfo: tournament.organizerInfo,
+    contactInfo: tournament.contactInfo,
+    rulesNotes: tournament.rulesNotes,
+    policyNotes: tournament.policyNotes,
   };
 }
 
+function publicProgressProjection(tournament: Tournament) {
+  const allPairings = getAllTournamentPairings(tournament);
+  const view = normalizeToMultiStageView(tournament);
+  return {
+    tournamentId: tournament.tournamentId,
+    format: tournament.format,
+    status: tournament.status,
+    isLegacy: view.isLegacy,
+    currentStage: view.currentStage ? {
+      stageId: view.currentStage.stageId,
+      stageType: view.currentStage.stageType,
+      name: view.currentStage.name,
+      status: view.currentStage.status,
+    } : null,
+    progress: {
+      ...pairingStats(allPairings),
+      totalStages: view.stages.length,
+      completedStages: view.stages.filter(stage => stage.status === 'completed').length,
+      pendingTiebreakers: allPairings.filter(pairing => pairing.status === 'pending_tiebreaker').length,
+    },
+    stages: compactStageProgress(tournament, false),
+  };
+}
+
+function publicStagesProjection(tournament: Tournament, compact: boolean) {
+  const multiStageView = normalizeToMultiStageView(tournament);
+  const participantName = (participantId: string | null) => participantId
+    ? tournament.participants.find(item => item.participantId === participantId)?.name ?? participantId
+    : 'Miền đấu';
+  const compactStages = compact ? compactStageProgress(tournament, false) : null;
+  const stages = compact
+    ? compactStages
+    : (safeSpectatorStages(tournament, participantName) ?? multiStageView.stages);
+  const allPairings = getAllTournamentPairings(tournament);
+  return {
+    tournamentId: tournament.tournamentId,
+    format: tournament.format,
+    status: tournament.status,
+    isLegacy: multiStageView.isLegacy,
+    currentStage: compact
+      ? compactStages?.find(stage => stage.stageId === multiStageView.currentStage?.stageId) ?? null
+      : multiStageView.currentStage,
+    isComplete: multiStageView.isComplete,
+    stages,
+    progress: {
+      totalStages: multiStageView.stages.length,
+      currentStageId: multiStageView.currentStage?.stageId ?? null,
+      currentStageType: multiStageView.currentStage?.stageType ?? null,
+      totalPairings: allPairings.length,
+      completedPairings: allPairings.filter(p => p.status === 'completed').length,
+      pendingTiebreakers: allPairings.filter(p => p.status === 'pending_tiebreaker').length,
+    },
+  };
+}
+
+class PublicProjectionUnavailable extends Error {
+  constructor(readonly statusCode: 403 | 404, message: string) {
+    super(message);
+  }
+}
+
 async function canViewTournamentResults(req: express.Request, tournament: Tournament): Promise<boolean> {
+  if (isQaFixturesEnabled() && getOwnedQaFixture(tournament.tournamentId, req.auth?.id ?? '')) return true;
   if (req.auth?.role === 'organizer') return tournament.metadata?.ownerId === req.auth.id;
   return Boolean(req.auth && isPublishedTournament(tournament));
 }
@@ -818,6 +1498,20 @@ app.get('/api/tournaments/discoverable', requireAuth, async (req, res) => {
       const mine = requests.success && requests.data?.length ? requests.data[requests.data.length - 1] : null;
       return { ...projection, myRequestStatus: mine?.status ?? null };
     }));
+    if (isQaFixturesEnabled() && req.auth!.role === 'organizer') {
+      const qaProjections = listOwnedQaFixtures(req.auth!.id).map(t => ({
+        tournamentId: t.tournamentId,
+        name: t.name,
+        format: t.format,
+        status: t.status,
+        registrationOpenedAt: t.registrationOpenedAt,
+        participantCount: t.participants.length,
+        resultsPublishedAt: t.resultsPublishedAt ?? null,
+        myRequestStatus: null,
+      }));
+      res.json([...projections, ...qaProjections]);
+      return;
+    }
     res.json(projections);
   } catch (error) {
     console.error('Discoverable tournament listing failed:', error);
@@ -871,6 +1565,7 @@ app.post('/api/tournaments/:id/participation-requests', requireAuth, requireRole
       sdkDigest: revision.sdk_digest ?? undefined,
     });
     if (!result.success || !result.data) return res.status(409).json({ error: String(result.error) });
+    enqueueParticipationPreflight(execution);
     res.status(201).json(safeParticipationRequest(result.data));
   } catch (error) {
     console.error('Participation request failed:', error);
@@ -970,7 +1665,12 @@ app.get('/api/my/bot-stats', requireAuth, requireRole('competitor'), async (req,
 app.get('/api/tournaments', requireAuth, requireRole('organizer'), async (req, res) => {
   try {
     const tournaments = await manager.listTournaments();
-    res.json(tournaments.filter(t => t.metadata?.ownerId === req.auth!.id));
+    const owned = tournaments.filter(t => t.metadata?.ownerId === req.auth!.id);
+    if (isQaFixturesEnabled()) {
+      res.json([...owned, ...listOwnedQaFixtures(req.auth!.id)]);
+      return;
+    }
+    res.json(owned);
   } catch (error) {
     console.error('Tournament listing failed:', error);
     res.status(500).json({ error: 'Unable to list tournaments' });
@@ -979,14 +1679,20 @@ app.get('/api/tournaments', requireAuth, requireRole('organizer'), async (req, r
 
 app.post('/api/tournaments', requireAuth, requireRole('organizer'), requireCsrf, async (req, res) => {
   try {
-    const { name, format } = req.body;
-    if (!name || typeof name !== 'string' || name.length > 100 ||
-        (format !== undefined && format !== 'single_round_robin')) {
+    const { name, format } = req.body ?? {};
+    if (!name || typeof name !== 'string' || name.length > 100) {
       return res.status(400).json({ error: 'Invalid tournament name' });
+    }
+    const resolvedFormat = format || 'single_round_robin';
+    if (resolvedFormat !== 'single_round_robin' && resolvedFormat !== 'multi_stage') {
+      return res.status(400).json({ error: 'Invalid tournament format' });
+    }
+    if (resolvedFormat === 'multi_stage' && !manager.isMultiStageEnabled()) {
+      return res.status(400).json({ error: 'Multi-stage tournament format is disabled by feature flag' });
     }
 
     const id = `t-${randomUUID()}`;
-    const result = await manager.createTournament(id, name, format || 'single_round_robin', { bestOf: 3 });
+    const result = await manager.createTournament(id, name, resolvedFormat, { bestOf: 3 });
 
     if (!result.success || !result.data) return res.status(400).json({ error: 'Unable to create tournament' });
     const metadataResult = await manager.updateMetadata(result.data.tournamentId, {
@@ -1018,11 +1724,23 @@ app.patch('/api/tournaments/:id', requireAuth, requireRole('organizer'), require
   try {
     const tournamentId = routeParam(req, 'id');
     if (!await ownedTournament(tournamentId, req.auth!.id)) return res.status(404).json({ error: 'Tournament not found' });
-    const { name } = req.body;
-    if (typeof name !== 'string' || !name.trim() || name.trim().length > 100) {
+    const { name, description, organizerInfo, contactInfo, rulesNotes, policyNotes } = req.body;
+    if (name !== undefined && (typeof name !== 'string' || !name.trim() || name.trim().length > 100)) {
       return res.status(400).json({ error: 'Invalid tournament details' });
     }
-    const result = await manager.updateTournamentDetails(tournamentId, name.trim());
+    const updatePayload: Record<string, string> = {};
+    if (name !== undefined) updatePayload.name = name.trim();
+    if (description !== undefined) updatePayload.description = typeof description === 'string' ? description.trim() : '';
+    if (organizerInfo !== undefined) updatePayload.organizerInfo = typeof organizerInfo === 'string' ? organizerInfo.trim() : '';
+    if (contactInfo !== undefined) updatePayload.contactInfo = typeof contactInfo === 'string' ? contactInfo.trim() : '';
+    if (rulesNotes !== undefined) updatePayload.rulesNotes = typeof rulesNotes === 'string' ? rulesNotes.trim() : '';
+    if (policyNotes !== undefined) updatePayload.policyNotes = typeof policyNotes === 'string' ? policyNotes.trim() : '';
+
+    if (Object.keys(updatePayload).length === 0) {
+      return res.status(400).json({ error: 'No valid fields provided for update' });
+    }
+
+    const result = await manager.updateTournamentDetails(tournamentId, updatePayload);
     if (!result.success || !result.data) return res.status(409).json({ error: String(result.error) });
     res.json(result.data);
   } catch (error) {
@@ -1061,12 +1779,57 @@ app.post('/api/tournaments/:id/requests/:requestId/approve', requireAuth, requir
   try {
     const tournamentId = routeParam(req, 'id');
     if (!await ownedTournament(tournamentId, req.auth!.id)) return res.status(404).json({ error: 'Tournament not found' });
+    const requests = await manager.listParticipationRequests(tournamentId);
+    const request = requests.data?.find(item => item.requestId === routeParam(req, 'requestId'));
+    const execution = request?.botSnapshot.execution?.kind === 'source-revision' ? request.botSnapshot.execution : null;
+    if (execution) {
+      if (!botPreflightService) return res.status(503).json({ error: 'Bot preflight validation is unavailable' });
+      const validation = botPreflightService.start(execution, req.body?.retry === true);
+      if (validation.status === 'pending') return res.status(202).json({ status: 'pending', preflight: validation });
+      if (validation.status !== 'passed') return res.status(409).json({ error: 'Bot revision has not passed preflight validation', preflight: validation });
+    }
     const result = await manager.reviewParticipationRequest(tournamentId, routeParam(req, 'requestId'), req.auth!.id, 'approve');
     if (!result.success) return res.status(409).json({ error: String(result.error) });
     res.json(result.data);
   } catch (error) {
     console.error('Participation request approval failed:', error);
     res.status(500).json({ error: 'Unable to approve participation request' });
+  }
+});
+
+app.get('/api/tournaments/:id/requests/:requestId/preflight', requireAuth, requireRole('organizer'), async (req, res) => {
+  try {
+    if (!await ownedTournament(routeParam(req, 'id'), req.auth!.id)) return res.status(404).json({ error: 'Tournament not found' });
+    const requests = await manager.listParticipationRequests(routeParam(req, 'id'));
+    const request = requests.data?.find(item => item.requestId === routeParam(req, 'requestId'));
+    const execution = request?.botSnapshot.execution?.kind === 'source-revision' ? request.botSnapshot.execution : null;
+    if (!execution || !botPreflightService) return res.status(404).json({ error: 'Preflight validation not found' });
+    const validation = botPreflightService.get(execution);
+    if (validation?.status === 'pending') botPreflightService.start(execution);
+    return res.json(validation ?? { status: 'not_started' });
+  } catch {
+    return res.status(500).json({ error: 'Unable to load Bot preflight validation' });
+  }
+});
+
+app.post('/api/tournaments/:id/requests/:requestId/preflight/retry', requireAuth, requireRole('organizer'), requireCsrf, async (req, res) => {
+  try {
+    const tournamentId = routeParam(req, 'id');
+    const tournament = await ownedTournament(tournamentId, req.auth!.id);
+    if (!tournament) return res.status(404).json({ error: 'Tournament not found' });
+    if (!['registration_open', 'registration_closed'].includes(tournament.status)) {
+      return res.status(409).json({ error: 'Preflight retry is only available during registration review' });
+    }
+    const requests = await manager.listParticipationRequests(tournamentId);
+    const request = requests.data?.find(item => item.requestId === routeParam(req, 'requestId'));
+    if (!request || request.status !== 'pending') {
+      return res.status(409).json({ error: 'Preflight retry is only available for pending participation requests' });
+    }
+    const execution = request?.botSnapshot.execution?.kind === 'source-revision' ? request.botSnapshot.execution : null;
+    if (!execution || !botPreflightService) return res.status(404).json({ error: 'Preflight validation not found' });
+    return res.status(202).json(botPreflightService.start(execution, true));
+  } catch {
+    return res.status(500).json({ error: 'Unable to retry Bot preflight validation' });
   }
 });
 
@@ -1085,20 +1848,247 @@ app.post('/api/tournaments/:id/requests/:requestId/reject', requireAuth, require
   }
 });
 
+app.post('/api/tournaments/:id/requests/:requestId/undo', requireAuth, requireRole('organizer'), requireCsrf, async (req, res) => {
+  try {
+    const tournamentId = routeParam(req, 'id');
+    if (!await ownedTournament(tournamentId, req.auth!.id)) return res.status(404).json({ error: 'Tournament not found' });
+    const result = await manager.undoParticipationRequestReview(tournamentId, routeParam(req, 'requestId'), req.auth!.id);
+    if (!result.success) return res.status(409).json({ error: String(result.error) });
+    res.json(result.data);
+  } catch (error) {
+    console.error('Participation request review undo failed:', error);
+    res.status(500).json({ error: 'Unable to undo participation request review' });
+  }
+});
+
 app.get('/api/tournaments/:id', requireAuth, async (req, res) => {
   try {
-    const tournament = await ownedTournament(routeParam(req, 'id'), req.auth!.id);
-    if (req.auth!.role === 'organizer') {
-      if (!tournament) return res.status(404).json({ error: 'Tournament not found' });
-      return res.json(tournament);
+    const tournamentId = routeParam(req, 'id');
+    const isFixture = isQaFixturesEnabled() && Boolean(getOwnedQaFixture(tournamentId, req.auth!.id));
+    const includeRounds = req.query.includeRounds !== 'false';
+    if (req.auth!.role !== 'organizer' && !isFixture) {
+      const projection = await projectionCache.getOrLoad(
+        `tournament:${tournamentId}:public:detail:${req.auth!.id}:${includeRounds ? 'rounds' : 'compact'}`,
+        async () => {
+          const loaded = await manager.loadTournament(tournamentId);
+          if (!loaded.success || !loaded.data) throw new PublicProjectionUnavailable(404, 'Tournament not found');
+          if (loaded.data.status === 'draft') throw new PublicProjectionUnavailable(403, 'Tournament not accessible');
+          return safeSpectatorTournament(loaded.data, req.auth!.id, includeRounds);
+        },
+      );
+      return res.json(projection);
     }
-    const result = await manager.loadTournament(routeParam(req, 'id'));
-    if (!result.success || !result.data) return res.status(404).json({ error: 'Tournament not found' });
-    if (result.data.status === 'draft') return res.status(403).json({ error: 'Tournament not accessible' });
-    return res.json(safeSpectatorTournament(result.data, req.auth!.id));
+    const tournament = isFixture
+      ? getQaFixture(tournamentId)!
+      : (await ownedTournament(tournamentId, req.auth!.id) || (await manager.loadTournament(tournamentId)).data);
+    if (!tournament) return res.status(404).json({ error: 'Tournament not found' });
+    if (req.auth!.role === 'organizer') {
+      const isOwner = isFixture || tournament.metadata?.ownerId === req.auth!.id;
+      if (!isOwner) return res.status(404).json({ error: 'Tournament not found' });
+      const rounds = includeRounds
+        ? (tournament.rounds && tournament.rounds.length > 0)
+          ? tournament.rounds
+          : (tournament.stages && tournament.stages.length > 0)
+            ? synthesizeRoundsFromStages(tournament.stages)
+            : tournament.rounds
+        : [];
+      return res.json({
+        ...tournament,
+        rounds,
+      });
+    }
+    if (tournament.status === 'draft') return res.status(403).json({ error: 'Tournament not accessible' });
+    return res.json(safeSpectatorTournament(tournament, req.auth!.id, includeRounds));
   } catch (error) {
+    if (error instanceof PublicProjectionUnavailable) return res.status(error.statusCode).json({ error: error.message });
     console.error('Tournament lookup failed:', error);
     res.status(500).json({ error: 'Unable to load tournament' });
+  }
+});
+
+app.get('/api/tournaments/:id/progress', requireAuth, async (req, res) => {
+  try {
+    const tournamentId = routeParam(req, 'id');
+    if (req.auth!.role !== 'organizer') {
+      const projection = await projectionCache.getOrLoad(`tournament:${tournamentId}:public:progress`, async () => {
+        const loaded = await manager.loadTournament(tournamentId);
+        if (!loaded.success || !loaded.data) throw new PublicProjectionUnavailable(404, 'Tournament not found');
+        if (loaded.data.status === 'draft') throw new PublicProjectionUnavailable(403, 'Tournament not accessible');
+        return publicProgressProjection(loaded.data);
+      });
+      return res.json(projection);
+    }
+    const ownerTournament = await ownedTournament(tournamentId, req.auth!.id);
+    const tournamentResult = ownerTournament
+      ? { success: true as const, data: ownerTournament }
+      : await manager.loadTournament(tournamentId);
+    if (!tournamentResult.success || !tournamentResult.data) {
+      return res.status(404).json({ error: 'Tournament not found' });
+    }
+    const tournament = tournamentResult.data;
+    const isOwner = Boolean(ownerTournament);
+    if (req.auth!.role === 'organizer' && !isOwner) {
+      return res.status(404).json({ error: 'Tournament not found' });
+    }
+    if (req.auth!.role !== 'organizer' && tournament.status === 'draft') {
+      return res.status(403).json({ error: 'Tournament not accessible' });
+    }
+
+    const allPairings = getAllTournamentPairings(tournament);
+    const view = normalizeToMultiStageView(tournament);
+    return res.json({
+      tournamentId: tournament.tournamentId,
+      format: tournament.format,
+      status: tournament.status,
+      isLegacy: view.isLegacy,
+      currentStage: view.currentStage ? {
+        stageId: view.currentStage.stageId,
+        stageType: view.currentStage.stageType,
+        name: view.currentStage.name,
+        status: view.currentStage.status,
+      } : null,
+      progress: {
+        ...pairingStats(allPairings),
+        totalStages: view.stages.length,
+        completedStages: view.stages.filter(stage => stage.status === 'completed').length,
+        pendingTiebreakers: allPairings.filter(pairing => pairing.status === 'pending_tiebreaker').length,
+      },
+      stages: compactStageProgress(tournament, isOwner),
+    });
+  } catch (error) {
+    if (error instanceof PublicProjectionUnavailable) return res.status(error.statusCode).json({ error: error.message });
+    console.error('Tournament progress lookup failed:', error);
+    res.status(500).json({ error: 'Unable to load tournament progress' });
+  }
+});
+
+app.get('/api/tournaments/:id/pairings', requireAuth, async (req, res) => {
+  try {
+    const tournamentId = routeParam(req, 'id');
+    const ownerTournament = await ownedTournament(tournamentId, req.auth!.id);
+    const tournamentResult = ownerTournament
+      ? { success: true as const, data: ownerTournament }
+      : await manager.loadTournament(tournamentId);
+    if (!tournamentResult.success || !tournamentResult.data) {
+      return res.status(404).json({ error: 'Tournament not found' });
+    }
+    const tournament = tournamentResult.data;
+    const isOwner = Boolean(ownerTournament);
+    if (req.auth!.role === 'organizer' && !isOwner) {
+      return res.status(404).json({ error: 'Tournament not found' });
+    }
+    if (req.auth!.role !== 'organizer' && tournament.status === 'draft') {
+      return res.status(403).json({ error: 'Tournament not accessible' });
+    }
+
+    const pagination = parsePageQuery(req);
+    if ('error' in pagination) return res.status(400).json({ error: pagination.error });
+
+    const stageId = typeof req.query.stageId === 'string' ? req.query.stageId : undefined;
+    const regionId = typeof req.query.regionId === 'string' ? req.query.regionId : undefined;
+    const groupId = typeof req.query.groupId === 'string' ? req.query.groupId : undefined;
+    const excludeByes = req.query.excludeByes === 'true';
+    const filtered = collectStagePairingCollections(tournament)
+      .filter(collection => stageId === undefined || collection.stageId === stageId)
+      .filter(collection => regionId === undefined || collection.regionId === regionId)
+      .filter(collection => groupId === undefined || collection.groupId === groupId)
+      .flatMap(collection => collection.pairings)
+      .filter(pairing => !excludeByes || pairing.participantB !== null);
+
+    const start = (pagination.page - 1) * pagination.pageSize;
+    const pageItems = filtered.slice(start, start + pagination.pageSize);
+    const participantName = (participantId: string | null) => participantId
+      ? tournament.participants.find(item => item.participantId === participantId)?.name ?? participantId
+      : 'Miễn đấu';
+
+    return res.json({
+      tournamentId,
+      format: tournament.format,
+      status: tournament.status,
+      filters: { stageId: stageId ?? null, regionId: regionId ?? null, groupId: groupId ?? null, excludeByes },
+      pagination: {
+        page: pagination.page,
+        pageSize: pagination.pageSize,
+        totalItems: filtered.length,
+        totalPages: Math.ceil(filtered.length / pagination.pageSize),
+      },
+      pairings: pageItems.map(pairing => compactPairing(pairing, tournament, isOwner, participantName)),
+    });
+  } catch (error) {
+    console.error('Tournament pairings lookup failed:', error);
+    res.status(500).json({ error: 'Unable to load tournament pairings' });
+  }
+});
+
+app.get('/api/tournaments/:id/stages', requireAuth, async (req, res) => {
+  try {
+    const tournamentId = routeParam(req, 'id');
+    const isFixture = isQaFixturesEnabled() && Boolean(getOwnedQaFixture(tournamentId, req.auth!.id));
+    const compact = req.query.compact === 'true' || req.query.includePairings === 'false';
+    if (req.auth!.role !== 'organizer' && !isFixture) {
+      const projection = await projectionCache.getOrLoad(`tournament:${tournamentId}:public:stages:${compact ? 'compact' : 'full'}`, async () => {
+        const loaded = await manager.loadTournament(tournamentId);
+        if (!loaded.success || !loaded.data) throw new PublicProjectionUnavailable(404, 'Tournament not found');
+        if (loaded.data.status === 'draft') throw new PublicProjectionUnavailable(403, 'Tournament not accessible');
+        return publicStagesProjection(loaded.data, compact);
+      });
+      return res.json(projection);
+    }
+    const tournament = isFixture
+      ? getQaFixture(tournamentId)!
+      : (await ownedTournament(tournamentId, req.auth!.id) || (await manager.loadTournament(tournamentId)).data);
+    if (!tournament) {
+      return res.status(404).json({ error: 'Tournament not found' });
+    }
+    const isOwner = req.auth!.role === 'organizer' && (isFixture || tournament.metadata?.ownerId === req.auth!.id);
+    if (req.auth!.role === 'organizer' && !isOwner) {
+      return res.status(404).json({ error: 'Tournament not found' });
+    }
+    if (req.auth!.role !== 'organizer' && tournament.status === 'draft') {
+      return res.status(403).json({ error: 'Tournament not accessible' });
+    }
+
+    const multiStageView = normalizeToMultiStageView(tournament);
+    const participantName = (participantId: string | null) => participantId
+      ? tournament.participants.find(item => item.participantId === participantId)?.name ?? participantId
+      : 'Miễn đấu';
+
+    const compactStages = compact ? compactStageProgress(tournament, isOwner) : null;
+    const stages = compact
+      ? compactStages
+      : isOwner
+        ? multiStageView.stages
+        : (safeSpectatorStages(tournament, participantName) ?? multiStageView.stages);
+
+    const allPairings = getAllTournamentPairings(tournament);
+    const totalPairings = allPairings.length;
+    const completedPairings = allPairings.filter(p => p.status === 'completed').length;
+    const pendingTiebreakers = allPairings.filter(p => p.status === 'pending_tiebreaker').length;
+
+    return res.json({
+      tournamentId: tournament.tournamentId,
+      format: tournament.format,
+      status: tournament.status,
+      isLegacy: multiStageView.isLegacy,
+      currentStage: compact
+        ? compactStages?.find(stage => stage.stageId === multiStageView.currentStage?.stageId) ?? null
+        : multiStageView.currentStage,
+      isComplete: multiStageView.isComplete,
+      stages,
+      progress: {
+        totalStages: multiStageView.stages.length,
+        currentStageId: multiStageView.currentStage?.stageId ?? null,
+        currentStageType: multiStageView.currentStage?.stageType ?? null,
+        totalPairings,
+        completedPairings,
+        pendingTiebreakers,
+      },
+      audit: isOwner ? (tournament.metadata?.tiebreakerAudit ?? []) : undefined,
+    });
+  } catch (error) {
+    if (error instanceof PublicProjectionUnavailable) return res.status(error.statusCode).json({ error: error.message });
+    console.error('Tournament stages lookup failed:', error);
+    res.status(500).json({ error: 'Unable to load tournament stages' });
   }
 });
 
@@ -1143,14 +2133,61 @@ app.post('/api/tournaments/:id/action', requireAuth, requireRole('organizer'), r
         result = await manager.openRegistration(tournamentId);
         break;
       case 'close_registration':
+        if (botPreflightService) {
+          const executions = tournament.participants.flatMap(participant => {
+            const execution = participant.bot.execution;
+            return execution?.kind === 'source-revision' ? [execution] : [];
+          });
+          const pending = executions.map(execution => botPreflightService!.start(execution)).filter(record => record.status === 'pending');
+          const failed = executions.map(execution => botPreflightService!.get(execution)).find(record => record && record.status === 'failed');
+          if (failed) return res.status(409).json({ error: 'A Bot revision failed preflight validation', preflight: failed });
+          if (pending.length) return res.status(202).json({ status: 'pending', message: 'Bot preflight validation is still running', pending: pending.map(record => record.validationId) });
+        }
         result = await manager.closeRegistration(tournamentId);
         break;
       case 'generate_schedule':
+        if (botPreflightService) {
+          const executions = tournament.participants.flatMap(participant => {
+            const execution = participant.bot.execution;
+            return execution?.kind === 'source-revision' ? [execution] : [];
+          });
+          const pending = executions.map(execution => botPreflightService!.start(execution)).filter(record => record.status === 'pending');
+          const failed = executions.map(execution => botPreflightService!.get(execution)).find(record => record && record.status === 'failed');
+          if (failed) return res.status(409).json({ error: 'A Bot revision failed preflight validation', preflight: failed });
+          if (pending.length) return res.status(202).json({ status: 'pending', message: 'Bot preflight validation is still running', pending: pending.map(record => record.validationId) });
+        }
         result = await manager.generateSchedule(tournamentId);
         break;
       case 'start':
+        if (tournament.status !== 'registration_closed') {
+          return res.status(409).json({ error: `Cannot start tournament with status ${tournament.status}` });
+        }
         result = await manager.startTournament(tournamentId);
         break;
+      case 'resume':
+        if (tournament.status !== 'running') {
+          return res.status(409).json({ error: `Cannot resume tournament with status ${tournament.status}` });
+        }
+        result = await manager.resumeTournament(tournamentId);
+        break;
+      case 'resolve_tiebreaker': {
+        if (typeof pairingId !== 'string' || !pairingId.trim()) return res.status(400).json({ error: 'Pairing ID is required' });
+        const { winner, reason } = req.body ?? {};
+        if (winner !== 'A' && winner !== 'B') {
+          return res.status(400).json({ error: "Winner must be either 'A' or 'B'" });
+        }
+        if (reason !== undefined && (typeof reason !== 'string' || reason.trim().length > 500)) {
+          return res.status(400).json({ error: 'Reason must be a string of at most 500 characters' });
+        }
+        result = await manager.resolveTiebreaker(
+          tournamentId,
+          pairingId.trim(),
+          winner,
+          typeof reason === 'string' ? reason.trim() : undefined,
+          req.auth!.id
+        );
+        break;
+      }
       case 'run_all':
         // 4. Prevent duplicate run_all tasks
         if (activeTournamentRuns.has(tournamentId)) {
@@ -1187,7 +2224,7 @@ app.post('/api/tournaments/:id/action', requireAuth, requireRole('organizer'), r
       case 'run_pairing':
         if (typeof pairingId !== 'string' || !pairingId.trim()) return res.status(400).json({ error: 'Pairing ID is required' });
         {
-          const requestedPairing = tournament.rounds.flatMap(round => round.pairings).find(pairing => pairing.pairingId === pairingId.trim());
+          const requestedPairing = getAllTournamentPairings(tournament).find(pairing => pairing.pairingId === pairingId.trim());
           if (!requestedPairing) return res.status(404).json({ error: 'Pairing not found' });
           if (requestedPairing.status !== 'failed') return res.status(409).json({ error: `Pairing cannot be retried (current: ${requestedPairing.status})` });
         }
@@ -1233,9 +2270,14 @@ app.post('/api/tournaments/:id/pairings/:pairingId/retry', requireAuth, requireR
   try {
     const tournamentId = routeParam(req, 'id');
     const pairingId = routeParam(req, 'pairingId');
+    if (isQaFixturesEnabled() && getOwnedQaFixture(tournamentId, req.auth!.id)) {
+      const retried = retryQaFixturePairing(tournamentId, pairingId);
+      if (!retried.success) return res.status(409).json({ error: retried.error });
+      return res.json({ message: 'Match retried successfully in QA fixture' });
+    }
     const tournament = await ownedTournament(tournamentId, req.auth!.id);
     if (!tournament) return res.status(404).json({ error: 'Tournament not found' });
-    const pairing = tournament?.rounds.flatMap(round => round.pairings).find(item => item.pairingId === pairingId);
+    const pairing = getAllTournamentPairings(tournament).find(item => item.pairingId === pairingId);
     if (!pairing) return res.status(404).json({ error: 'Pairing not found' });
     if (pairing.status !== 'failed') return res.status(409).json({ error: `Pairing cannot be retried (current: ${pairing.status})` });
     const taskId = `retry_pairing_${tournamentId}_${pairingId}`;
@@ -1268,15 +2310,81 @@ app.post('/api/tournaments/:id/pairings/:pairingId/retry', requireAuth, requireR
   }
 });
 
+// Dedicated tiebreaker resolution endpoint for organizers
+app.post('/api/tournaments/:id/pairings/:pairingId/resolve-tiebreaker', requireAuth, requireRole('organizer'), requireCsrf, async (req, res) => {
+  try {
+    const tournamentId = routeParam(req, 'id');
+    const pairingId = routeParam(req, 'pairingId');
+    const { winner, reason } = req.body ?? {};
+    if (winner !== 'A' && winner !== 'B') {
+      return res.status(400).json({ error: "Winner must be either 'A' or 'B'" });
+    }
+    if (reason !== undefined && (typeof reason !== 'string' || reason.trim().length > 500)) {
+      return res.status(400).json({ error: 'Reason must be a string of at most 500 characters' });
+    }
+
+    if (isQaFixturesEnabled() && getOwnedQaFixture(tournamentId, req.auth!.id)) {
+      const resolved = resolveQaFixtureTiebreaker(tournamentId, pairingId, winner, typeof reason === 'string' ? reason.trim() : undefined, req.auth!.id);
+      if (!resolved.success || !resolved.data) return res.status(409).json({ error: resolved.error ?? 'Unable to resolve tiebreaker' });
+      const resolvedPairing = getAllTournamentPairings(resolved.data).find(p => p.pairingId === pairingId);
+      return res.json({
+        message: 'Tiebreaker resolved successfully',
+        pairingId,
+        winner,
+        pairing: resolvedPairing,
+        tournament: resolved.data,
+      });
+    }
+
+    const tournament = await ownedTournament(tournamentId, req.auth!.id);
+    if (!tournament) return res.status(404).json({ error: 'Tournament not found' });
+
+    const result = await manager.resolveTiebreaker(
+      tournamentId,
+      pairingId,
+      winner,
+      typeof reason === 'string' ? reason.trim() : undefined,
+      req.auth!.id
+    );
+
+    if (!result.success || !result.data) {
+      return res.status(409).json({ error: result.error ?? 'Unable to resolve tiebreaker' });
+    }
+
+    const resolvedPairing = getAllTournamentPairings(result.data).find(p => p.pairingId === pairingId);
+    return res.json({
+      message: 'Tiebreaker resolved successfully',
+      pairingId,
+      winner,
+      pairing: resolvedPairing,
+      tournament: result.data,
+    });
+  } catch (error) {
+    console.error('Resolve tiebreaker failed:', error);
+    return res.status(500).json({ error: 'Unable to resolve tiebreaker' });
+  }
+});
+
 app.get('/api/tournaments/:id/standings', requireAuth, async (req, res) => {
   try {
     const tournamentId = routeParam(req, 'id');
+    if (req.auth!.role !== 'organizer') {
+      const projection = await projectionCache.getOrLoad(`tournament:${tournamentId}:public:standings`, async () => {
+        const loaded = await manager.loadTournament(tournamentId);
+        if (!loaded.success || !loaded.data || !isPublishedTournament(loaded.data)) throw new PublicProjectionUnavailable(403, 'Tournament results are not published');
+        const result = await manager.getStandings(tournamentId);
+        if (!result.success) throw new PublicProjectionUnavailable(404, 'Tournament not found');
+        return result.data;
+      });
+      return res.json(projection);
+    }
     const tournamentResult = await manager.loadTournament(tournamentId);
-    if (!tournamentResult.success || !tournamentResult.data || !await canViewTournamentResults(req, tournamentResult.data)) return res.status(req.auth!.role === 'competitor' ? 403 : 404).json({ error: req.auth!.role === 'competitor' ? 'Tournament results are not published' : 'Tournament not found' });
+    if (!tournamentResult.success || !tournamentResult.data || !await canViewTournamentResults(req, tournamentResult.data)) return res.status(404).json({ error: 'Tournament not found' });
     const result = await manager.getStandings(tournamentId);
     if (!result.success) return res.status(400).json({ error: String(result.error) });
     res.json(result.data);
   } catch (error) {
+    if (error instanceof PublicProjectionUnavailable) return res.status(error.statusCode).json({ error: error.message });
     console.error('Tournament standings lookup failed:', error);
     res.status(500).json({ error: 'Unable to load standings' });
   }
@@ -1285,12 +2393,23 @@ app.get('/api/tournaments/:id/standings', requireAuth, async (req, res) => {
 app.get('/api/tournaments/:id/stats', requireAuth, async (req, res) => {
   try {
     const tournamentId = routeParam(req, 'id');
+    if (req.auth!.role !== 'organizer') {
+      const projection = await projectionCache.getOrLoad(`tournament:${tournamentId}:public:stats`, async () => {
+        const loaded = await manager.loadTournament(tournamentId);
+        if (!loaded.success || !loaded.data || !isPublishedTournament(loaded.data)) throw new PublicProjectionUnavailable(403, 'Tournament results are not published');
+        const result = await manager.getStats(tournamentId);
+        if (!result.success) throw new PublicProjectionUnavailable(404, 'Tournament not found');
+        return result.data;
+      });
+      return res.json(projection);
+    }
     const tournamentResult = await manager.loadTournament(tournamentId);
-    if (!tournamentResult.success || !tournamentResult.data || !await canViewTournamentResults(req, tournamentResult.data)) return res.status(req.auth!.role === 'competitor' ? 403 : 404).json({ error: req.auth!.role === 'competitor' ? 'Tournament results are not published' : 'Tournament not found' });
+    if (!tournamentResult.success || !tournamentResult.data || !await canViewTournamentResults(req, tournamentResult.data)) return res.status(404).json({ error: 'Tournament not found' });
     const result = await manager.getStats(tournamentId);
     if (!result.success) return res.status(400).json({ error: String(result.error) });
     res.json(result.data);
   } catch (error) {
+    if (error instanceof PublicProjectionUnavailable) return res.status(error.statusCode).json({ error: error.message });
     console.error('Tournament statistics lookup failed:', error);
     res.status(500).json({ error: 'Unable to load tournament statistics' });
   }
@@ -1343,6 +2462,23 @@ app.get('/api/tournaments/:id/matches/:matchId/live', requireAuth, requireRole('
         } : {}),
       };
     };
+    const fixedParticipantA = liveParticipant(participantA);
+    const fixedParticipantB = liveParticipant(participantB);
+    const projectHistoryFrame = (frame: typeof snapshot) => {
+      const frameGame = (frame.gameNumber ?? 1) as 1 | 2 | 3;
+      const frameSides = progress && participantA && participantB
+        ? getSeriesSides(progress.seed, frameGame, participantA.participantId, participantB.participantId)
+        : { playerA: pairing.participantA, playerB: pairing.participantB };
+      return {
+        ...frame,
+        currentParticipants: {
+          A: liveParticipant(tournament.participants.find(item => item.participantId === frameSides.playerA)),
+          B: liveParticipant(frameSides.playerB
+            ? tournament.participants.find(item => item.participantId === frameSides.playerB)
+            : undefined),
+        },
+      };
+    };
     const series = progress ? {
       format: progress.format,
       bestOf: progress.bestOf,
@@ -1355,6 +2491,9 @@ app.get('/api/tournaments/:id/matches/:matchId/live', requireAuth, requireRole('
       winsB: progress.winsB,
       gamesPlayed: progress.games.length,
       active: pairing.status === 'in_progress' && !seriesComplete,
+      competitorA: fixedParticipantA,
+      competitorB: fixedParticipantB,
+      winner: completedWinner ?? null,
     } : {
       format: 'bo1' as const,
       bestOf: 1,
@@ -1364,14 +2503,21 @@ app.get('/api/tournaments/:id/matches/:matchId/live', requireAuth, requireRole('
       gamesPlayed: snapshot.status === 'finished' ? 1 : 0,
       active: false,
       nextGame: 1,
+      competitorA: fixedParticipantA,
+      competitorB: fixedParticipantB,
+      winner: completedWinner ?? null,
     };
     return res.json({
       ...snapshot,
       matchId: liveMatchId,
       tournamentId,
-      history: manager.getLiveMatchHistory(tournamentId, liveMatchId),
+      history: manager.getLiveMatchHistory(tournamentId, liveMatchId).map(projectHistoryFrame),
       series,
       participants: {
+        A: fixedParticipantA,
+        B: fixedParticipantB,
+      },
+      currentParticipants: {
         A: liveParticipant(sideParticipantA),
         B: liveParticipant(sideParticipantB),
       },
@@ -1388,6 +2534,13 @@ app.get('/api/tournaments/:id/matches/:matchId/live', requireAuth, requireRole('
 app.get('/api/tournaments/:id/results/:matchId', requireAuth, async (req, res) => {
   try {
     const tournamentId = routeParam(req, 'id');
+    const qaFixture = isQaFixturesEnabled() ? getOwnedQaFixture(tournamentId, req.auth!.id) : undefined;
+    if (qaFixture) {
+      const resolvedFixturePairing = resolveLivePairing(qaFixture, routeParam(req, 'matchId'));
+      const fixtureResult = resolvedFixturePairing?.pairing.matchResult;
+      if (!fixtureResult) return res.status(404).json({ error: 'Match result not found' });
+      return res.json(req.auth!.role === 'organizer' ? fixtureResult : projectPublicMatchResult(fixtureResult));
+    }
     const tournamentResult = await manager.loadTournament(tournamentId);
     if (!tournamentResult.success || !tournamentResult.data || !await canViewTournamentResults(req, tournamentResult.data)) return res.status(404).json({ error: 'Tournament not found' });
     const matchId = routeParam(req, 'matchId');
@@ -1400,8 +2553,7 @@ app.get('/api/tournaments/:id/results/:matchId', requireAuth, async (req, res) =
     if (req.auth!.role === 'organizer') {
       res.json(result.data);
     } else {
-      const { executionDiagnostics: _diagnostics, ...publicResult } = result.data;
-      res.json(publicResult);
+      res.json(projectPublicMatchResult(result.data));
     }
   } catch (error) {
     console.error('Match result lookup failed:', error);
@@ -1421,7 +2573,7 @@ function spectatorRateLimit(req: express.Request, res: express.Response, tournam
 }
 
 function findPairing(tournament: Tournament, matchId: string) {
-  return tournament.rounds.flatMap(round => round.pairings).find(pairing => pairing.matchId === matchId) ?? null;
+  return getAllTournamentPairings(tournament).find(pairing => pairing.matchId === matchId) ?? null;
 }
 
 function stablePairingMatchId(tournamentId: string, pairingId: string): string {
@@ -1432,11 +2584,16 @@ function stablePairingMatchId(tournamentId: string, pairingId: string): string {
 }
 
 function resolveLivePairing(tournament: Tournament, requestedId: string) {
-  const pairing = tournament.rounds.flatMap(round => round.pairings).find(item =>
+  const pairing = getAllTournamentPairings(tournament).find(item =>
     item.matchId === requestedId || item.pairingId === requestedId
       || stablePairingMatchId(tournament.tournamentId, item.pairingId) === requestedId,
+  );
+  if (pairing) return { pairing, matchId: pairing.matchId ?? stablePairingMatchId(tournament.tournamentId, pairing.pairingId) };
+  const gamePairing = getAllTournamentPairings(tournament).find(item =>
+    item.matchResult?.series?.games.some(game => game.matchId === requestedId)
+      || item.seriesProgress?.games.some(game => game.matchId === requestedId),
   ) ?? null;
-  return pairing ? { pairing, matchId: pairing.matchId ?? stablePairingMatchId(tournament.tournamentId, pairing.pairingId) } : null;
+  return gamePairing ? { pairing: gamePairing, matchId: requestedId } : null;
 }
 
 async function authorizedSpectatorTournament(req: express.Request, tournamentId: string) {
@@ -1458,12 +2615,21 @@ app.get('/api/tournaments/:id/spectator/matches/:matchId/live', requireAuth, asy
     if (!resolved) return res.status(404).json({ error: 'Tournament not found' });
     const { pairing, matchId: liveMatchId } = resolved;
     const snapshot = manager.getLiveMatchSnapshot(tournamentId, liveMatchId);
-    const history = manager.getLiveMatchHistory(tournamentId, liveMatchId);
-    const replay = await manager.getReplay(tournamentId, liveMatchId);
-    const replayAvailable = replay.success;
-    res.json(projectSpectatorLive({
-      tournament, pairing, snapshot, history, replayAvailable,
-    }));
+    const projection = snapshot
+      ? await projectionCache.getOrLoad(`tournament:${tournamentId}:live:${liveMatchId}:${snapshot.sequence}`, async () => {
+          const replay = await manager.getReplay(tournamentId, liveMatchId);
+          return projectSpectatorLive({
+            tournament, pairing, snapshot,
+            history: manager.getLiveMatchHistory(tournamentId, liveMatchId),
+            replayAvailable: replay.success,
+          });
+        })
+      : projectSpectatorLive({
+          tournament, pairing, snapshot,
+          history: manager.getLiveMatchHistory(tournamentId, liveMatchId),
+          replayAvailable: (await manager.getReplay(tournamentId, liveMatchId)).success,
+        });
+    res.json(projection);
   } catch (error) {
     console.error('Spectator live lookup failed:', error);
     res.status(500).json({ error: 'Unable to load spectator data' });
@@ -1493,22 +2659,27 @@ app.get('/api/tournaments/:id/spectator/matches/:matchId/live/stream', requireAu
     'X-Accel-Buffering': 'no',
   });
   res.flushHeaders();
+  activeSseResponses.add(res);
+  let closed = false;
   const write = (payload: unknown) => {
-    if (!res.writableEnded) res.write(`data: ${JSON.stringify(payload)}\n\n`);
+    if (!closed && !res.writableEnded && !res.destroyed) res.write(`data: ${JSON.stringify(payload)}\n\n`);
   };
   const emitSnapshot = async (snapshot: NonNullable<ReturnType<typeof manager.getLiveMatchSnapshot>>) => {
-    const current = await authorizedSpectatorTournament(req, tournamentId);
-    const resolved = current ? resolveLivePairing(current, liveMatchId) : null;
-    const pairing = resolved?.pairing ?? null;
-    if (!current || !pairing) return;
-    const replay = await manager.getReplay(tournamentId, liveMatchId);
-    write(projectSpectatorLive({
-      tournament: current,
-      pairing,
-      snapshot,
-      history: manager.getLiveMatchHistory(tournamentId, liveMatchId),
-      replayAvailable: replay.success,
-    }));
+    const projection = await projectionCache.getOrLoad(`tournament:${tournamentId}:live:${liveMatchId}:${snapshot.sequence}`, async () => {
+      const current = await authorizedSpectatorTournament(req, tournamentId);
+      const resolved = current ? resolveLivePairing(current, liveMatchId) : null;
+      const pairing = resolved?.pairing ?? null;
+      if (!current || !pairing) throw new PublicProjectionUnavailable(404, 'Tournament not found');
+      const replay = await manager.getReplay(tournamentId, liveMatchId);
+      return projectSpectatorLive({
+        tournament: current,
+        pairing,
+        snapshot,
+        history: manager.getLiveMatchHistory(tournamentId, liveMatchId),
+        replayAvailable: replay.success,
+      });
+    });
+    write(projection);
   };
   let emitChain = Promise.resolve();
   const enqueueSnapshot = (snapshot: NonNullable<ReturnType<typeof manager.getLiveMatchSnapshot>>) => {
@@ -1516,13 +2687,19 @@ app.get('/api/tournaments/:id/spectator/matches/:matchId/live/stream', requireAu
   };
   const unsubscribe = manager.subscribeLiveMatch(tournamentId, liveMatchId, enqueueSnapshot);
   const heartbeat = setInterval(() => {
-    if (res.writableEnded) return;
+    if (closed || res.writableEnded || res.destroyed) return;
     res.write(': heartbeat\n\n');
   }, 15_000);
-  req.on('close', () => {
+  const cleanup = () => {
+    if (closed) return;
+    closed = true;
+    activeSseResponses.delete(res);
     clearInterval(heartbeat);
     unsubscribe();
-  });
+  };
+  req.once('aborted', cleanup);
+  req.once('close', cleanup);
+  res.once('close', cleanup);
   const snapshot = manager.getLiveMatchSnapshot(tournamentId, liveMatchId);
   if (snapshot) {
     enqueueSnapshot(snapshot);
@@ -1573,9 +2750,6 @@ app.get('/api/tournaments/:id/replays/:matchId', requireAuth, async (req, res) =
     const result = await manager.getReplay(tournamentId, resolved.matchId);
     if (!result.success) return res.status(404).json({ error: 'Replay not found' });
     const replay = result.data;
-    if (replay && req.auth?.role !== 'organizer' && replay.metadata?.executionDiagnostics) {
-      replay.metadata = { ...replay.metadata, executionDiagnostics: undefined };
-    }
     if (replay && req.auth?.role === 'organizer' && tournament.metadata?.ownerId === req.auth.id && replay.participantIdentities) {
       const participantIdentities = Object.fromEntries(
         Object.entries(replay.participantIdentities).map(([side, identity]) => {
@@ -1587,7 +2761,7 @@ app.get('/api/tournaments/:id/replays/:matchId', requireAuth, async (req, res) =
       res.json({ ...replay, participantIdentities });
       return;
     }
-    res.json(replay);
+    res.json(replay && req.auth?.role !== 'organizer' ? projectSpectatorReplay(replay) : replay);
   } catch (error) {
     console.error('Replay lookup failed:', error);
     res.status(500).json({ error: 'Unable to load replay' });
@@ -1614,6 +2788,11 @@ app.get('/api/system/queue', requireAuth, requireRole('organizer'), async (req, 
     taskId: taskId ?? null,
     status: taskId ? executionQueue.getStatus(taskId) : null,
   });
+});
+
+app.get('/api/system/metrics', requireAuth, requireRole('organizer'), (_req, res) => {
+  res.set('Cache-Control', 'no-store, private');
+  res.json(applicationMetrics.snapshot());
 });
 
 // Error handling fallback
@@ -1647,6 +2826,7 @@ export async function startServer(port: string | number = PORT): Promise<Server>
   await initServer();
   return await new Promise<Server>((resolve, reject) => {
     const server = app.listen(port);
+    httpServer = server;
     const onError = (error: Error) => {
       server.close();
       closeServer();
@@ -1675,6 +2855,15 @@ export async function startServer(port: string | number = PORT): Promise<Server>
 
 // Only start server if run directly (not imported for tests)
 if (isDirectExecution(import.meta.url)) {
+  let signalShutdown: Promise<ShutdownResult> | undefined;
+  const handleSignal = () => {
+    signalShutdown ??= shutdownServer();
+    void signalShutdown.then(result => {
+      if (!result.closed) console.error('Graceful shutdown timed out; storage remains open for active workers');
+    });
+  };
+  process.once('SIGINT', handleSignal);
+  process.once('SIGTERM', handleSignal);
   startServer().catch(error => {
     const message = error instanceof Error ? error.message : String(error);
     console.error(`Failed to start server: ${message}`);

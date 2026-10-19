@@ -1,0 +1,686 @@
+
+/* ==================== EXTRACTED: Practice Runner Sandbox ==================== */
+/* === Tactical Replay & Sandbox Enhancements === */
+    .editor-sandbox {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      color: #176b4d;
+      font-size: .74rem;
+      font-weight: 700;
+      background: #eaf6ee;
+      padding: 3px 10px;
+      border-radius: 999px;
+      border: 1px solid #cce8d6;
+    }
+
+    .editor-sandbox::before {
+      content: '';
+      display: inline-block;
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: #10b981;
+      box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.25);
+      animation: pulseGreen 2s infinite ease-in-out;
+    }
+
+    @keyframes pulseGreen {
+      0%, 100% { transform: scale(1); opacity: 1; }
+      50% { transform: scale(1.25); opacity: 0.65; }
+    }
+
+    .replay-piece {
+      transition: transform .18s cubic-bezier(0.16, 1, 0.3, 1), box-shadow .18s ease;
+      box-shadow: 0 3px 6px rgba(0, 0, 0, 0.16);
+    }
+
+    .replay-piece:hover {
+      transform: scale(1.12);
+      box-shadow: 0 4px 10px rgba(0, 0, 0, 0.22);
+    }
+
+    @keyframes capturePulse {
+      0% { transform: scale(0.92); box-shadow: inset 0 0 0 2px #dc2626; }
+      50% { transform: scale(1.04); box-shadow: inset 0 0 0 3px #ef4444, 0 0 10px rgba(239, 68, 68, 0.4); }
+      100% { transform: scale(1); box-shadow: inset 0 0 0 2px #dc2626; }
+    }
+
+    
+    /* === Victory & Goal Reached Celebratory Effects === */
+    .replay-cell.goal {
+      background: radial-gradient(circle at center, #fefbf2 20%, #fef5e0 100%);
+      border: 1.5px dashed #d97706 !important;
+      position: relative;
+    }
+
+    .goal-flag {
+      position: absolute;
+      top: 3px;
+      right: 3px;
+      z-index: 2;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 16px;
+      height: 16px;
+      color: #d97706;
+      opacity: .92;
+      filter: drop-shadow(0 1px 2px rgba(217, 119, 6, 0.4));
+      transition: transform .3s ease;
+    }
+
+    .replay-cell.goal-reached,
+    .replay-cell.victory-cell {
+      background: radial-gradient(circle at center, #fffbeb 0%, #fef3c7 60%, #fde68a 100%) !important;
+      box-shadow: 0 0 24px rgba(245, 158, 11, 0.75), inset 0 0 0 3px #f59e0b !important;
+      border-style: solid !important;
+      border-color: #f59e0b !important;
+      z-index: 10;
+      animation: victoryCellPulse 1.8s infinite ease-in-out;
+    }
+
+    .replay-cell.goal-reached .goal-flag,
+    .replay-cell.victory-cell .goal-flag {
+      color: #b45309;
+      transform: scale(1.35) rotate(-5deg);
+      animation: flagCelebrate 1.2s infinite alternate ease-in-out;
+    }
+
+    .replay-piece.victory-piece {
+      transform: scale(1.18) !important;
+      box-shadow: 0 0 16px rgba(245, 158, 11, 0.9), 0 4px 10px rgba(0, 0, 0, 0.3) !important;
+      border-color: #fde68a !important;
+      animation: victoryPieceBounce 1.4s infinite ease-in-out;
+    }
+
+    @keyframes victoryCellPulse {
+      0%, 100% {
+        box-shadow: 0 0 16px rgba(245, 158, 11, 0.6), inset 0 0 0 2px #f59e0b;
+      }
+      50% {
+        box-shadow: 0 0 28px rgba(245, 158, 11, 0.95), inset 0 0 0 3.5px #d97706;
+      }
+    }
+
+    @keyframes flagCelebrate {
+      0% { transform: scale(1.2) rotate(-8deg); }
+      100% { transform: scale(1.4) rotate(8deg); }
+    }
+
+    @keyframes victoryPieceBounce {
+      0%, 100% { transform: scale(1.15) translateY(0); }
+      50% { transform: scale(1.22) translateY(-4px); }
+    }
+
+    #replay-view .replay-series-card .replay-player-identity.is-winner {
+      border-color: #f59e0b !important;
+      background: linear-gradient(135deg, rgba(254, 243, 199, 0.5), rgba(253, 230, 138, 0.3)) !important;
+      box-shadow: 0 0 20px rgba(245, 158, 11, 0.28), 0 4px 12px rgba(23, 35, 29, 0.06) !important;
+      position: relative;
+    }
+
+    #replay-view .replay-series-card .replay-player-identity.is-winner::after {
+      content: '🏆 THẮNG CUỘC';
+      position: absolute;
+      top: -10px;
+      padding: 1px 7px;
+      border-radius: 999px;
+      background: linear-gradient(135deg, #f59e0b, #d97706);
+      color: #fff;
+      font-size: .65rem;
+      font-weight: 800;
+      letter-spacing: .03em;
+      box-shadow: 0 2px 6px rgba(217, 119, 6, 0.4);
+      animation: winnerBadgePulse 2s infinite ease-in-out;
+      z-index: 2;
+    }
+
+    #replay-view .replay-series-card .replay-player-a-label.is-winner::after {
+      left: 12px;
+      right: auto;
+    }
+
+    #replay-view .replay-series-card .replay-player-b-label.is-winner::after {
+      right: 12px;
+      left: auto;
+    }
+
+    @keyframes winnerBadgePulse {
+      0%, 100% { transform: scale(1); }
+      50% { transform: scale(1.06); }
+    }
+
+    #replay-view .replay-series-card .replay-player-identity.is-winner .replay-player-score {
+      background: #fef3c7;
+      color: #b45309;
+      font-weight: 850;
+      box-shadow: inset 0 0 0 1.5px #f59e0b;
+    }
+
+    .replay-current-move.is-victory-announcement {
+      background: linear-gradient(135deg, #fef3c7, #fde68a) !important;
+      border-left: 4px solid #f59e0b !important;
+      color: #78350f !important;
+      font-weight: 750 !important;
+      font-size: .84rem !important;
+      box-shadow: 0 4px 14px rgba(245, 158, 11, 0.25);
+      animation: announcementGlow 1.8s infinite ease-in-out;
+    }
+
+    @keyframes announcementGlow {
+      0%, 100% { box-shadow: 0 4px 14px rgba(245, 158, 11, 0.2); }
+      50% { box-shadow: 0 4px 20px rgba(245, 158, 11, 0.45); }
+    }
+
+    #r-winner.has-winner {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      color: #b45309;
+      background: #fef3c7;
+      padding: 2px 8px;
+      border-radius: 6px;
+      font-weight: 750;
+      border: 1px solid #fde68a;
+    }
+
+    .replay-cell.capture {
+      background: #fef2f2;
+      box-shadow: inset 0 0 0 2px #ef4444;
+      animation: capturePulse .4s ease-out;
+    }
+
+    .replay-cell.move-from {
+      background: #fffbeb;
+      box-shadow: inset 0 0 0 2px #f59e0b;
+    }
+
+    .replay-cell.move-to {
+      background: #ecfdf5;
+      box-shadow: inset 0 0 0 2px #10b981;
+    }
+
+    .editor-sandbox {
+      color: #176b4d;
+      font-size: .72rem;
+      font-weight: 700;
+    }
+
+    .bot-source-header,
+    .bot-revision-heading,
+    .source-editor-actions {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+    }
+
+    .bot-source-header h3 {
+      margin: 4px 0 6px;
+      font-size: 1.2rem;
+    }
+
+    .bot-source-header .section-kicker {
+      margin: 0;
+    }
+
+    .source-runtime {
+      flex: 0 0 auto;
+      padding: 6px 9px;
+      border: 1px solid #cfe0d4;
+      border-radius: 7px;
+      color: #176b4d;
+      background: #f4faf5;
+      font: 700 .75rem ui-monospace, SFMono-Regular, Consolas, monospace;
+    }
+
+    .source-runtime-picker {
+      display: grid;
+      gap: 4px;
+      flex: 0 0 130px;
+      color: var(--text-secondary);
+      font-size: .72rem;
+      font-weight: 700;
+    }
+
+    .source-runtime-picker select {
+      min-height: 34px;
+      padding: 6px 8px;
+    }
+
+    .workspace-source-mode {
+      color: var(--text-faint);
+      font-size: .68rem;
+      font-weight: 600;
+      line-height: 1.3;
+    }
+
+    .bot-source-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1.6fr) minmax(220px, .8fr);
+      gap: 24px;
+      margin-top: 22px;
+    }
+
+    .bot-editor-panel>label {
+      display: block;
+      margin-bottom: 8px;
+      font-weight: 700;
+    }
+
+    .source-editor {
+      display: block;
+      width: 100%;
+      box-sizing: border-box;
+      min-height: 280px;
+      padding: 14px;
+      border: 1px solid #b9cbbf;
+      border-radius: 9px;
+      resize: vertical;
+      background: #17231d;
+      color: #edf7ef;
+      font: .85rem/1.6 ui-monospace, SFMono-Regular, Consolas, monospace;
+    }
+
+    .source-editor:focus {
+      border-color: #16803c;
+      outline: 3px solid rgba(22, 128, 60, .16);
+    }
+
+    .source-editor-actions {
+      margin-top: 16px;
+    }
+
+    .source-dirty {
+      color: #8a5b12;
+      font-size: .8rem;
+    }
+
+    .bot-revision-panel {
+      min-width: 0;
+      padding-left: 20px;
+      border-left: 1px solid var(--border-light);
+    }
+
+    .bot-revision-heading h4 {
+      margin: 0;
+      font-size: .98rem;
+    }
+
+    .bot-revision-list {
+      display: grid;
+      gap: 8px;
+      margin-top: 14px;
+      max-height: 360px;
+      overflow-y: auto;
+    }
+
+    .bot-revision-item {
+      display: grid;
+      gap: 6px;
+      padding: 11px 12px;
+      border: 1px solid var(--border-light);
+      border-radius: 9px;
+      background: #fbfdfb;
+    }
+
+    .bot-revision-item.selected {
+      border-color: #93c5a2;
+      background: #f2faf4;
+    }
+
+    .bot-revision-meta {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      color: var(--text-secondary);
+      font-size: .75rem;
+    }
+
+    .bot-revision-digest {
+      overflow: hidden;
+      color: var(--text-faint);
+      font: .67rem ui-monospace, SFMono-Regular, Consolas, monospace;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .bot-revision-actions {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .bot-card-footer {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      padding-top: 14px;
+      border-top: 1px solid var(--border-light);
+    }
+
+    .bot-card-footer small {
+      color: var(--text-faint);
+      font-size: .68rem;
+    }
+
+    .bot-actions {
+      display: flex;
+      gap: 7px;
+    }
+
+    .bot-action {
+      width: auto;
+      min-height: 32px;
+      padding: 6px 9px;
+      font-size: .72rem;
+    }
+
+    .bot-delete {
+      border-color: #f4cccc;
+      color: #b42318;
+    }
+
+    .bot-delete:hover {
+      border-color: #e89b94;
+      background: #fff4f2;
+      color: #8e1d13;
+    }
+
+    /* Test Run Modal: scoped layout corrections. */
+    .practice-dialog {
+      width: min(620px, calc(100vw - 32px));
+      max-width: none;
+      box-sizing: border-box;
+      padding: 24px;
+      border: 1px solid #dbe9df;
+      border-radius: 18px;
+      background: linear-gradient(145deg, #ffffff 0%, #f5faf7 100%);
+      box-shadow: 0 24px 70px rgba(25, 65, 43, .18);
+      max-height: calc(100dvh - 32px);
+      overflow-x: hidden;
+      overflow-y: auto;
+    }
+    .practice-dialog .modal-head {
+      align-items: flex-start;
+      margin-bottom: 4px;
+    }
+    .practice-dialog .modal-head h4 {
+      margin: 0;
+      font-size: 1.35rem;
+      letter-spacing: -.02em;
+    }
+    .practice-dialog #practice-description {
+      max-width: 500px;
+      margin: 0 0 16px;
+      color: #718179;
+      font-size: .84rem;
+      line-height: 1.55;
+    }
+    .practice-dialog .practice-revision-meta {
+      display: block;
+      margin: 0;
+      padding: 13px 15px;
+      border: 1px solid #cfe5d6;
+      border-radius: 12px;
+      background: #edf8f1;
+      color: #176b50;
+      font-size: .78rem;
+      font-weight: 700;
+      line-height: 1.5;
+      overflow-wrap: anywhere;
+    }
+    .practice-dialog .practice-revision-meta::before {
+      content: 'PHIÊN BẢN ĐANG KIỂM TRA';
+      display: block;
+      margin-bottom: 3px;
+      color: #6d8d7a;
+      font-size: .63rem;
+      font-weight: 850;
+      letter-spacing: .1em;
+    }
+    .practice-dialog .practice-toolbar {
+      display: block;
+      width: 100%;
+      min-width: 0;
+      margin: 12px 0 14px;
+      padding: 16px;
+      box-sizing: border-box;
+      border: 1px solid #e0e9e3;
+      border-radius: 14px;
+      background: rgba(255, 255, 255, .78);
+    }
+    .practice-dialog .practice-opponent {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      width: 100%;
+      min-width: 0;
+    }
+    .practice-dialog .practice-opponent-icon {
+      width: 22px;
+      height: 22px;
+      flex: 0 0 22px;
+      margin-top: 1px;
+      color: #176b4d;
+      fill: none;
+      stroke: currentColor;
+      stroke-width: 2;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+    .practice-dialog .practice-opponent-copy {
+      display: grid;
+      gap: 3px;
+      min-width: 0;
+      flex: 1 1 auto;
+    }
+    .practice-dialog .practice-opponent-copy .field-label {
+      color: var(--text-faint);
+      font-size: .7rem;
+      font-weight: 800;
+      letter-spacing: .08em;
+    }
+    .practice-dialog .practice-opponent-copy strong {
+      display: block;
+      color: var(--text-primary);
+      font-size: .92rem;
+      line-height: 1.35;
+      overflow-wrap: break-word;
+    }
+    .practice-dialog .practice-opponent-copy span:last-child {
+      color: var(--text-faint);
+      font-size: .76rem;
+      line-height: 1.45;
+      overflow-wrap: anywhere;
+    }
+    .practice-dialog .practice-opponent::after {
+      content: 'SANDBOX';
+      align-self: flex-start;
+      padding: 5px 8px;
+      border-radius: 999px;
+      background: #e8f4ec;
+      color: #176b50;
+      font-size: .6rem;
+      font-weight: 850;
+      letter-spacing: .08em;
+    }
+    .practice-dialog .practice-status {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-height: 22px;
+      margin: 12px 2px 0;
+      color: #5f7067;
+      font-size: .8rem;
+      font-weight: 650;
+    }
+    .practice-dialog .practice-status::before {
+      content: '';
+      width: 8px;
+      height: 8px;
+      flex: 0 0 8px;
+      border-radius: 50%;
+      background: #e3a62b;
+      box-shadow: 0 0 0 4px rgba(227, 166, 43, .14);
+    }
+    .practice-dialog .practice-actions {
+      display: flex;
+      justify-content: flex-end;
+      align-items: center;
+      gap: 10px;
+      margin-top: 20px;
+      padding-top: 16px;
+      border-top: 1px solid var(--border-light);
+    }
+    .practice-dialog .practice-actions button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 7px;
+      width: auto;
+      min-width: 96px;
+      flex: 0 0 auto;
+    }
+    .practice-dialog .practice-actions .ui-icon {
+      width: 25px;
+      height: 25px;
+      fill: none;
+      stroke: currentColor;
+      stroke-width: 2;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+    .practice-dialog .practice-replay-toolbar {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 8px 12px;
+      margin: 14px 0 16px;
+    }
+    .practice-dialog .practice-replay-controls {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      min-width: 0;
+    }
+    .practice-dialog .practice-replay-controls button {
+      width: 34px;
+      height: 34px;
+      min-width: 34px;
+      padding: 0;
+      flex: 0 0 34px;
+    }
+    .practice-dialog .practice-replay-controls .replay-play {
+      width: 76px;
+      flex-basis: 76px;
+      gap: 5px;
+    }
+    .practice-dialog .practice-replay-controls .replay-step { margin-left: auto; white-space: nowrap; }
+    .practice-dialog .practice-replay-toolbar > input { grid-column: 1 / -1; width: 100%; min-width: 0; }
+    .practice-dialog .practice-replay-speed { justify-self: end; color: var(--text-faint); font-size: .74rem; }
+    .practice-dialog .practice-replay-speed select { margin-left: 6px; padding: 5px 8px; border: 1px solid var(--border-light); border-radius: 7px; background: #fff; color: var(--text-primary); }
+    .practice-dialog .practice-move-history { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--border-light); }
+    .practice-dialog .practice-move-history-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+    .practice-dialog .practice-move-history-head h6 { margin: 0; color: var(--text-primary); font-size: .8rem; }
+    .practice-dialog .practice-move-history-head span { color: var(--text-faint); font-size: .72rem; }
+    .practice-dialog .practice-move-history-list { display: grid; gap: 5px; max-height: 180px; margin-top: 9px; overflow-y: auto; }
+    .practice-dialog .practice-move-history-item { display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%; min-width: 0; padding: 7px 8px; border: 1px solid transparent; border-radius: 7px; background: #f7faf8; color: var(--text-secondary); font-size: .72rem; text-align: left; }
+    .practice-dialog button.practice-move-history-item { cursor: pointer; }
+    .practice-dialog .practice-move-history-item.active { border-color: #a9d4b9; background: #eaf6ed; color: #125d39; }
+    .practice-dialog .practice-move-history-item span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .practice-dialog .practice-move-history-empty { margin: 0; color: var(--text-faint); font-size: .75rem; }
+    @media (max-width: 560px) {
+      .practice-dialog {
+        width: calc(100vw - 20px);
+        max-height: calc(100dvh - 20px);
+        padding: 22px 18px;
+      }
+      .practice-dialog .practice-actions {
+        flex-direction: column-reverse;
+        align-items: stretch;
+      }
+      .practice-dialog .practice-actions button { width: 100%; }
+      .practice-dialog .practice-replay-toolbar { grid-template-columns: 1fr; }
+      .practice-dialog .practice-replay-controls { justify-content: center; }
+      .practice-dialog .practice-replay-speed { justify-self: start; }
+    }
+
+    .practice-dialog .practice-progress {
+      display: grid;
+      gap: 9px;
+      margin: 12px 0 4px;
+      padding: 11px 12px;
+      border: 1px solid #d8e8dc;
+      border-radius: 8px;
+      background: #f5fbf6;
+    }
+    .practice-dialog .practice-progress-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      color: #176b4d;
+      font-size: .76rem;
+    }
+    .practice-dialog .practice-progress-head span {
+      flex: 0 0 auto;
+      color: var(--text-faint);
+      font-variant-numeric: tabular-nums;
+      font-size: .72rem;
+    }
+    .practice-dialog .practice-progress-track {
+      position: relative;
+      height: 6px;
+      overflow: hidden;
+      border-radius: 999px;
+      background: #dcebe0;
+    }
+    .practice-dialog .practice-progress-track > span {
+      display: block;
+      width: 36%;
+      height: 100%;
+      border-radius: inherit;
+      background: #198754;
+      animation: practiceProgressWaiting 1.4s ease-in-out infinite;
+    }
+    .practice-dialog .practice-progress[data-progress-state="complete"] .practice-progress-track > span,
+    .practice-dialog .practice-progress[data-progress-state="error"] .practice-progress-track > span {
+      animation: none;
+    }
+    .practice-dialog .practice-progress[data-progress-state="error"] .practice-progress-track > span {
+      background: #c75c54;
+    }
+    .practice-dialog .practice-progress-stages {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 5px 14px;
+      color: var(--text-faint);
+      font-size: .68rem;
+    }
+    .practice-dialog .practice-progress-stages span { position: relative; padding-left: 10px; }
+    .practice-dialog .practice-progress-stages span::before {
+      position: absolute;
+      top: .42em;
+      left: 0;
+      width: 5px;
+      height: 5px;
+      border-radius: 50%;
+      background: #c3d3c7;
+      content: '';
+    }
+    .practice-dialog .practice-progress-stages span.is-active { color: #176b4d; font-weight: 700; }
+    .practice-dialog .practice-progress-stages span.is-active::before { background: #198754; }
+    .practice-dialog .practice-progress-stages span.is-complete::before { background: #6fbf8d; }
+
+    @keyframes practiceProgressWaiting {
+      0% { transform: translateX(-120%); }
+      100% { transform: translateX(330%); }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .practice-dialog .practice-progress-track > span { animation: none; }
+    }

@@ -1,5 +1,6 @@
 import type { Tournament, TournamentPairing } from '../tournament/types.js';
 import type { LiveMatchSnapshot, MatchReplay, ReplayParticipantIdentity } from '../match-runner/types.js';
+import type { TournamentMatchRecord } from '../tournament/types.js';
 import { getSeriesSides } from '../tournament/series.js';
 
 const MAX_HISTORY_FRAMES = 120;
@@ -42,8 +43,10 @@ function safeTermination(value: unknown): string | null {
 
 function safeMove(move: LiveMatchSnapshot['latestMove']) {
   if (!move) return null;
+  const player = move.pieceId.startsWith('A-') ? 'A' : move.pieceId.startsWith('B-') ? 'B' : null;
   return {
     pieceId: move.pieceId,
+    player,
     from: move.from,
     to: move.to,
     captures: move.captures ?? null,
@@ -117,6 +120,7 @@ export function projectSpectatorLive(options: SpectatorLiveOptions) {
       currentGameNumber: gameNumber,
       competitorX: participantName(tournament, pairing.participantA),
       competitorY: participantName(tournament, pairing.participantB),
+      winner: pairing.matchResult?.winner ?? null,
       scoreByCompetitor: {
         [pairing.participantA]: score.A,
         ...(pairing.participantB ? { [pairing.participantB]: score.B } : {}),
@@ -152,11 +156,15 @@ export function projectSpectatorReplay(replay: MatchReplay): MatchReplay {
     },
   } as MatchReplay;
   if (!replay.series) return base;
+  const seriesFormat: 'bo2' | 'bo3' = replay.series.format ?? (replay.series.bestOf === 2 ? 'bo2' : 'bo3');
+  const seriesBestOf: 2 | 3 = replay.series.bestOf ?? (seriesFormat === 'bo2' ? 2 : 3);
   base.series = {
-    format: 'bo3', bestOf: 3,
+    format: seriesFormat,
+    bestOf: seriesBestOf,
     winsA: replay.series.winsA, winsB: replay.series.winsB, winner: replay.series.winner,
     games: replay.series.games.map(game => ({
       gameNumber: game.gameNumber,
+      matchId: game.replay.matchId,
       participantA: game.participantA,
       participantB: game.participantB,
       winner: game.winner,
@@ -165,4 +173,10 @@ export function projectSpectatorReplay(replay: MatchReplay): MatchReplay {
     })),
   } as unknown as NonNullable<MatchReplay['series']>;
   return base;
+}
+
+/** Public match results omit executor provenance and diagnostics by value. */
+export function projectPublicMatchResult(result: TournamentMatchRecord): TournamentMatchRecord {
+  const { executionProvenance: _provenance, executionDiagnostics: _diagnostics, ...publicResult } = result;
+  return publicResult;
 }

@@ -1,5 +1,6 @@
 import { readFile } from 'node:fs/promises';
 import { describe, expect, it } from 'vitest';
+import { readAssembledFrontendMarkup } from './frontend-fixtures';
 
 async function source(file: string): Promise<string> {
   return readFile(new URL(`../../${file}`, import.meta.url), 'utf8');
@@ -7,7 +8,7 @@ async function source(file: string): Promise<string> {
 
 describe('UX.7 final QA regression contracts', () => {
   it('keeps organizer queue visibility and password controls explicit', async () => {
-    const [app, page] = await Promise.all([source('app.js'), source('index.html')]);
+    const [app, page] = await Promise.all([source('app.js'), readAssembledFrontendMarkup()]);
     expect(app).toContain('if (queueCard) queueCard.hidden = competitor');
     expect(app).toContain('function togglePassword');
     expect(page).toContain('id="login-password-toggle"');
@@ -23,7 +24,7 @@ describe('UX.7 final QA regression contracts', () => {
   });
 
   it('keeps replay QA state authoritative and bounded', async () => {
-    const [app, page] = await Promise.all([source('app.js'), source('index.html')]);
+    const [app, page] = await Promise.all([source('app.js'), readAssembledFrontendMarkup()]);
     expect(app).toContain("scrubber.value = String(state.replayMoveIndex)");
     expect(app).toContain("cell.classList.add('capture')");
     expect(app).toContain('if (!isReplayShape(replay)) throw new Error');

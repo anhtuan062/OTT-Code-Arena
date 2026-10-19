@@ -1,5 +1,6 @@
 import { readFile } from 'node:fs/promises';
 import { describe, expect, it } from 'vitest';
+import { readAssembledFrontendMarkup } from './frontend-fixtures';
 
 async function source(file: string): Promise<string> {
   return readFile(new URL(`../../${file}`, import.meta.url), 'utf8');
@@ -7,12 +8,15 @@ async function source(file: string): Promise<string> {
 
 describe('UX.4 Practice Runner', () => {
   it('keeps all scenario IDs and provides responsive result structure', async () => {
-    const page = await source('index.html');
+    const [page, css] = await Promise.all([
+      readAssembledFrontendMarkup(),
+      Promise.all([source('styles/components/app-shell.css'), source('styles/views/practice.css')]).then(parts => parts.join('\n')),
+    ]);
     for (const scenario of ['initial', 'capture', 'near-goal']) expect(page).toContain(`value="${scenario}"`);
     expect(page).toContain('id="practice-revision-meta"');
     expect(page).toContain('id="practice-scenario-help"');
-    expect(page).toContain('grid-template-areas: \'board result\'');
-    expect(page).toContain('grid-template-areas: \'result\' \'board\'');
+    expect(css).toContain('grid-template-areas: \'board result\'');
+    expect(css).toContain('grid-template-areas: \'result\' \'board\'');
     expect(page).toContain('practice-legend');
   });
 
@@ -46,7 +50,7 @@ describe('UX.4 Practice Runner', () => {
   });
 
   it('retains modal accessibility and retry-safe controls', async () => {
-    const [app, page] = await Promise.all([source('app.js'), source('index.html')]);
+    const [app, page] = await Promise.all([source('app.js'), readAssembledFrontendMarkup()]);
     expect(page).toContain('role="dialog"');
     expect(page).toContain('aria-modal="true"');
     expect(page).toContain('id="practice-error-details"');

@@ -1,0 +1,165 @@
+
+/* ==================== EXTRACTED: Modal Dialogs ==================== */
+/* Create tournament modal refinement. */
+.registration-submission-status { margin: 16px 0 4px; padding: 14px 16px; border: 1px solid #d7e8dc; border-radius: 12px; background: #f5fbf7; }
+.registration-submission-status strong { display: block; color: #176b50; font-size: .9rem; }
+.registration-submission-status p { margin: 6px 0 0; color: #53645a; font-size: .82rem; line-height: 1.45; }
+.registration-submission-status[data-status="pending"] { border-color: #ead9a2; background: #fffaf0; }
+.registration-submission-status[data-status="failed"] { border-color: #e5bcb4; background: #fff7f5; }
+.registration-submission-status[data-status="failed"] strong { color: #a24c3d; }
+.registration-submission-status[data-status="passed"] { border-color: #b8ddc5; }
+    #add-tourney-modal {
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+      background: rgba(16, 36, 29, .42);
+    }
+
+    #add-tourney-modal .modal-box {
+      width: min(100%, 480px);
+      max-height: min(720px, calc(100dvh - 48px));
+      padding: 28px;
+      border: 1px solid #dfe7e1;
+      border-radius: 14px;
+      background: #fff;
+      box-shadow: 0 18px 46px rgba(16, 36, 29, .16);
+      overflow-y: auto;
+    }
+
+    #add-tourney-modal .modal-head {
+      margin-bottom: 10px;
+    }
+
+    #add-tourney-modal .modal-head h4 {
+      font-size: 1.3rem;
+      line-height: 1.25;
+      letter-spacing: -.025em;
+    }
+
+    #add-tourney-modal .modal-close {
+      width: 36px;
+      height: 36px;
+      border: 1px solid #dfe7e1;
+      border-radius: 9px;
+      background: #fff;
+      color: #60736b;
+    }
+
+    #add-tourney-modal .modal-close:hover,
+    #add-tourney-modal .modal-close:focus-visible {
+      border-color: #a9cdb5;
+      background: #f1f8f3;
+      color: #176b4d;
+    }
+
+    #add-tourney-modal .modal-close-icon {
+      width: 18px;
+      height: 18px;
+      fill: none;
+      stroke: currentColor;
+      stroke-width: 2;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    #add-tourney-modal .dialog-copy {
+      margin: 0 0 24px;
+      color: #60736b;
+      font-size: .88rem;
+      line-height: 1.55;
+    }
+
+    #add-tourney-modal .form-group {
+      display: grid;
+      gap: 8px;
+      margin-bottom: 20px;
+    }
+
+    #add-tourney-modal .form-group label {
+      color: #10241d;
+      font-size: .82rem;
+      font-weight: 700;
+    }
+
+    #add-tourney-modal .input-shell {
+      min-height: 44px;
+      padding: 10px 12px;
+      border: 1px solid #c9d8cd;
+      border-radius: 8px;
+      background: #fff;
+      color: #10241d;
+      font: inherit;
+      outline: none;
+      transition: border-color .18s ease, box-shadow .18s ease;
+    }
+
+    #add-tourney-modal .input-shell:hover {
+      border-color: #a9bfb0;
+    }
+
+    #add-tourney-modal .input-shell:focus {
+      border-color: #176b4d;
+      box-shadow: 0 0 0 3px rgba(23, 107, 77, .14);
+    }
+
+    #add-tourney-modal .input-shell[aria-invalid="true"] {
+      border-color: #c65c55;
+      box-shadow: 0 0 0 3px rgba(198, 92, 85, .1);
+    }
+
+    #add-tourney-modal .field-help {
+      margin: 0;
+      color: #718078;
+      font-size: .76rem;
+      line-height: 1.45;
+    }
+
+    #add-tourney-modal .form-error {
+      margin: 0 0 16px;
+    }
+
+    #add-tourney-modal .dialog-actions {
+      padding-top: 18px;
+      border-top: 1px solid #e7ece8;
+      gap: 10px;
+    }
+
+    #add-tourney-modal .dialog-actions .secondary-btn,
+    #add-tourney-modal .dialog-actions .primary-btn {
+      width: auto;
+      min-width: 104px;
+      min-height: 42px;
+      padding: 9px 15px;
+      border-radius: 8px;
+    }
+
+    #add-tourney-modal .tournament-submit-loading {
+      display: inline-block;
+    }
+
+    #add-tourney-modal .primary-btn.is-loading {
+      cursor: wait;
+      opacity: .78;
+    }
+
+    @media (max-width: 640px) {
+      #add-tourney-modal {
+        align-items: flex-end;
+        padding: 12px;
+      }
+
+      #add-tourney-modal .modal-box {
+        max-height: calc(100dvh - 24px);
+        padding: 24px 20px;
+        border-radius: 12px;
+      }
+
+      #add-tourney-modal .dialog-actions {
+        flex-direction: column-reverse;
+      }
+
+      #add-tourney-modal .dialog-actions .secondary-btn,
+      #add-tourney-modal .dialog-actions .primary-btn {
+        width: 100%;
+      }
+    }

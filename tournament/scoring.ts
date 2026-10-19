@@ -206,7 +206,10 @@ export function sortStandings(
   matchRecords: TournamentMatchRecord[],
   scoringConfig: TournamentScoringConfig = DEFAULT_SCORING_CONFIG
 ): TournamentStanding[] {
-  const participantMap = new Map(participants.map(p => [p.participantId, p]));
+  const pointsCount = new Map<number, number>();
+  for (const s of standings) {
+    pointsCount.set(s.points, (pointsCount.get(s.points) || 0) + 1);
+  }
 
   return [...standings].sort((a, b) => {
     // 1. Total points descending
@@ -215,7 +218,7 @@ export function sortStandings(
     }
 
     // 2. Head-to-head for exact 2-way tie
-    if (a.points === b.points) {
+    if (a.points === b.points && pointsCount.get(a.points) === 2) {
       const h2h = computeHeadToHead(a.participantId, b.participantId, matchRecords, scoringConfig);
       if (h2h.matchCount > 0 && h2h.aPoints !== h2h.bPoints) {
         return h2h.bPoints - h2h.aPoints; // descending

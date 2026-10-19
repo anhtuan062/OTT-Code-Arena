@@ -26,13 +26,14 @@ New-Item -ItemType Directory -Path $runtimeDir -Force | Out-Null
 $env:NODE_ENV = 'development'
 $env:EXECUTION_POLICY = 'sandbox-required'
 $env:ENABLE_SOURCE_REVISION_EXECUTION = 'true'
+$env:BOT_CPP_COMPILATION_BACKEND = 'ephemeral-volume'
 $env:BOT_CPP_COMPILE_TIMEOUT_MS = '120000'
 $env:PORT = [string]$Port
 $env:BOT_TRUSTED_IMAGE_REGISTRIES = 'docker.io,ghcr.io'
 $env:BOT_DOCKER_IMAGE = 'ghcr.io/anhtuan062/ott-phase6e-bot@sha256:78c1972c29f1385eacd32f715a24ec41013b5883fb5f8fe0f2c597358d3bf70d'
 $env:BOT_CPP_COMPILER_IMAGE = 'docker.io/library/gcc@sha256:5e927c284bf55a7dc796262e311a0703344f62f41f5621eb56843111b1d37e15'
 $env:BOT_CPP_RUNTIME_IMAGE = 'docker.io/library/debian@sha256:7c7b2c966bc9ee8cedfeef67e0e279108992c77681fa595db4a9d65c06ccc587'
-$env:BOT_PYTHON3_RUNTIME_IMAGE = 'docker.io/library/python@sha256:34386ef0cb081344d7ec1c103ba398e6e9f64e9ab3a1509accc92a4e24a07258'
+$env:BOT_PYTHON3_RUNTIME_IMAGE = 'docker.io/library/python@sha256:2ed6491b93cd49272ee6de2b5a38440c3448360322c089fc23e370722d74179d'
 
 Write-Host 'Building application...' -ForegroundColor Cyan
 & npm.cmd run build

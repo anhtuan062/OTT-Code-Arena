@@ -82,6 +82,43 @@ describe('ExecutionQueue', () => {
   });
 
   describe('cancellation', () => {
+    it('stops admission and drains active work without aborting it', async () => {
+      queue = createExecutionQueue({ maxConcurrent: 1, maxQueueLength: 10 });
+      let signal!: AbortSignal;
+      let release!: () => void;
+      const active = queue.submit('active-drain', currentSignal => {
+        signal = currentSignal;
+        return new Promise<void>(resolve => { release = resolve; });
+      });
+      while (!release) await Promise.resolve();
+
+      queue.stopAccepting();
+      await expect(queue.submit('new-work', async () => undefined)).rejects.toThrow('shutting down');
+      const draining = queue.drain(1_000);
+      expect(signal.aborted).toBe(false);
+      release();
+      await expect(active).resolves.toBeUndefined();
+      await expect(draining).resolves.toBe(true);
+    });
+
+    it('returns a bounded timeout without cancelling or releasing active work', async () => {
+      queue = createExecutionQueue({ maxConcurrent: 1, maxQueueLength: 10 });
+      let signal!: AbortSignal;
+      let release!: () => void;
+      const active = queue.submit('active-timeout', currentSignal => {
+        signal = currentSignal;
+        return new Promise<void>(resolve => { release = resolve; });
+      });
+      while (!release) await Promise.resolve();
+
+      queue.stopAccepting();
+      await expect(queue.drain(1)).resolves.toBe(false);
+      expect(queue.activeCount).toBe(1);
+      expect(signal.aborted).toBe(false);
+      release();
+      await active;
+    });
+
     it('should cancel a queued task', async () => {
       queue = createExecutionQueue({ maxConcurrent: 1, maxQueueLength: 10 });
 

@@ -1,0 +1,141 @@
+<!-- DASHBOARD -->
+  <div id="dashboard" class="page dashboard-page">
+    <section class="dashboard-welcome">
+      <div class="dashboard-welcome-content">
+        <p class="welcome-copy" id="dashboard-welcome-copy">Chào mừng trở lại, <span id="dashboard-username">admin</span>. Theo dõi và quản lý các giải đấu của bạn.</p>
+      </div>
+      <div class="dashboard-welcome-art" aria-hidden="true">
+        <svg class="dashboard-art-svg" viewBox="0 0 200 130" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <path d="M35 30L37 22L39 30L47 32L39 34L37 42L35 34L27 32L35 30Z" fill="#a7f3d0" />
+          <path d="M175 22L176.5 16L178 22L184 23.5L178 25L176.5 31L175 25L169 23.5L175 22Z" fill="#a7f3d0" />
+          <rect x="18" y="75" width="50" height="42" rx="6" fill="#c6f1d6" />
+          <rect x="58" y="55" width="70" height="62" rx="8" fill="#a3e6be" />
+          <rect x="118" y="85" width="55" height="32" rx="6" fill="#d2f5e0" />
+          <path d="M78 18H108V38C108 46.2843 101.284 53 93 53C84.7157 53 78 46.2843 78 38V18Z" fill="#10b981" />
+          <path d="M78 23H70C68.3431 23 67 24.3431 67 26V30C67 34.4183 70.5817 38 75 38H79" stroke="#10b981" stroke-width="3.5" stroke-linecap="round" />
+          <path d="M108 23H116C117.657 23 119 24.3431 119 26V30C119 34.4183 115.418 38 111 38H107" stroke="#10b981" stroke-width="3.5" stroke-linecap="round" />
+          <rect x="90" y="53" width="6" height="13" fill="#059669" />
+          <path d="M84 66H102V70C102 71.1046 101.105 72 100 72H86C84.8954 72 84 71.1046 84 70V66Z" fill="#047857" />
+        </svg>
+      </div>
+    </section>
+
+    <section class="summary-grid" aria-label="Tóm tắt không gian làm việc">
+      <article class="summary-card" id="dash-bot-card">
+        <div class="summary-card-main">
+          <span class="summary-card-visual"><svg class="summary-icon" aria-hidden="true"><use id="dash-bot-icon-main" href="#icon-users"></use></svg></span>
+          <div class="stat-card__header">
+            <strong id="dash-bot-count">0</strong>
+            <p id="dash-bot-label">Giải mở đăng ký</p>
+            <small id="dash-bot-detail" class="summary-card-detail">Đang nhận đăng ký từ người chơi.</small>
+          </div>
+        </div>
+        <span class="summary-card-chevron"><svg class="ui-icon" aria-hidden="true"><use href="#icon-chevron-right"></use></svg></span>
+        <span class="summary-card-chip" hidden><svg class="summary-icon" aria-hidden="true"><use id="dash-bot-icon" href="#icon-bot"></use></svg></span>
+      </article>
+
+      <article class="summary-card" id="dash-tourney-card">
+        <div class="summary-card-main">
+          <span class="summary-card-visual"><svg class="summary-icon" aria-hidden="true"><use id="dash-tourney-icon-main" href="#icon-trophy"></use></svg></span>
+          <div class="stat-card__header">
+            <strong id="dash-tourney-count">0</strong>
+            <p id="dash-tourney-label">Giải đấu quản lý</p>
+            <small id="dash-tourney-detail" class="summary-card-detail">Tổng số giải đấu do bạn tạo.</small>
+          </div>
+        </div>
+        <span class="summary-card-chevron"><svg class="ui-icon" aria-hidden="true"><use href="#icon-chevron-right"></use></svg></span>
+        <span class="summary-card-chip" hidden><svg class="summary-icon" aria-hidden="true"><use id="dash-tourney-icon" href="#icon-calendar"></use></svg></span>
+      </article>
+
+      <article class="summary-card" id="dash-pending-card" hidden>
+        <div class="summary-card-main">
+          <span class="summary-card-visual"><svg class="summary-icon" aria-hidden="true"><use href="#icon-user-round-plus"></use></svg></span>
+          <div class="stat-card__header">
+            <strong id="dash-pending-count">0</strong>
+            <p id="dash-pending-label">Đơn chờ duyệt</p>
+            <small id="dash-pending-detail" class="summary-card-detail">Đã duyệt hết đơn đăng ký.</small>
+          </div>
+        </div>
+        <span class="summary-card-chevron"><svg class="ui-icon" aria-hidden="true"><use href="#icon-chevron-right"></use></svg></span>
+        <span class="summary-card-chip" hidden><svg class="summary-icon" aria-hidden="true"><use href="#icon-users"></use></svg></span>
+      </article>
+
+      <article class="summary-card" id="dash-queue-card">
+        <div class="summary-card-main">
+          <span class="summary-card-visual"><svg class="summary-icon" aria-hidden="true"><use id="dash-queue-icon-main" href="#icon-activity"></use></svg></span>
+          <div class="stat-card__header">
+            <strong id="dash-queue-value">0</strong>
+            <p id="dash-queue-label">Đang diễn ra</p>
+            <small id="dash-queue-detail" class="summary-card-detail">Giải đấu đang thi đấu.</small>
+          </div>
+        </div>
+        <span class="summary-card-chevron"><svg class="ui-icon" aria-hidden="true"><use href="#icon-chevron-right"></use></svg></span>
+        <span class="summary-card-chip" hidden><svg class="summary-icon" aria-hidden="true"><use id="dash-queue-icon" href="#icon-activity"></use></svg></span>
+      </article>
+
+      <article class="summary-card" id="dash-record-card" hidden>
+        <div class="summary-card-main">
+          <span class="summary-card-visual"><svg class="summary-icon" aria-hidden="true"><use href="#icon-percent"></use></svg></span>
+          <div class="stat-card__header">
+            <strong id="dash-record-rate">—</strong>
+            <p>Tỉ lệ thắng</p>
+            <small id="dash-record-matches" class="summary-card-detail">— trận tham gia</small>
+          </div>
+        </div>
+        <span class="summary-card-chevron"><svg class="ui-icon" aria-hidden="true"><use href="#icon-chevron-right"></use></svg></span>
+        <span class="summary-card-chip" hidden><svg class="summary-icon" aria-hidden="true"><use href="#icon-activity"></use></svg></span>
+      </article>
+    </section>
+
+    <section class="dashboard-section" aria-labelledby="recent-tournaments-title">
+      <div class="section-header" id="dashboard-activity-header">
+        <div>
+          <div class="dashboard-section-title"><svg class="ui-icon" aria-hidden="true"><use href="#icon-trophy"></use></svg><h3 id="recent-tournaments-title">Giải đấu đang mở đăng ký</h3></div>
+          <p class="section-description" id="dashboard-activity-copy">Các giải đấu bạn có thể gửi yêu cầu tham gia.</p>
+        </div>
+        <button class="text-button dashboard-section-link" id="dashboard-open-tournaments" type="button">Xem tất cả <svg class="ui-icon" aria-hidden="true"><use href="#icon-arrow-right"></use></svg></button>
+      </div>
+      <div class="dashboard-list-toolbar" id="dashboard-tournament-toolbar" hidden>
+        <div class="toolbar-left">
+          <label class="bot-search" for="dashboard-tournament-search"><svg class="ui-icon search-icon" aria-hidden="true"><use href="#icon-search"></use></svg><span class="visually-hidden">Tìm giải đấu</span><input id="dashboard-tournament-search" type="search" placeholder="Tìm giải đấu theo tên, mô tả..." autocomplete="off"></label>
+          <label class="dashboard-filter" for="dashboard-tournament-status"><svg class="ui-icon" aria-hidden="true"><use href="#icon-filter"></use></svg><span class="visually-hidden">Lọc trạng thái</span><select id="dashboard-tournament-status" class="input-shell"><option value="all">Tất cả trạng thái</option><option value="draft">Bản nháp</option><option value="registration_open">Đang mở đăng ký</option><option value="registration_closed">Đã đóng đăng ký</option><option value="running">Đang diễn ra</option><option value="completed">Đã hoàn thành</option><option value="cancelled">Đã hủy</option></select></label>
+          <label class="dashboard-filter dashboard-sort" for="dashboard-tournament-sort"><svg class="ui-icon" aria-hidden="true"><use href="#icon-calendar"></use></svg><span class="visually-hidden">Sắp xếp</span><select id="dashboard-tournament-sort" class="input-shell"><option value="newest">Ngày tạo: Mới nhất</option><option value="oldest">Ngày tạo: Cũ nhất</option></select></label>
+        </div>
+        <div class="toolbar-right">
+          <span class="toolbar-count" id="dashboard-tournament-count">0 giải đấu</span>
+        </div>
+      </div>
+      <div class="dashboard-empty" id="dash-empty" hidden role="status" aria-live="polite">
+        <div class="dashboard-empty-icon-wrap"><svg class="ui-icon dashboard-empty-trophy" aria-hidden="true"><use href="#icon-trophy"></use></svg></div>
+        <h3 id="dash-empty-title">Bạn chưa tạo giải đấu nào</h3>
+        <p id="dash-empty-copy">Tạo giải đấu đầu tiên để bắt đầu tổ chức thi đấu.</p>
+        <div class="dashboard-empty-actions">
+          <button class="primary-btn" id="dash-empty-tournament" type="button"><svg class="ui-icon" aria-hidden="true"><use href="#icon-plus"></use></svg>Tạo giải đấu</button>
+        </div>
+      </div>
+      <div class="recent-tournaments-card" id="dash-recent-table">
+        <table class="data-table" id="dash-recent-tourneys">
+          <thead>
+            <tr>
+              <th>Tên</th>
+              <th id="dashboard-secondary-column">Thể thức</th>
+              <th>Trạng thái</th>
+              <th>Người tham gia</th>
+              <th><span class="visually-hidden">Thao tác</span></th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </section>
+    <section class="dashboard-section dashboard-bots-section" id="dash-bots-section" aria-labelledby="dashboard-bots-title" hidden>
+      <div class="section-header">
+        <div>
+          <div class="dashboard-section-title"><svg class="ui-icon" aria-hidden="true"><use href="#icon-code-2"></use></svg><h3 id="dashboard-bots-title">Bot của tôi</h3></div>
+          <p class="section-description">Truy cập nhanh các Bot đã tạo.</p>
+        </div>
+        <button class="text-button dashboard-section-link" id="dashboard-open-bots" type="button">Xem tất cả <svg class="ui-icon" aria-hidden="true"><use href="#icon-arrow-right"></use></svg></button>
+      </div>
+      <div class="dashboard-bot-list" id="dash-bot-list" aria-live="polite"></div>
+    </section>
+  </div>

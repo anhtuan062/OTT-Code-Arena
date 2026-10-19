@@ -1,0 +1,70 @@
+<!-- TOURNAMENT DETAILS -->
+  <div id="tournament-detail" class="page tournament-detail-redesign">
+    <div class="tournament-detail-hero">
+      <div class="tournament-heading-copy"><button class="tournament-breadcrumb" id="back-to-tournaments" type="button"><svg class="td-icon td-icon--sm" aria-hidden="true"><use href="#td-icon-arrow-left"></use></svg><span id="td-breadcrumb-root">Quản lý giải đấu</span><span class="breadcrumb-separator" aria-hidden="true">/</span><span id="td-breadcrumb-name">Đang tải</span></button>
+        <div class="tournament-detail-title">
+          <h2 id="td-name">Đang tải giải đấu…</h2>
+          <div class="tournament-status-row">
+            <span id="td-status" class="status-badge">Đang tải</span><span id="td-phase-label" class="phase-indicator-label"></span>
+          </div>
+        </div>
+      </div>
+      <div id="td-actions" class="tournament-actions" aria-label="Thao tác giải đấu"></div>
+    </div>
+    <ol id="td-lifecycle" class="tournament-lifecycle" aria-label="Tiến trình giải đấu"></ol><span class="lifecycle-mobile-count" id="td-lifecycle-count" aria-hidden="true"></span>
+    <section class="tournament-next-step" id="td-next-step" aria-live="polite"></section>
+    <div id="td-lifecycle-body" class="tournament-lifecycle-body"></div>
+    <section class="tournament-podium-panel" id="td-podium-panel" hidden aria-labelledby="td-podium-title">
+      <div class="podium-heading">
+        <div class="podium-heading-copy">
+          <div class="podium-heading-title"><svg class="td-icon td-icon--md" aria-hidden="true"><use href="#td-icon-trophy"></use></svg><span id="td-podium-title">Vinh danh kết quả chung cuộc</span></div>
+          <p>Ba vị trí dẫn đầu của giải đấu</p>
+        </div>
+      </div>
+      <div class="podium-list" id="td-podium-list"></div>
+    </section>
+    <section class="tournament-panel" id="td-requests" hidden aria-labelledby="td-requests-title">
+      <div class="tournament-panel-head">
+        <div><h3><svg class="td-icon td-icon--md panel-heading-icon" aria-hidden="true"><use href="#td-icon-clipboard-list"></use></svg><span id="td-requests-title">Yêu cầu tham gia</span></h3></div>
+        <span class="panel-count request-pending-count" id="td-requests-count" aria-live="polite"></span>
+      </div>
+      <div id="td-request-list" aria-live="polite"></div>
+    </section>
+    <div class="tournament-overview">
+      <section class="tournament-panel">
+        <div class="tournament-panel-head">
+          <div><p class="panel-kicker">Người tham gia</p></div><span class="panel-count" id="td-pcount">0</span>
+        </div>
+        <ul id="td-participants" class="participant-list"></ul><button id="btn-register-bot" type="button"
+          class="secondary-btn detail-register" hidden><svg class="td-icon td-icon--sm" aria-hidden="true"><use href="#td-icon-user-round-plus"></use></svg>Đăng ký Bot</button>
+      </section>
+      <section class="tournament-panel standings-panel">
+        <div class="tournament-panel-head">
+          <div class="standings-heading"><svg class="td-icon td-icon--md" aria-hidden="true"><use href="#td-icon-trophy"></use></svg><p class="panel-kicker">Bảng xếp hạng</p></div><span id="td-execution-status" class="bots-count" role="status"
+            aria-live="polite"></span><span id="td-stats" class="bots-count"></span>
+        </div>
+        <div id="td-standings-empty" class="detail-empty" role="status" hidden></div>
+        <div class="standings-table-scroll" role="region" aria-label="Bảng xếp hạng, cuộn ngang để xem đầy đủ"
+          tabindex="0">
+          <table class="data-table" id="td-standings">
+            <thead>
+              <tr>
+                <th>Hạng</th>
+                <th>Tên</th>
+                <th>ĐT</th>
+                <th>Thắng</th>
+                <th>Hòa</th>
+                <th>Thua</th>
+                <th>Điểm</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </section>
+    </div>
+    <section class="tournament-schedule">
+      <div class="schedule-heading"><div><p class="panel-kicker">Lịch thi đấu và trận đấu</p></div><span class="schedule-caption">Theo dõi từng vòng và kết quả</span></div>
+      <div id="td-schedule"></div>
+    </section>
+  </div>

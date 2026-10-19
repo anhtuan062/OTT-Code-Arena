@@ -5,7 +5,35 @@ import * as os from 'node:os';
 import { TournamentManager } from '@tournament/manager.js';
 import { FileTournamentRepository } from '@tournament/persistence.js';
 import type { MatchExecutor } from '@tournament/executor.js';
-import type { MatchResult } from '@match-runner/types.js';
+import type { MatchResult, MatchReplay } from '@match-runner/types.js';
+import type { Tournament, TournamentMatchRecord } from '@tournament/types.js';
+import { getSeriesSides, shouldPlayNextGame } from '@tournament/series.js';
+
+class CrashAfterFirstSeriesGameRepository extends FileTournamentRepository {
+  private failNextTournamentSave = false;
+  private injected = false;
+
+  override async saveMatchResult(
+    tournamentId: string,
+    matchId: string,
+    match: TournamentMatchRecord,
+    replay: MatchReplay,
+  ): Promise<void> {
+    await super.saveMatchResult(tournamentId, matchId, match, replay);
+    if (!this.injected && matchId.endsWith('-g1')) {
+      this.injected = true;
+      this.failNextTournamentSave = true;
+    }
+  }
+
+  override async save(tournament: Tournament): Promise<void> {
+    if (this.failNextTournamentSave) {
+      this.failNextTournamentSave = false;
+      throw new Error('injected crash after durable series game');
+    }
+    await super.save(tournament);
+  }
+}
 
 function result(matchId: string, winner: 'A' | 'B' | 'draw'): MatchResult {
   return {
@@ -33,6 +61,33 @@ describe('BO3 tournament series', () => {
   afterEach(async () => {
     repository.close();
     await fs.rm(dir, { recursive: true, force: true });
+  });
+
+  it('keeps both deterministic Game 3 orientations stable when the persisted seed is reloaded', () => {
+    const orientations = new Map<string, string>();
+    for (let index = 0; index < 10_000 && orientations.size < 2; index += 1) {
+      const seed = `game-3-seed-${index}`;
+      const first = getSeriesSides(seed, 3, 'P1', 'P2');
+      const reloadedSeed = JSON.parse(JSON.stringify({ seed })).seed as string;
+      const afterRestart = getSeriesSides(reloadedSeed, 3, 'P1', 'P2');
+      expect(afterRestart).toEqual(first);
+      orientations.set(`${first.playerA}:${first.playerB}`, seed);
+    }
+
+    expect(orientations.has('P1:P2')).toBe(true);
+    expect(orientations.has('P2:P1')).toBe(true);
+  });
+
+  it('ends after the first two games when their aggregate result is already decided', () => {
+    const game = (winnerParticipantId: string | null, participantA = 'P1', participantB = 'P2') => ({
+      participantA,
+      participantB,
+      winnerParticipantId,
+    }) as any;
+
+    expect(shouldPlayNextGame([game('P1'), game(null)])).toBe(false);
+    expect(shouldPlayNextGame([game('P1'), game('P2')])).toBe(true);
+    expect(shouldPlayNextGame([game(null), game(null)])).toBe(true);
   });
 
   it('plays both sides, stores the seed and keeps standings at one series', async () => {
@@ -67,6 +122,15 @@ describe('BO3 tournament series', () => {
     const replay = await manager.getReplay('bo3', pairing.matchId!);
     expect(replay.data?.series?.games).toHaveLength(3);
     expect(replay.data?.series?.seed).toBe(pairing.matchResult?.series?.seed);
+    const secondGameId = pairing.matchResult?.series?.games[1]?.matchId;
+    expect(secondGameId).toBeTruthy();
+    const secondGameReplay = await manager.getReplay('bo3', secondGameId!);
+    expect(secondGameReplay.data?.participantIdentities).toMatchObject({
+      A: { participantId: 'P1', participantName: 'Player 1' },
+      B: { participantId: 'P2', participantName: 'Player 2' },
+    });
+    expect(secondGameReplay.data?.series?.winsA).toBe(1);
+    expect(secondGameReplay.data?.series?.winsB).toBe(1);
     expect(tournament.standings.every(standing => standing.matchesPlayed === 1 && standing.draws === 1)).toBe(true);
     expect(tournament.standings.every(standing => standing.points === 1)).toBe(true);
   }, 20_000);
@@ -92,5 +156,86 @@ describe('BO3 tournament series', () => {
     const tournament = (await manager.loadTournament('bo3-stop')).data!;
     expect(tournament.standings.find(standing => standing.participantId === 'P1')).toMatchObject({ wins: 1, losses: 0, points: 3 });
     expect(tournament.standings.find(standing => standing.participantId === 'P2')).toMatchObject({ wins: 0, losses: 1, points: 0 });
+  });
+
+  it('plays exactly two alternating games for BO2 and keeps the scheduler on the series path', async () => {
+    const calls: string[] = [];
+    const executor: MatchExecutor = {
+      async executeMatch(matchId, playerA, playerB) {
+        calls.push(`${matchId}:${playerA.botId}:${playerB.botId}`);
+        return result(matchId, 'A');
+      },
+      async isAvailable() { return true; },
+    };
+    const manager = new TournamentManager({
+      repository,
+      executor,
+      defaultMatchConfig: { bestOf: 2 },
+      enableBo1MatchScheduler: true,
+    });
+    await manager.createTournament('bo2', 'BO2');
+    await manager.registerParticipant('bo2', 'P1', 'Player 1', { botId: 'B1', command: 'node', args: [] });
+    await manager.registerParticipant('bo2', 'P2', 'Player 2', { botId: 'B2', command: 'node', args: [] });
+    await manager.openRegistration('bo2');
+    await manager.generateSchedule('bo2');
+    await manager.startTournament('bo2');
+
+    const run = await manager.runAllMatches('bo2');
+    expect(run.success).toBe(true);
+    expect(calls).toHaveLength(2);
+    expect(calls[0]).toContain(':B1:B2');
+    expect(calls[1]).toContain(':B2:B1');
+    const tournament = (await manager.loadTournament('bo2')).data!;
+    const pairing = tournament.rounds[0]!.pairings[0]!;
+    expect(pairing.matchResult?.series).toMatchObject({ format: 'bo2', bestOf: 2, winsA: 1, winsB: 1, winner: 'draw' });
+    expect(tournament.standings.find(standing => standing.participantId === 'P1')).toMatchObject({ matchesPlayed: 1, draws: 1, points: 1 });
+    expect(tournament.standings.find(standing => standing.participantId === 'P2')).toMatchObject({ matchesPlayed: 1, draws: 1, points: 1 });
+  });
+
+  it('restarts after a committed BO2 game without re-executing that game', async () => {
+    const crashDir = await fs.mkdtemp(path.join(os.tmpdir(), 'ott-bo2-recovery-'));
+    const crashRepository = new CrashAfterFirstSeriesGameRepository({ baseDir: crashDir });
+    await crashRepository.initialize();
+    try {
+      const calls: string[] = [];
+      const executor: MatchExecutor = {
+        async executeMatch(matchId, playerA, playerB) {
+          calls.push(matchId);
+          return result(matchId, 'A');
+        },
+        async isAvailable() { return true; },
+      };
+      const config = { repository: crashRepository, executor, defaultMatchConfig: { bestOf: 2 as const } };
+      const manager = new TournamentManager(config);
+      await manager.createTournament('bo2-recovery', 'BO2 recovery');
+      await manager.registerParticipant('bo2-recovery', 'P1', 'Player 1', { botId: 'B1', command: 'node', args: [] });
+      await manager.registerParticipant('bo2-recovery', 'P2', 'Player 2', { botId: 'B2', command: 'node', args: [] });
+      await manager.openRegistration('bo2-recovery');
+      await manager.generateSchedule('bo2-recovery');
+      await manager.startTournament('bo2-recovery');
+
+      expect((await manager.runAllMatches('bo2-recovery')).success).toBe(false);
+      expect(calls).toHaveLength(1);
+
+      const recoveryManager = new TournamentManager(config);
+      expect((await recoveryManager.runAllMatches('bo2-recovery')).success).toBe(true);
+      expect(calls).toHaveLength(2);
+      expect(calls.filter(matchId => matchId.endsWith('-g1'))).toHaveLength(1);
+      expect(calls.filter(matchId => matchId.endsWith('-g2'))).toHaveLength(1);
+
+      const recovered = (await crashRepository.load('bo2-recovery'))!;
+      const pairing = recovered.rounds[0]!.pairings[0]!;
+      expect(pairing.seriesProgress).toMatchObject({ format: 'bo2', bestOf: 2, nextGame: 3, winsA: 1, winsB: 1 });
+      expect(pairing.seriesProgress?.games).toHaveLength(2);
+      for (const game of pairing.seriesProgress!.games) {
+        expect(await crashRepository.loadMatchResult('bo2-recovery', game.matchId)).not.toBeNull();
+        expect(await crashRepository.loadReplay('bo2-recovery', game.matchId)).not.toBeNull();
+      }
+      expect(await crashRepository.loadMatchResult('bo2-recovery', pairing.matchId!)).not.toBeNull();
+      expect(await crashRepository.loadReplay('bo2-recovery', pairing.matchId!)).not.toBeNull();
+    } finally {
+      crashRepository.close();
+      await fs.rm(crashDir, { recursive: true, force: true });
+    }
   });
 });

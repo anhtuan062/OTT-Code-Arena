@@ -169,10 +169,10 @@ export interface MatchReplay {
     A?: ReplayParticipantIdentity;
     B?: ReplayParticipantIdentity;
   };
-  /** BO3 envelope; absent on historical BO1 replays. */
+  /** Multi-game envelope; absent on historical BO1 replays. */
   series?: {
-    format: 'bo3';
-    bestOf: 3;
+    format: 'bo3' | 'bo2';
+    bestOf: 3 | 2;
     seed: string;
     winsA: number;
     winsB: number;
@@ -233,3 +233,14 @@ export const DEFAULT_MATCH_CONFIG: MatchConfig = {
   logResponses: true,
   logStates: false,
 };
+
+/**
+ * Source revisions use the same minimum turn budget in matches and in
+ * preflight.  The minimum is part of the existing match policy: it covers
+ * Docker/runtime startup overhead without changing legacy-command behavior.
+ */
+export const SOURCE_REVISION_MIN_TURN_TIMEOUT_MS = 5_000;
+
+export function sourceRevisionTurnTimeoutMs(turnTimeoutMs = DEFAULT_MATCH_CONFIG.turnTimeoutMs): number {
+  return Math.max(turnTimeoutMs, SOURCE_REVISION_MIN_TURN_TIMEOUT_MS);
+}

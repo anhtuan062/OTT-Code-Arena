@@ -1,0 +1,27 @@
+.operations-page { max-width: 1280px; }
+.operations-header { display: flex; justify-content: space-between; gap: 24px; align-items: flex-start; margin-bottom: 22px; }
+.operations-header h1 { margin: 4px 0 6px; font-size: clamp(1.5rem, 3vw, 2rem); color: #12251b; }
+.eyebrow { margin: 0; color: #18804c; font-size: .72rem; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; }
+.operations-muted, .operations-note, .operations-empty { color: #64756b; }
+.operations-muted { margin: 0; font-size: .9rem; }
+.operations-updated { display: flex; align-items: center; gap: 8px; color: #64756b; font-size: .78rem; white-space: nowrap; padding-top: 8px; }
+.operations-status-dot { width: 9px; height: 9px; border-radius: 50%; background: #94a3b8; }
+.operations-status-dot.is-live { background: #16a34a; }
+.operations-status-dot.is-warning { background: #f59e0b; }
+.operations-warning, .operations-error { margin-bottom: 16px; padding: 12px 14px; border-radius: 10px; font-size: .86rem; }
+.operations-warning { color: #854d0e; background: #fef9c3; border: 1px solid #fde68a; }
+.operations-error { color: #991b1b; background: #fef2f2; border: 1px solid #fecaca; }
+.operations-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; margin-bottom: 14px; }
+.operations-grid-wide { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.operations-card { min-width: 0; padding: 18px; border: 1px solid #e2ebe5; border-radius: 14px; background: #fff; box-shadow: 0 2px 8px rgba(21, 54, 35, .04); }
+.operations-capacity-card { background: linear-gradient(135deg, #f3fbf5, #fff); }
+.operations-card-title { display: flex; align-items: center; justify-content: space-between; gap: 10px; color: #26372c; font-size: .88rem; font-weight: 750; }
+.ops-badge { padding: 4px 9px; border-radius: 999px; font-size: .72rem; font-weight: 750; white-space: nowrap; }
+.ops-badge-healthy { color: #166534; background: #dcfce7; }.ops-badge-recovery { color: #075985; background: #e0f2fe; }.ops-badge-constrained { color: #92400e; background: #fef3c7; }.ops-badge-critical { color: #991b1b; background: #fee2e2; }.ops-badge-muted { color: #64748b; background: #f1f5f9; }
+.operations-primary-value { margin: 18px 0 14px; color: #12251b; font-size: 1.5rem; font-weight: 800; }
+.operations-stat-pair { display: flex; gap: 32px; margin: 18px 0 12px; }.operations-stat-pair div { display: grid; gap: 3px; }.operations-stat-pair strong { color: #12251b; font-size: 1.45rem; }.operations-stat-pair span, .operations-muted-inline { color: #748278; font-size: .72rem; }
+.operations-note { margin: 7px 0 0; font-size: .8rem; line-height: 1.45; }.operations-note strong { color: #334e3d; }
+.operations-meter-row { display: flex; justify-content: space-between; margin-top: 10px; color: #64756b; font-size: .75rem; }.operations-meter-row strong { color: #26372c; }
+.operations-meter { height: 7px; margin-top: 5px; overflow: hidden; border-radius: 99px; background: #e6eee8; }.operations-meter span { display: block; width: 0; height: 100%; border-radius: inherit; background: #21a366; transition: width .25s ease; }
+.operations-card-icon { color: #21a366; font-size: 1rem; }.operations-tournaments-card { margin-bottom: 20px; }.operations-tournament-list { display: grid; gap: 8px; margin-top: 14px; }.operations-tournament-row { display: grid; grid-template-columns: minmax(150px, 1fr) 110px minmax(120px, 1.3fr); gap: 14px; align-items: center; padding: 11px 12px; border: 1px solid #edf2ee; border-radius: 9px; }.operations-tournament-name { overflow: hidden; color: #26372c; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }.operations-tournament-status { color: #64756b; font-size: .78rem; }.operations-progress { height: 7px; overflow: hidden; border-radius: 99px; background: #edf2ee; }.operations-progress span { display: block; height: 100%; border-radius: inherit; background: #36a269; }
+@media (max-width: 760px) { .operations-page { padding-bottom: 18px; }.operations-header { display: block; }.operations-header h1 { font-size: 1.7rem; line-height: 1.15; }.operations-muted { max-width: 42rem; line-height: 1.5; }.operations-updated { margin-top: 12px; }.operations-grid, .operations-grid-wide { grid-template-columns: 1fr; }.operations-card { padding: 16px; }.operations-tournament-row { grid-template-columns: 1fr; gap: 7px; }.operations-tournament-name { white-space: normal; overflow-wrap: anywhere; } }

@@ -49,9 +49,16 @@
 .bot-workspace-page .bot-editor-panel.is-expanded .source-code-layer { height: calc(100dvh - 170px); }
 .bot-workspace-page .bot-editor-panel.is-expanded .source-editor { height: 100% !important; }
 .bot-workspace-page .bot-editor-panel.is-expanded #source-expand { background: #176f4f; color: #fff; }
-.bot-workspace-page .source-editor-shell { border-radius: 0; }
+.bot-workspace-page .source-editor-shell {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+  align-items: stretch;
+  border-radius: 0;
+}
+.bot-workspace-page .source-code-layer { grid-column: 1; grid-row: 1; min-width: 0; min-height: 0; }
 .bot-workspace-page .source-editor { min-height: 340px; height: calc(100dvh - 365px); padding: 10px; border-radius: 0; font-size: .72rem; line-height: 1.5; }
-.bot-workspace-page .source-line-numbers { padding: 10px 7px; font-size: .68rem; line-height: 1.5; }
+.bot-workspace-page .source-line-numbers { padding: 10px 7px; font: .72rem/1.5 ui-monospace, SFMono-Regular, Consolas, monospace; }
 .bot-workspace-page .editor-footer { margin: 0; padding: 5px 8px; border: 1px solid #e1e7e2; border-top: 0; border-radius: 0 0 7px 7px; }
 .bot-workspace-page .editor-footer .field-help,
 .bot-workspace-page .editor-sandbox { font-size: .62rem; }

@@ -43,4 +43,38 @@ describe('LIVE.1H replay navigation lifecycle', () => {
     expect(streamSection).not.toContain('showLiveGameResultModal(snapshot)');
     expect(pollingSection).not.toContain('showLiveGameResultModal(snapshot)');
   });
+
+  it('falls back to spectator polling for multi-stage competitors and prevents duplicate timers', async () => {
+    const [app, tournaments] = await Promise.all([source('app.js'), source('js/tournaments.js')]);
+    expect(tournaments).toContain("state.spectatorMode = progress.status === 'running';");
+    expect(app).toContain('if (state.liveMatchPollingTimer) return;');
+    expect(app).toContain('context.spectator');
+    expect(app).toContain('/spectator/matches/${context.matchId}/live?ts=${Date.now()}');
+  });
+
+  it('closes the tiebreaker overlay before replay navigation and labels BO2 summaries correctly', async () => {
+    const app = await source('app.js');
+    expect(app).toContain("closeModal('tiebreaker-resolution-modal');");
+    expect(app).toContain('const seriesLabel = series.format?.toUpperCase()');
+    expect(app).toContain('renderReplaySummaryV2Base');
+    expect(app).toContain('Series ${seriesLabel}');
+  });
+
+  it('keeps live series names fixed while current game sides can swap', async () => {
+    const [app, spectator] = await Promise.all([source('app.js'), source('server/spectator.ts')]);
+    expect(spectator).toContain('winner: pairing.matchResult?.winner ?? null');
+    expect(app).toContain('currentParticipants:');
+    expect(app).toContain('winner: series.winner ?? null');
+    expect(app).toContain('replayParticipantName(currentParticipants, latestMovePlayer)');
+    expect(app).toContain('function replayMovePlayer(move)');
+    expect(app).toContain("move.pieceId.startsWith('A-')");
+    expect(app).toContain('updateReplaySeriesSideColors(');
+    expect(app).toContain('renderReplayPieceCounts(snapshot.state, {');
+    expect(app).toContain('A: currentSideAId === fixedAId ? \'A\' : \'B\'');
+    expect(app).toContain("currentMove?.classList.toggle('replay-current-move-a', latestMovePlayer === 'A')");
+    expect(app).toContain("currentMove?.classList.toggle('replay-current-move-b', latestMovePlayer === 'B')");
+    expect(app).toContain('const fixedActivePlayer = activeParticipantId === fixedAId');
+    expect(app).toContain('currentParticipants: frame.currentParticipants || latest.currentParticipants');
+    expect(app).toContain('currentParticipants: {');
+  });
 });

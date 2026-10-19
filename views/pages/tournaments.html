@@ -1,0 +1,17 @@
+<!-- TOURNAMENTS LIST -->
+  <div id="tournaments" class="page tournaments-page">
+    <div class="tournament-scope-tabs" id="tournament-scope-tabs" role="tablist" aria-label="Phạm vi giải đấu" hidden>
+      <button class="tournament-scope-tab active" id="tournament-tab-discoverable" type="button" role="tab" data-scope="discoverable" aria-selected="true">Giải đấu đang mở</button>
+      <button class="tournament-scope-tab" id="tournament-tab-mine" type="button" role="tab" data-scope="mine" aria-selected="false">Giải đấu của tôi</button>
+    </div>
+    <div class="tournament-toolbar" id="tournaments-toolbar" hidden>
+      <div class="tournament-toolbar-controls">
+        <label class="bot-search" for="tournament-search"><svg class="ui-icon search-icon" aria-hidden="true"><use href="#icon-search"></use></svg><span class="visually-hidden">Tìm giải đấu theo tên</span><input id="tournament-search" type="search" placeholder="Tìm giải đấu theo tên" autocomplete="off"></label>
+        <label class="tournament-filter" for="tournament-status-filter"><svg class="ui-icon" aria-hidden="true"><use href="#icon-filter"></use></svg><span class="visually-hidden">Lọc trạng thái</span><select id="tournament-status-filter" class="input-shell"><option value="all">Tất cả trạng thái</option><option value="draft">Bản nháp</option><option value="registration_open">Đang mở đăng ký</option><option value="registration_closed">Đã đóng đăng ký</option><option value="running">Đang diễn ra</option><option value="completed">Đã hoàn thành</option><option value="cancelled">Đã hủy</option></select></label>
+      </div>
+      <span id="tournaments-count" class="bots-count">Đang tải danh sách giải đấu</span>
+      <button class="primary-btn workspace-primary-action" id="open-tournament-modal" type="button"><svg class="ui-icon" aria-hidden="true"><use href="#icon-plus"></use></svg>Tạo giải đấu</button>
+    </div>
+    <section id="tournaments-list" class="tournament-grid" aria-live="polite" aria-label="Các giải đấu của bạn">
+    </section>
+  </div>

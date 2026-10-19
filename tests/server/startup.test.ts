@@ -146,7 +146,7 @@ describe('server startup', () => {
       const server = await startServer(0);
       expect(server.listening).toBe(true);
       await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
-      closeServer();
+      await closeServer();
     } finally {
       if (previousDataDir === undefined) delete process.env.TOURNAMENT_DATA_DIR;
       else process.env.TOURNAMENT_DATA_DIR = previousDataDir;
@@ -171,7 +171,7 @@ describe('server startup', () => {
       await startServer(0).then(server => new Promise<void>((resolve, reject) => {
         server.close(error => error ? reject(error) : resolve());
       }));
-      closeServer();
+      await closeServer();
       expect((await fs.stat(path.join(absoluteDir, 'arena.sqlite'))).isFile()).toBe(true);
       await fs.rm(absoluteDir, { recursive: true, force: true });
 
@@ -181,7 +181,7 @@ describe('server startup', () => {
         process.env.TOURNAMENT_DATA_DIR = invalidPath;
         await expect(startServer(0)).rejects.toThrow();
       } finally {
-        closeServer();
+        await closeServer();
         await fs.rm(invalidPath, { force: true });
       }
     } finally {
@@ -192,6 +192,81 @@ describe('server startup', () => {
       if (previousPolicy === undefined) delete process.env.EXECUTION_POLICY;
       else process.env.EXECUTION_POLICY = previousPolicy;
       await fs.rm(absoluteDir, { recursive: true, force: true });
+    }
+  }, 15_000);
+
+  it('F-01: fails startup on storage ownership contention before executing Docker orphan recovery or writing leases', async () => {
+    const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'ott-f01-startup-'));
+    const workDir = path.join(dataDir, '.source-execution');
+    const { StorageOwnership, StorageOwnershipError } = await import('../../tournament/ownership.js');
+
+    // Process A holds storage ownership
+    const storageOwnership = new StorageOwnership(dataDir);
+    await storageOwnership.acquire();
+
+    const previousDataDir = process.env.TOURNAMENT_DATA_DIR;
+    const previousNodeEnv = process.env.NODE_ENV;
+    const previousPolicy = process.env.EXECUTION_POLICY;
+    const previousSourceExec = process.env.ENABLE_SOURCE_REVISION_EXECUTION;
+    const previousWorkDir = process.env.BOT_EXECUTION_WORKDIR;
+    const previousBotImage = process.env.BOT_DOCKER_IMAGE;
+    const previousCppCompiler = process.env.BOT_CPP_COMPILER_IMAGE;
+    const previousCppRuntime = process.env.BOT_CPP_RUNTIME_IMAGE;
+    const previousPython3Runtime = process.env.BOT_PYTHON3_RUNTIME_IMAGE;
+    const previousTrustedRegistries = process.env.BOT_TRUSTED_IMAGE_REGISTRIES;
+
+    const digest = (name: string) => `ghcr.io/ott-code-arena/${name}@sha256:${'a'.repeat(64)}`;
+    process.env.TOURNAMENT_DATA_DIR = dataDir;
+    process.env.NODE_ENV = 'test';
+    process.env.EXECUTION_POLICY = 'sandbox-required';
+    process.env.ENABLE_SOURCE_REVISION_EXECUTION = 'true';
+    process.env.BOT_EXECUTION_WORKDIR = workDir;
+    process.env.BOT_DOCKER_IMAGE = digest('bot');
+    process.env.BOT_CPP_COMPILER_IMAGE = digest('cpp-compiler');
+    process.env.BOT_CPP_RUNTIME_IMAGE = digest('cpp-runtime');
+    process.env.BOT_PYTHON3_RUNTIME_IMAGE = digest('python3-runtime');
+    process.env.BOT_TRUSTED_IMAGE_REGISTRIES = 'ghcr.io';
+
+    try {
+      // Start server should fail because storage is already owned by storageOwnership
+      await expect(startServer(0)).rejects.toThrow(StorageOwnershipError);
+
+      // Verify that Docker ownership directory was NEVER created or populated with leases
+      const ownerLeaseDir = path.join(workDir, '.revision-owners');
+      let leaseExists = false;
+      try {
+        const files = await fs.readdir(ownerLeaseDir);
+        leaseExists = files.length > 0;
+      } catch {
+        leaseExists = false;
+      }
+      expect(leaseExists).toBe(false);
+    } finally {
+      await closeServer();
+      await storageOwnership.release();
+
+      if (previousDataDir === undefined) delete process.env.TOURNAMENT_DATA_DIR;
+      else process.env.TOURNAMENT_DATA_DIR = previousDataDir;
+      if (previousNodeEnv === undefined) delete process.env.NODE_ENV;
+      else process.env.NODE_ENV = previousNodeEnv;
+      if (previousPolicy === undefined) delete process.env.EXECUTION_POLICY;
+      else process.env.EXECUTION_POLICY = previousPolicy;
+      if (previousSourceExec === undefined) delete process.env.ENABLE_SOURCE_REVISION_EXECUTION;
+      else process.env.ENABLE_SOURCE_REVISION_EXECUTION = previousSourceExec;
+      if (previousWorkDir === undefined) delete process.env.BOT_EXECUTION_WORKDIR;
+      else process.env.BOT_EXECUTION_WORKDIR = previousWorkDir;
+      if (previousBotImage === undefined) delete process.env.BOT_DOCKER_IMAGE;
+      else process.env.BOT_DOCKER_IMAGE = previousBotImage;
+      if (previousCppCompiler === undefined) delete process.env.BOT_CPP_COMPILER_IMAGE;
+      else process.env.BOT_CPP_COMPILER_IMAGE = previousCppCompiler;
+      if (previousCppRuntime === undefined) delete process.env.BOT_CPP_RUNTIME_IMAGE;
+      else process.env.BOT_CPP_RUNTIME_IMAGE = previousCppRuntime;
+      if (previousPython3Runtime === undefined) delete process.env.BOT_PYTHON3_RUNTIME_IMAGE;
+      else process.env.BOT_PYTHON3_RUNTIME_IMAGE = previousPython3Runtime;
+      if (previousTrustedRegistries === undefined) delete process.env.BOT_TRUSTED_IMAGE_REGISTRIES;
+      else process.env.BOT_TRUSTED_IMAGE_REGISTRIES = previousTrustedRegistries;
+
+      await fs.rm(dataDir, { recursive: true, force: true });
     }
   }, 15_000);
 });

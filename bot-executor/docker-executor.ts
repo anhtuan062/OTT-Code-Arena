@@ -23,6 +23,7 @@ import type {
 } from './types.js';
 import { ExecutionCancelledError } from './types.js';
 import { validateDockerImage } from './image-config.js';
+import { DockerExecutionLimiter, globalDockerExecutionLimiter } from './docker-execution-limiter.js';
 
 interface DockerExecutorConfig extends ExecutorConfig {
   image: string;
@@ -31,6 +32,7 @@ interface DockerExecutorConfig extends ExecutorConfig {
   memoryLimit?: string;
   cpuLimit?: number;
   pidsLimit?: number;
+  dockerExecutionLimiter?: DockerExecutionLimiter;
 }
 
 interface RunningContainer {
@@ -53,6 +55,7 @@ export class DockerExecutor implements BotExecutor {
   private startingExecutions = new Set<string>();
   private pendingTerminations = new Set<string>();
   private dockerAvailable: boolean = false;
+  private readonly dockerExecutionLimiter: DockerExecutionLimiter;
 
   constructor(config: Partial<DockerExecutorConfig> = {}) {
     this.config = {
@@ -71,6 +74,7 @@ export class DockerExecutor implements BotExecutor {
       pidsLimit: 64,
       ...config,
     };
+    this.dockerExecutionLimiter = config.dockerExecutionLimiter ?? globalDockerExecutionLimiter;
   }
 
   getName(): string {
@@ -159,6 +163,7 @@ export class DockerExecutor implements BotExecutor {
     const requestJson = JSON.stringify(request);
     let runningContainer: RunningContainer | null = null;
     let cancelled = false;
+    let releasePermit: (() => void) | null = null;
     const abortHandler = () => {
       cancelled = true;
       if (runningContainer) void this.terminateRunningContainer(runningContainer);
@@ -172,10 +177,24 @@ export class DockerExecutor implements BotExecutor {
       if (cancelled || context.signal?.aborted) throw new ExecutionCancelledError();
 
       const dockerArgs = this.buildDockerArgs(executionId, processConfig, tempDir, requestJson);
-      const proc = spawn(this.config.dockerBinary!, dockerArgs, {
-        stdio: ['ignore', 'pipe', 'pipe'],
-        windowsHide: true,
-      } as SpawnOptionsWithoutStdio);
+      try {
+        releasePermit = await this.dockerExecutionLimiter.acquire(context.signal, `generic:${executionId}`);
+      } catch (error) {
+        this.startingExecutions.delete(executionId);
+        this.pendingTerminations.delete(executionId);
+        if (context.signal?.aborted) throw new ExecutionCancelledError();
+        throw error;
+      }
+      let proc: ReturnType<typeof spawn>;
+      try {
+        proc = spawn(this.config.dockerBinary!, dockerArgs, {
+          stdio: ['ignore', 'pipe', 'pipe'],
+          windowsHide: true,
+        } as SpawnOptionsWithoutStdio);
+      } catch (error) {
+        releasePermit();
+        throw error;
+      }
 
       runningContainer = {
         containerId: `ott-bot-${executionId}`,
@@ -236,9 +255,15 @@ export class DockerExecutor implements BotExecutor {
         proc.once('close', code => finish(code));
         proc.once('error', error => finish(-1, error));
       });
+      // Cleanup invokes docker kill/rm independently; do not hold the
+      // execution permit while waiting for those commands.
+      releasePermit?.();
+      releasePermit = null;
     } finally {
       this.startingExecutions.delete(executionId);
       this.pendingTerminations.delete(executionId);
+      releasePermit?.();
+      releasePermit = null;
       context.signal?.removeEventListener('abort', abortHandler);
       if (runningContainer) {
         clearTimeout(runningContainer.timeoutId);

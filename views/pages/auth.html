@@ -1,0 +1,737 @@
+<section id="auth-screen" class="page active" role="main" aria-labelledby="auth-title">
+  <!-- Glowing atmospheric gradients -->
+  <div class="landing-glow landing-glow-one" aria-hidden="true"></div>
+  <div class="landing-glow landing-glow-two" aria-hidden="true"></div>
+
+  <!-- Landing Header / Navbar -->
+  <header class="landing-navbar">
+    <div class="landing-container landing-navbar-inner">
+      <a href="#auth-screen" class="landing-brand" aria-label="Trang chủ OTT Code Arena">
+        <span class="landing-brand-icon">
+          <svg viewBox="0 0 40 40" fill="none" aria-hidden="true">
+            <rect width="40" height="40" rx="12" fill="url(#brandGradient)"/>
+            <path d="M11 13L17 20L11 27M20 27H29" stroke="white" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"/>
+            <defs>
+              <linearGradient id="brandGradient" x1="0" y1="0" x2="40" y2="40">
+                <stop stop-color="#167346"/>
+                <stop offset="1" stop-color="#0f5132"/>
+              </linearGradient>
+            </defs>
+          </svg>
+        </span>
+        <span class="landing-brand-name">OTT<span>ARENA</span></span>
+      </a>
+
+      <nav class="landing-nav-links" id="landingNavLinks" aria-label="Điều hướng trang chủ">
+        <a href="#landing-features">Tính năng</a>
+        <a href="#landing-rules">Luật đấu 9×9</a>
+        <a href="#landing-how-it-works">Cách chơi</a>
+      </nav>
+
+      <div class="landing-nav-actions">
+        <button type="button" class="landing-btn landing-btn-ghost" onclick="document.getElementById('show-login')?.click(); document.getElementById('auth-station')?.scrollIntoView({behavior:'smooth'});">
+          Đăng nhập
+        </button>
+        <button type="button" class="landing-btn landing-btn-primary" onclick="document.getElementById('show-register')?.click(); document.getElementById('auth-station')?.scrollIntoView({behavior:'smooth'});">
+          Tạo Bot đầu tiên <span aria-hidden="true">↗</span>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <!-- Hero Section -->
+  <section class="landing-hero landing-container">
+    <div class="landing-hero-content">
+      <div class="landing-eyebrow">
+        <span class="landing-status-dot"></span>
+        <span>ĐẤU TRƯỜNG BOT CHIẾN THUẬT THẾ HỆ MỚI</span>
+      </div>
+
+      <h1 class="landing-hero-title">
+        Tự tạo Bot của bạn.<br>
+        <span class="landing-gradient-text">Làm chủ đấu trường Kéo - Búa - Bao.</span>
+      </h1>
+
+      <p class="landing-hero-desc">
+        Biến những dòng mã C++17 và Python 3 thành chiến thuật đỉnh cao trên bàn cờ 9×9.
+        Thử sức cùng bot của các lập trình viên khác, kiểm soát thế trận và bước lên đỉnh vinh quang.
+      </p>
+
+      <div class="landing-hero-actions">
+        <button type="button" class="landing-btn landing-btn-primary landing-btn-large" onclick="document.getElementById('show-register')?.click(); document.getElementById('auth-station')?.scrollIntoView({behavior:'smooth'});">
+          Vào đấu trường ngay
+          <span class="button-arrow">→</span>
+        </button>
+
+        <a href="#landing-rules" class="landing-btn landing-btn-secondary landing-btn-large">
+          <span class="play-icon">▶</span>
+          Khám phá luật chơi 9×9
+        </a>
+      </div>
+
+      <div class="landing-hero-trust">
+        <div class="landing-avatar-stack" aria-hidden="true">
+          <span class="landing-mini-avatar avatar-green">O</span>
+          <span class="landing-mini-avatar avatar-purple">C</span>
+          <span class="landing-mini-avatar avatar-blue">P</span>
+          <span class="landing-mini-avatar avatar-orange">A</span>
+        </div>
+        <div class="landing-trust-copy">
+          <div class="landing-trust-stars">★★★★★</div>
+          <p>Dành cho những người ham học hỏi và đam mê lập trình đấu trí</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Battle illustration preview card -->
+    <div class="landing-hero-visual" id="landing-arena-preview" aria-label="Xem trước trận đấu">
+      <div class="visual-orbit orbit-one" aria-hidden="true"></div>
+      <div class="visual-orbit orbit-two" aria-hidden="true"></div>
+
+      <div class="floating-chip chip-top">
+        <span class="chip-icon green-icon">✦</span>
+        <span>
+          <strong>Chiến thuật khôn ngoan</strong>
+          <small>Mỗi nước đi đều quyết định</small>
+        </span>
+      </div>
+
+      <div class="landing-battle-card">
+        <div class="battle-card-header">
+          <div class="battle-live-status">
+            <span class="live-indicator"></span>
+            <span class="battle-label">TRẬN ĐẤU ĐANG DIỄN RA</span>
+          </div>
+          <span class="round-label">LƯỢT 04</span>
+        </div>
+
+        <div class="battle-arena">
+          <div class="battle-side">
+            <div class="bot-avatar bot-green">
+              <svg viewBox="0 0 100 100" fill="none" aria-hidden="true">
+                <rect x="20" y="27" width="60" height="49" rx="16" fill="#D6F2E2"/>
+                <rect x="28" y="35" width="44" height="32" rx="10" fill="#167346"/>
+                <circle cx="41" cy="49" r="5" fill="white"/>
+                <circle cx="59" cy="49" r="5" fill="white"/>
+                <path d="M42 59H58" stroke="white" stroke-width="3" stroke-linecap="round"/>
+                <path d="M50 27V17M43 17H57" stroke="#167346" stroke-width="4" stroke-linecap="round"/>
+                <rect x="12" y="43" width="8" height="18" rx="4" fill="#69C293"/>
+                <rect x="80" y="43" width="8" height="18" rx="4" fill="#69C293"/>
+                <rect x="33" y="75" width="12" height="9" rx="4" fill="#167346"/>
+                <rect x="55" y="75" width="12" height="9" rx="4" fill="#167346"/>
+              </svg>
+            </div>
+            <strong class="bot-name">NOVA.cpp</strong>
+            <span class="bot-type">Bot kiểm soát bàn cờ</span>
+            <div class="health-bar"><span class="health-green"></span></div>
+            <span class="health-label">Quân cờ <b>09</b></span>
+          </div>
+
+          <div class="battle-versus">
+            <span>VS</span>
+            <div class="versus-line"></div>
+          </div>
+
+          <div class="battle-side">
+            <div class="bot-avatar bot-cyan">
+              <svg viewBox="0 0 100 100" fill="none" aria-hidden="true">
+                <path d="M50 13L84 33V68L50 88L16 68V33L50 13Z" fill="#C8F5F2"/>
+                <path d="M50 22L75 37V64L50 79L25 64V37L50 22Z" fill="#0d9488"/>
+                <rect x="32" y="39" width="36" height="25" rx="8" fill="#E4FFFC"/>
+                <circle cx="42" cy="50" r="4" fill="#0f766e"/>
+                <circle cx="58" cy="50" r="4" fill="#0f766e"/>
+                <path d="M43 59H57" stroke="#0f766e" stroke-width="3" stroke-linecap="round"/>
+                <path d="M50 22V12M44 12H56" stroke="#0d9488" stroke-width="4" stroke-linecap="round"/>
+                <path d="M26 69L20 77M74 69L80 77" stroke="#0d9488" stroke-width="5" stroke-linecap="round"/>
+              </svg>
+            </div>
+            <strong class="bot-name">TITAN.py</strong>
+            <span class="bot-type">Aggressive AI</span>
+            <div class="health-bar"><span class="health-cyan"></span></div>
+            <span class="health-label">Quân cờ <b>09</b></span>
+          </div>
+        </div>
+
+        <div class="battle-divider"></div>
+
+        <div class="battle-card-footer">
+          <div class="battle-status">
+            <span class="status-pulse"></span>
+            <span>Trận đấu đang diễn ra</span>
+          </div>
+          <div class="battle-timer">
+            <span class="timer-icon">◷</span>
+            <span>02:41</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="floating-chip chip-bottom">
+        <span class="chip-icon gold-icon">↗</span>
+        <span>
+          <strong>+240 Điểm Elo</strong>
+          <small>Phần thưởng chiến thắng</small>
+        </span>
+      </div>
+
+      <div class="decorative-spark spark-one" aria-hidden="true">✳</div>
+      <div class="decorative-spark spark-two" aria-hidden="true">✦</div>
+    </div>
+  </section>
+
+  <!-- Interactive Auth Station (Code showcase + Login/Register Forms) -->
+  <section class="landing-auth-station landing-container" id="auth-station">
+    <div class="landing-auth-grid">
+      <div class="auth-system-panel" aria-label="Tổng quan nền tảng">
+        <div class="auth-system-kicker"><span class="auth-system-dot"></span>OTT CODE ARENA</div>
+        <h1>Viết Bot.<br><span>Luyện tập. Thi đấu.</span></h1>
+        <p class="auth-system-intro">Nền tảng để học sinh xây dựng chiến thuật, chạy thử mã nguồn và tham gia các giải đấu lập trình.</p>
+        <div class="auth-code-preview" aria-label="Ví dụ mã nguồn Bot">
+          <div class="auth-code-preview-header"><span>bot.cpp</span><span>C++17</span></div>
+          <pre><code><span class="auth-code-muted">Move</span> <span class="auth-code-accent">chooseMove</span>(<span class="auth-code-muted">const GameState</span>&amp; state, <span class="auth-code-muted">const vector&lt;Move&gt;</span>&amp; legalMoves) {
+  <span class="auth-code-comment">// Chọn nước đi hợp lệ cho Bot</span>
+  <span class="auth-code-keyword">return</span> legalMoves.front();
+}</code></pre>
+          <p><span aria-hidden="true">✓</span> Chạy thử trong Sandbox trước khi tham gia giải đấu</p>
+        </div>
+        <div class="auth-system-board" aria-hidden="true"><span class="board-piece board-piece-a"></span><span class="board-piece board-piece-b"></span></div>
+        <div class="auth-system-facts">
+          <div><strong>C++17 · Python 3</strong><span>Viết hàm chiến thuật `chooseMove`</span></div>
+          <div><strong>Sandbox an toàn</strong><span>Chạy thử Bot trước khi đăng ký giải đấu</span></div>
+          <div><strong>Giải đấu 9×9</strong><span>Theo dõi trận đấu và xem lại kết quả</span></div>
+        </div>
+      </div>
+
+      <!-- Visual Strategy Code Showcase -->
+      <div class="landing-strategy-showcase">
+        <div class="strategy-badge">
+          <span class="visual-badge-dot"></span>
+          ĐẤU TRƯỜNG ĐANG CHỜ BẠN
+        </div>
+
+        <h2>
+          Nghĩ chiến thuật.<br>
+          <span class="landing-gradient-text">Lập trình sắc bén.</span><br>
+          Chinh phục đấu trường.
+        </h2>
+
+        <p class="strategy-desc">
+          Tạo bot thông minh, so tài cùng những đối thủ đáng gờm
+          và biến chiến thuật của bạn thành chiến thắng vang dội.
+        </p>
+
+        <!-- Code Preview Card -->
+        <div class="strategy-code-card">
+          <div class="strategy-code-header">
+            <div class="showcase-dots" aria-hidden="true">
+              <span></span>
+              <span></span>
+              <span></span>
+            </div>
+            <span class="showcase-file">strategy.cpp</span>
+            <span class="showcase-live">● SANDBOX READY</span>
+          </div>
+
+          <div class="strategy-code-body">
+            <div><span class="code-line-number">01</span> <span class="code-keyword">#include</span> <span class="code-string">&lt;ott_arena.hpp&gt;</span></div>
+            <div><span class="code-line-number">02</span> <span class="code-keyword">Move</span> <span class="code-func">chooseMove</span>(<span class="code-type">const GameState</span>&amp; state, <span class="code-type">const vector&lt;Move&gt;</span>&amp; legal) {</div>
+            <div><span class="code-line-number">03</span> &nbsp;&nbsp;<span class="code-comment">// Tìm nước đi tối ưu bắt quân hoặc chiếm căn cứ</span></div>
+            <div><span class="code-line-number">04</span> &nbsp;&nbsp;<span class="code-keyword">return</span> legal[<span class="code-number">0</span>];</div>
+            <div><span class="code-line-number">05</span> }</div>
+            <div class="code-output">
+              <span class="output-check">✓</span>
+              Chiến thuật đã sẵn sàng. Bắt đầu so tài!
+            </div>
+          </div>
+        </div>
+
+        <div class="strategy-chips">
+          <div class="mini-stat-chip">
+            <span class="mini-stat-icon">⚡</span>
+            <div>
+              <strong>Chiến thuật sắc bén</strong>
+              <span>Không chỉ là những dòng mã</span>
+            </div>
+          </div>
+          <div class="mini-stat-chip">
+            <span class="mini-stat-icon">🏆</span>
+            <div>
+              <strong>Chiến thắng tiếp theo</strong>
+              <span>Bắt đầu từ một nước đi</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Functional Auth Card -->
+      <div class="auth-card" id="auth-form-card">
+        <div class="auth-branding">
+          <div class="auth-logo" aria-label="OTT Code Arena Logo">
+            <svg viewBox="0 0 48 48" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="OTT Code Arena Logo">
+              <circle cx="24" cy="24" r="23" fill="currentColor" class="logo-circle"/>
+              <text x="24" y="32" text-anchor="middle" font-family="Be Vietnam Pro, sans-serif" font-size="18" font-weight="700" fill="white">O</text>
+            </svg>
+          </div>
+          <div class="brand-text">
+            <h2>OTT Code Arena</h2>
+            <p class="brand-tagline">Học, luyện tập và thi đấu lập trình Bot</p>
+          </div>
+        </div>
+
+        <div class="auth-tabs" role="tablist" aria-label="Chuyển chế độ đăng nhập hoặc đăng ký">
+          <button type="button" class="auth-tab-btn active" id="tab-login">Đăng nhập</button>
+          <button type="button" class="auth-tab-btn" id="tab-register">Tạo tài khoản</button>
+        </div>
+
+        <div class="auth-forms-wrapper">
+          <!-- Form Đăng Nhập -->
+          <form id="login-form" class="auth-form active-form" novalidate>
+            <div class="form-header">
+              <h2 id="auth-title">Đăng nhập</h2>
+              <p class="form-description">Chào mừng trở lại! Đăng nhập để tiếp tục hành trình.</p>
+            </div>
+            
+            <div class="form-fields">
+              <div class="form-group">
+                <label for="login-username" class="required-field">Tên người dùng</label>
+                <div class="input-wrapper">
+                  <div class="input-icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                      <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
+                      <circle cx="12" cy="7" r="4"></circle>
+                    </svg>
+                  </div>
+                  <input 
+                    id="login-username" 
+                    type="text" 
+                    required 
+                    autocomplete="username"
+                    aria-invalid="false"
+                    placeholder="Nhập tên người dùng của bạn"
+                  >
+                </div>
+              </div>
+              
+              <div class="form-group">
+                <label for="login-password" class="required-field">Mật khẩu</label>
+                <div class="input-wrapper password-input-wrapper">
+                  <div class="input-icon password-icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                      <rect x="4" y="10" width="16" height="11" rx="2"></rect>
+                      <path d="M8 10V7a4 4 0 0 1 8 0v3"></path>
+                      <circle cx="12" cy="15.5" r="1"></circle>
+                    </svg>
+                  </div>
+                  <input 
+                    id="login-password" 
+                    type="password" 
+                    required 
+                    autocomplete="current-password"
+                    aria-invalid="false"
+                    aria-describedby="login-password-toggle"
+                    placeholder="Nhập mật khẩu của bạn"
+                  >
+                  <button 
+                    type="button" 
+                    id="login-password-toggle" 
+                    class="password-toggle-btn"
+                    aria-label="Hiển thị mật khẩu"
+                    aria-controls="login-password"
+                    aria-expanded="false"
+                  >
+                    <svg class="eye-icon" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                      <path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0"></path>
+                      <circle cx="12" cy="12" r="3"></circle>
+                    </svg>
+                    <svg class="eye-slash-icon hidden" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                      <path d="M10.733 5.076a10.744 10.744 0 0 1 11.205 6.575 1 1 0 0 1 0 .696 10.8 10.8 0 0 1-1.444 2.49"></path>
+                      <path d="M14.084 14.158a3 3 0 0 1-4.242-4.242"></path>
+                      <path d="M17.479 17.499A10.75 10.75 0 0 1 2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 4.446-5.143"></path>
+                      <path d="m2 2 20 20"></path>
+                    </svg>
+                  </button>
+                </div>
+              </div>
+            </div>
+            <p id="login-form-message" class="form-message" role="alert" aria-live="polite" hidden></p>
+            
+            <div class="form-actions">
+              <button id="login-submit" class="primary-btn" type="submit">
+                <span class="btn-text">Đăng nhập</span>
+                <span class="btn-loading hidden">
+                  <svg class="spinner" viewBox="0 0 24 24">
+                    <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"></circle>
+                    <path fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                  </svg>
+                </span>
+              </button>
+            </div>
+            <div class="auth-switch">
+              <p>Chưa có tài khoản OTT Code Arena? 
+                <button id="show-register" class="text-link" type="button">Tạo tài khoản ngay</button>
+              </p>
+            </div>
+          </form>
+
+          <!-- Form Đăng Ký -->
+          <form id="register-form" class="auth-form" novalidate hidden>
+            <div class="form-header">
+              <h2 id="register-title">Tạo tài khoản</h2>
+              <p class="form-description">Tạo tài khoản để xây dựng Bot và tham gia các giải đấu.</p>
+            </div>
+            
+            <div class="form-fields">
+              <div class="form-group">
+                <label for="register-username" class="required-field">Tên người dùng</label>
+                <div class="input-wrapper">
+                  <div class="input-icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                      <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
+                      <circle cx="12" cy="7" r="4"></circle>
+                    </svg>
+                  </div>
+                  <input 
+                    id="register-username" 
+                    type="text" 
+                    required 
+                    minlength="3" 
+                    maxlength="32" 
+                    autocomplete="username"
+                    aria-invalid="false"
+                    placeholder="Chọn tên người dùng (3-32 ký tự)"
+                  >
+                </div>
+              </div>
+              
+              <div class="form-group">
+                <label for="register-password" class="required-field">Mật khẩu</label>
+                <div class="input-wrapper password-input-wrapper">
+                  <div class="input-icon password-icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                      <rect x="4" y="10" width="16" height="11" rx="2"></rect>
+                      <path d="M8 10V7a4 4 0 0 1 8 0v3"></path>
+                      <circle cx="12" cy="15.5" r="1"></circle>
+                    </svg>
+                  </div>
+                  <input 
+                    id="register-password" 
+                    type="password" 
+                    required 
+                    minlength="12" 
+                    maxlength="128" 
+                    autocomplete="new-password"
+                    aria-invalid="false"
+                    aria-describedby="register-password-toggle"
+                    placeholder="Tạo mật khẩu mạnh (tối thiểu 12 ký tự)"
+                  >
+                  <button 
+                    type="button" 
+                    id="register-password-toggle" 
+                    class="password-toggle-btn"
+                    aria-label="Hiển thị mật khẩu"
+                    aria-controls="register-password"
+                    aria-expanded="false"
+                  >
+                    <svg class="eye-icon" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                      <path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0"></path>
+                      <circle cx="12" cy="12" r="3"></circle>
+                    </svg>
+                    <svg class="eye-slash-icon hidden" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                      <path d="M10.733 5.076a10.744 10.744 0 0 1 11.205 6.575 1 1 0 0 1 0 .696 10.8 10.8 0 0 1-1.444 2.49"></path>
+                      <path d="M14.084 14.158a3 3 0 0 1-4.242-4.242"></path>
+                      <path d="M17.479 17.499A10.75 10.75 0 0 1 2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 4.446-5.143"></path>
+                      <path d="m2 2 20 20"></path>
+                    </svg>
+                  </button>
+                </div>
+              </div>
+            </div>
+            <p id="register-form-message" class="form-message" role="alert" aria-live="polite" hidden></p>
+            
+            <div class="form-actions">
+              <button id="register-submit" class="primary-btn" type="submit">
+                <span class="btn-text">Tạo tài khoản</span>
+                <span class="btn-loading hidden">
+                  <svg class="spinner" viewBox="0 0 24 24">
+                    <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"></circle>
+                    <path fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                  </svg>
+                </span>
+              </button>
+            </div>
+            <div class="auth-switch">
+              <p>Đã có tài khoản? 
+                <button id="show-login" class="text-link" type="button">Đăng nhập ngay</button>
+              </p>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Statistics Strip -->
+  <section class="landing-stats-section landing-container" aria-label="Điểm nổi bật của nền tảng">
+    <div class="landing-stats-card">
+      <div class="landing-stat-item">
+        <div class="stat-icon-wrap icon-purple">⌘</div>
+        <div>
+          <div class="landing-stat-value">Mã của bạn</div>
+          <div class="landing-stat-label">Chiến thuật do chính bạn quyết định</div>
+        </div>
+      </div>
+
+      <div class="stat-divider" aria-hidden="true"></div>
+
+      <div class="landing-stat-item">
+        <div class="stat-icon-wrap icon-cyan">⚔</div>
+        <div>
+          <div class="landing-stat-value">1 vs 1</div>
+          <div class="landing-stat-label">Đấu bot trực tiếp trên bàn cờ 9×9</div>
+        </div>
+      </div>
+
+      <div class="stat-divider" aria-hidden="true"></div>
+
+      <div class="landing-stat-item">
+        <div class="stat-icon-wrap icon-gold">♛</div>
+        <div>
+          <div class="landing-stat-value">Vươn lên dẫn đầu</div>
+          <div class="landing-stat-label">So tài cùng cộng đồng &amp; tính điểm Elo</div>
+        </div>
+      </div>
+
+      <div class="stat-divider" aria-hidden="true"></div>
+
+      <div class="landing-stat-item">
+        <div class="stat-icon-wrap icon-green">✧</div>
+        <div>
+          <div class="landing-stat-value">Không ngừng tiến bộ</div>
+          <div class="landing-stat-label">Replay phân tích sau mỗi trận</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Rules Section: Kéo - Búa - Bao trên bàn cờ 9x9 -->
+  <section class="landing-rules-section landing-container" id="landing-rules">
+    <div class="landing-section-heading">
+      <span class="landing-section-kicker">CƠ CHẾ ĐẤU TRƯỜNG</span>
+      <h2>Luật chơi Kéo · Búa · Bao trên bàn cờ 9×9</h2>
+      <p>Luật chơi kinh điển được tái hiện dưới hình thức chiến thuật đối kháng bàn cờ hiện đại.</p>
+    </div>
+
+    <div class="landing-rules-grid">
+      <div class="rule-card">
+        <div class="rule-icon-circle keo-circle">✌</div>
+        <h3>Quân KÉO</h3>
+        <p class="rule-relation">Thắng <strong>Bao</strong> · Thua <strong>Búa</strong></p>
+        <p class="rule-desc">Cắt xuyên phòng tuyến Bao của đối thủ. Di chuyển chiến lược để khóa chặt quân địch.</p>
+      </div>
+
+      <div class="rule-card">
+        <div class="rule-icon-circle bua-circle">✊</div>
+        <h3>Quân BÚA</h3>
+        <p class="rule-relation">Thắng <strong>Kéo</strong> · Thua <strong>Bao</strong></p>
+        <p class="rule-desc">Lực lượng công phá mạnh mẽ, khắc chế hoàn toàn quân Kéo và mở đường tiến công.</p>
+      </div>
+
+      <div class="rule-card">
+        <div class="rule-icon-circle bao-circle">✋</div>
+        <h3>Quân BAO</h3>
+        <p class="rule-relation">Thắng <strong>Búa</strong> · Thua <strong>Kéo</strong></p>
+        <p class="rule-desc">Bao bọc và vô hiệu hóa Búa đối phương, là chìa khóa bọc lót quan trọng trong đội hình.</p>
+      </div>
+    </div>
+
+    <div class="rules-win-conditions">
+      <div class="win-card">
+        <span class="win-badge">ĐIỀU KIỆN THẮNG 1</span>
+        <h4>Tiêu diệt toàn bộ quân địch</h4>
+        <p>Bắt hết toàn bộ 9 quân cờ của đối thủ trên bàn đấu thông qua các nước đi hợp lệ.</p>
+      </div>
+      <div class="win-card">
+        <span class="win-badge">ĐIỀU KIỆN THẮNG 2</span>
+        <h4>Xâm nhập căn cứ (Home Base)</h4>
+        <p>Đưa bất kỳ quân cờ nào của bạn tiến vào ô căn cứ đối phương để giành chiến thắng knock-out tức thì!</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- Features Section -->
+  <section class="landing-features-section landing-container" id="landing-features">
+    <div class="landing-section-heading">
+      <span class="landing-section-kicker">DÀNH CHO LẬP TRÌNH VIÊN</span>
+      <h2>Mã nguồn tạo nên bot.<br><span class="landing-gradient-text">Chiến thuật tạo nên khác biệt.</span></h2>
+      <p>Mọi công cụ bạn cần để xây dựng bot, so tài và liên tục hoàn thiện lối chơi.</p>
+    </div>
+
+    <div class="landing-features-grid">
+      <article class="landing-feature-card">
+        <div class="feature-icon-box icon-purple">
+          <svg viewBox="0 0 48 48" fill="none" aria-hidden="true">
+            <rect x="8" y="10" width="32" height="28" rx="8" stroke="currentColor" stroke-width="2.5"/>
+            <path d="M17 20L22 24L17 28M26 28H32" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+            <path d="M24 10V5M19 5H29" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/>
+          </svg>
+        </div>
+        <span class="feature-index">01 / SÁNG TẠO</span>
+        <h3>Tạo bot theo cách của bạn</h3>
+        <p>Hiện thực hóa ý tưởng với C++17 và Python 3. Tự viết hàm chọn nước đi thông minh và quản lý các phiên bản mã nguồn bất biến.</p>
+        <button type="button" class="landing-feature-link" onclick="document.getElementById('show-register')?.click(); document.getElementById('auth-station')?.scrollIntoView({behavior:'smooth'});">
+          Bắt đầu tạo bot <span>→</span>
+        </button>
+      </article>
+
+      <article class="landing-feature-card highlight-card">
+        <div class="feature-icon-box icon-cyan">
+          <svg viewBox="0 0 48 48" fill="none" aria-hidden="true">
+            <path d="M24 5L29 17L42 18L32 27L35 40L24 33L13 40L16 27L6 18L19 17L24 5Z" stroke="currentColor" stroke-width="2.5" stroke-linejoin="round"/>
+            <path d="M24 15L27 22L34 23L29 28L30 34L24 31L18 34L19 28L14 23L21 22L24 15Z" fill="currentColor" opacity=".22"/>
+          </svg>
+        </div>
+        <span class="feature-index">02 / SO TÀI</span>
+        <h3>Đưa bot vào giải đấu</h3>
+        <p>Gửi yêu cầu tham gia giải đấu phù hợp và theo dõi các trận đấu khi giải được tổ chức.</p>
+        <button type="button" class="landing-feature-link" onclick="document.getElementById('show-register')?.click(); document.getElementById('auth-station')?.scrollIntoView({behavior:'smooth'});">
+          Khám phá giải đấu <span>→</span>
+        </button>
+      </article>
+
+      <article class="landing-feature-card">
+        <div class="feature-icon-box icon-green">
+          <svg viewBox="0 0 48 48" fill="none" aria-hidden="true">
+            <path d="M9 39V25H19V39M29 39V15H39V39M19 39V8H29V39" stroke="currentColor" stroke-width="2.5" stroke-linejoin="round"/>
+            <path d="M7 39H41" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/>
+            <path d="M24 15L27 21H21L24 15Z" fill="currentColor"/>
+          </svg>
+        </div>
+        <span class="feature-index">03 / TIẾN BỘ</span>
+        <h3>Học hỏi &amp; Nâng cấp</h3>
+        <p>Xem lại replay chi tiết từng ván đấu, phân tích nước đi sai lầm và thử nghiệm với bot mẫu cố định trong Sandbox an toàn trước khi vào giải.</p>
+        <button type="button" class="landing-feature-link" onclick="document.getElementById('show-register')?.click(); document.getElementById('auth-station')?.scrollIntoView({behavior:'smooth'});">
+          Bắt đầu so tài <span>→</span>
+        </button>
+      </article>
+    </div>
+  </section>
+
+  <!-- How It Works (3 Steps) -->
+  <section class="landing-workflow-section" id="landing-how-it-works">
+    <div class="landing-container landing-workflow-layout">
+      <div class="landing-workflow-intro">
+        <span class="landing-section-kicker">BẮT ĐẦU THẬT DỄ DÀNG</span>
+        <h2>Ba bước đơn giản.<br><span class="landing-gradient-text">Thỏa sức sáng tạo.</span></h2>
+        <p>Tạo tài khoản, xây dựng bot và để chiến thuật của bạn chứng minh năng lực lập trình.</p>
+
+        <button type="button" class="landing-btn landing-btn-primary landing-btn-large" onclick="document.getElementById('show-register')?.click(); document.getElementById('auth-station')?.scrollIntoView({behavior:'smooth'});">
+          Tạo tài khoản miễn phí <span class="button-arrow">→</span>
+        </button>
+      </div>
+
+      <div class="landing-workflow-steps">
+        <article class="workflow-step-card">
+          <div class="step-badge">01</div>
+          <div class="step-text">
+            <h3>Tạo tài khoản</h3>
+            <p>Đăng ký tài khoản để bắt đầu xây dựng Bot và tham gia các hoạt động trên nền tảng.</p>
+          </div>
+          <div class="step-icon-status">✓</div>
+        </article>
+
+        <article class="workflow-step-card">
+          <div class="step-badge">02</div>
+          <div class="step-text">
+            <h3>Xây dựng &amp; Chạy thử</h3>
+            <p>Lập trình bot bằng C++17 hoặc Python 3, kiểm thử chiến thuật ngay trong Docker Sandbox.</p>
+          </div>
+          <div class="step-icon-status">⌘</div>
+        </article>
+
+        <article class="workflow-step-card">
+          <div class="step-badge">03</div>
+          <div class="step-text">
+            <h3>Bước vào giải đấu</h3>
+            <p>Gửi yêu cầu tham gia giải đấu, theo dõi trạng thái đăng ký và xem kết quả trận đấu.</p>
+          </div>
+          <div class="step-icon-status">↗</div>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <!-- CTA Section -->
+  <section class="landing-cta-section landing-container">
+    <div class="landing-cta-card">
+      <div class="cta-decoration-circle circle-one" aria-hidden="true"></div>
+      <div class="cta-decoration-circle circle-two" aria-hidden="true"></div>
+
+      <div class="landing-cta-content">
+        <span class="landing-cta-kicker">✦ THỬ THÁCH TIẾP THEO BẮT ĐẦU TỪ ĐÂY</span>
+        <h2>Sẵn sàng thử sức với chính bot của bạn?</h2>
+        <p>Trận đấu đầu tiên chỉ là khởi đầu. Hãy tạo một bot thật khôn ngoan và xem chiến thuật của bạn tiến xa đến đâu!</p>
+        <button type="button" class="landing-btn landing-btn-white landing-btn-large" onclick="document.getElementById('show-register')?.click(); document.getElementById('auth-station')?.scrollIntoView({behavior:'smooth'});">
+          Tham gia đấu trường ngay <span class="button-arrow">→</span>
+        </button>
+      </div>
+
+      <div class="landing-cta-graphic" aria-hidden="true">
+        <div class="cta-ring ring-one"></div>
+        <div class="cta-ring ring-two"></div>
+        <div class="cta-core">OTT<span>ARENA</span></div>
+        <span class="cta-sparkle spark-one">✦</span>
+        <span class="cta-sparkle spark-two">✳</span>
+        <span class="cta-sparkle spark-three">✧</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- Landing Footer -->
+  <footer class="landing-footer">
+    <div class="landing-container landing-footer-main">
+      <div class="landing-footer-brand">
+        <a href="#auth-screen" class="landing-brand">
+          <span class="landing-brand-icon">
+            <svg viewBox="0 0 40 40" fill="none" aria-hidden="true">
+              <rect width="40" height="40" rx="12" fill="url(#footerBrandGrad)"/>
+              <path d="M11 13L17 20L11 27M20 27H29" stroke="white" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"/>
+              <defs>
+                <linearGradient id="footerBrandGrad" x1="0" y1="0" x2="40" y2="40">
+                  <stop stop-color="#167346"/>
+                  <stop offset="1" stop-color="#0f5132"/>
+                </linearGradient>
+              </defs>
+            </svg>
+          </span>
+          <span class="landing-brand-name">OTT<span>ARENA</span></span>
+        </a>
+        <p>Nơi hội tụ của lập trình, sáng tạo và những màn đấu trí Kéo - Búa - Bao hấp dẫn.</p>
+      </div>
+
+      <div class="landing-footer-columns">
+        <div class="footer-col">
+          <h4>Khám phá</h4>
+          <a href="#landing-features">Tính năng</a>
+          <a href="#landing-rules">Luật đấu 9×9</a>
+          <a href="#landing-how-it-works">Cách chơi</a>
+        </div>
+        <div class="footer-col">
+          <h4>Tài khoản</h4>
+          <a href="#auth-station" onclick="document.getElementById('show-login')?.click();">Đăng nhập</a>
+          <a href="#auth-station" onclick="document.getElementById('show-register')?.click();">Tạo tài khoản</a>
+        </div>
+        <div class="footer-col">
+          <h4>Nền tảng</h4>
+          <a href="#landing-features">C++17 &amp; Python 3</a>
+          <a href="#landing-features">Docker Sandbox</a>
+          <a href="#landing-features">Live Match &amp; Replay</a>
+        </div>
+      </div>
+    </div>
+
+    <div class="landing-container landing-footer-bottom">
+      <span>© 2026 OTT Code Arena. All rights reserved.</span>
+      <span>Dành cho những tâm hồn đam mê sáng tạo &amp; so tài thuật toán ♥</span>
+    </div>
+  </footer>
+</section>

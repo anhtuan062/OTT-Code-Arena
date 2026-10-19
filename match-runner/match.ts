@@ -18,6 +18,7 @@ import {
   Player,
   ExecutionProvenance,
   DEFAULT_MATCH_CONFIG,
+  sourceRevisionTurnTimeoutMs,
 } from './types.js';
 import type { GameState, MoveOption, ApplyResult, GameConfig } from '@engine/types.js';
 import type { BotError } from '@bot-protocol/types.js';
@@ -163,7 +164,7 @@ export class MatchRunner {
         // Python the same 5-second turn budget so runtime startup and SDK
         // loading do not cause avoidable timeouts.
         timeoutMs: botDef.execution?.kind === 'source-revision'
-          ? Math.max(this.config.turnTimeoutMs, 5_000)
+          ? sourceRevisionTurnTimeoutMs(this.config.turnTimeoutMs)
           : this.config.turnTimeoutMs,
         signal,
         revisionScopeId: this.config.matchId,

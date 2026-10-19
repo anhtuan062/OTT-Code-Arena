@@ -6,13 +6,17 @@
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {
-    "build": "tsc && tsc-alias",
+    "build": "node scripts/build-html.js && node scripts/build-frontend.js && tsc && tsc-alias --resolve-full-paths",
+    "build:html": "node scripts/build-html.js",
+    "build:frontend": "node scripts/build-frontend.js",
     "start": "node dist/server/index.js",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "lint": "eslint . --ext .ts",
+    "predev": "node scripts/build-html.js",
     "dev": "tsx watch server/index.ts",
+    "dev:qa": "node scripts/build-html.js && tsx scripts/start-qa-server.ts",
     "engine:test": "vitest run tests/engine"
   },
   "keywords": [

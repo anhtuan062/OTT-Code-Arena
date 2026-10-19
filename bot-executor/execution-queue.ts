@@ -1,8 +1,10 @@
 import { EventEmitter } from 'events';
+import { applicationMetrics } from '../observability/metrics.js';
 
 export interface ExecutionQueueConfig {
   maxConcurrent: number;
   maxQueueLength: number;
+  metricsName?: string;
 }
 
 export type QueueTaskStatus = 'queued' | 'active' | 'completed' | 'failed' | 'cancelled';
@@ -22,18 +24,24 @@ export interface QueueTask<T = unknown> {
 
 export class ExecutionQueue extends EventEmitter {
   private config: ExecutionQueueConfig;
+  private readonly metricsName: string;
   private queue: QueueTask[] = [];
   private active: Map<string, QueueTask> = new Map();
   private cancelled: Set<string> = new Set();
   private recentStatuses = new Map<string, QueueTaskStatus>();
   private _disposed = false;
+  private accepting = true;
+  private readonly drainWaiters = new Set<() => void>();
 
   constructor(config: Partial<ExecutionQueueConfig> = {}) {
     super();
     this.config = {
       maxConcurrent: config.maxConcurrent ?? 4,
       maxQueueLength: config.maxQueueLength ?? 64,
+      metricsName: config.metricsName ?? 'execution',
     };
+    this.metricsName = this.config.metricsName ?? 'execution';
+    this.publishMetrics();
   }
 
   get activeCount(): number {
@@ -48,9 +56,16 @@ export class ExecutionQueue extends EventEmitter {
     return this._disposed;
   }
 
+  get isAccepting(): boolean {
+    return this.accepting && !this._disposed;
+  }
+
   async submit<T>(id: string, execute: (signal: AbortSignal) => Promise<T>): Promise<T> {
     if (this._disposed) {
       throw new Error('Queue is disposed');
+    }
+    if (!this.accepting) {
+      throw new Error('Queue is shutting down');
     }
 
     if (this.cancelled.has(id)) {
@@ -79,6 +94,7 @@ export class ExecutionQueue extends EventEmitter {
         this.startTask(task as unknown as QueueTask);
       } else {
         this.queue.push(task as unknown as QueueTask);
+        this.publishMetrics();
         this.emit('queued', { id, queueLength: this.queue.length });
       }
     });
@@ -97,6 +113,7 @@ export class ExecutionQueue extends EventEmitter {
       task.settled = true;
       task.reject(new Error(`Task ${id} cancelled while queued`));
       this.emit('cancelled', { id, wasActive: false });
+      this.publishMetrics();
       return true;
     }
 
@@ -111,6 +128,7 @@ export class ExecutionQueue extends EventEmitter {
         activeTask.reject(new Error(`Task ${id} cancelled during execution`));
       }
       this.emit('cancelled', { id, wasActive: true });
+      this.publishMetrics();
       return true;
     }
 
@@ -126,10 +144,45 @@ export class ExecutionQueue extends EventEmitter {
     }
   }
 
+  /** Stop admission while allowing already-active tasks to settle normally. */
+  stopAccepting(): void {
+    if (!this.accepting) return;
+    this.accepting = false;
+    for (const task of [...this.queue]) this.cancel(task.id);
+    this.resolveDrainWaitersIfSettled();
+  }
+
+  /**
+   * Wait for active work to settle without aborting it. A timeout returns false;
+   * callers must keep the queue/storage alive when that happens.
+   */
+  async drain(timeoutMs = 30_000): Promise<boolean> {
+    if (this.active.size === 0 && this.queue.length === 0) return true;
+    let resolveSettled!: () => void;
+    const settled = new Promise<void>(resolve => {
+      resolveSettled = resolve;
+      this.drainWaiters.add(resolve);
+    });
+    // A task may settle between the fast path above and registering the
+    // waiter. Re-check after registration so drain cannot hang in that race.
+    this.resolveDrainWaitersIfSettled();
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    const deadline = new Promise<boolean>(resolve => {
+      timeout = setTimeout(() => resolve(false), Math.max(1, timeoutMs));
+      timeout.unref?.();
+    });
+    const result = await Promise.race([settled.then(() => true), deadline]);
+    if (timeout) clearTimeout(timeout);
+    this.drainWaiters.delete(resolveSettled);
+    return result;
+  }
+
   async dispose(): Promise<void> {
     this._disposed = true;
+    this.accepting = false;
     this.cancelAll();
     this.queue = [];
+    this.publishMetrics();
   }
 
   getStats(): {
@@ -193,6 +246,8 @@ export class ExecutionQueue extends EventEmitter {
     task.status = 'active';
     task.startedAt = Date.now();
     this.active.set(task.id, task);
+    applicationMetrics.observe(`queue.${this.metricsName}.wait_ms`, task.startedAt - task.enqueuedAt);
+    this.publishMetrics();
     this.emit('started', { id: task.id });
 
     const wasCancelled = () => this.cancelled.has(task.id);
@@ -202,6 +257,7 @@ export class ExecutionQueue extends EventEmitter {
         if (wasCancelled()) {
           task.status = 'cancelled';
           task.completedAt = Date.now();
+          applicationMetrics.increment(`queue.${this.metricsName}.cancelled`);
           this.rememberStatus(task.id, task.status);
           if (!task.settled) {
             task.settled = true;
@@ -210,6 +266,8 @@ export class ExecutionQueue extends EventEmitter {
         } else {
           task.status = 'completed';
           task.completedAt = Date.now();
+          applicationMetrics.observe(`queue.${this.metricsName}.execution_ms`, task.completedAt - (task.startedAt ?? task.completedAt));
+          applicationMetrics.increment(`queue.${this.metricsName}.completed`);
           this.rememberStatus(task.id, task.status);
           if (!task.settled) {
             task.settled = true;
@@ -221,6 +279,9 @@ export class ExecutionQueue extends EventEmitter {
       .catch((error) => {
         task.status = wasCancelled() ? 'cancelled' : 'failed';
         task.completedAt = Date.now();
+        if (task.status === 'cancelled') applicationMetrics.increment(`queue.${this.metricsName}.cancelled`);
+        else applicationMetrics.increment(`queue.${this.metricsName}.failed`);
+        applicationMetrics.observe(`queue.${this.metricsName}.execution_ms`, task.completedAt - (task.startedAt ?? task.completedAt));
         this.rememberStatus(task.id, task.status);
         if (!task.settled) {
           task.settled = true;
@@ -230,8 +291,16 @@ export class ExecutionQueue extends EventEmitter {
       })
       .finally(() => {
         this.active.delete(task.id);
+        this.publishMetrics();
         this.drainQueue();
+        this.resolveDrainWaitersIfSettled();
       });
+  }
+
+  private resolveDrainWaitersIfSettled(): void {
+    if (this.active.size !== 0 || this.queue.length !== 0) return;
+    for (const resolve of this.drainWaiters) resolve();
+    this.drainWaiters.clear();
   }
 
   private drainQueue(): void {
@@ -246,11 +315,18 @@ export class ExecutionQueue extends EventEmitter {
         next.settled = true;
         next.reject(new Error(`Task ${next.id} cancelled while queued`));
         this.emit('cancelled', { id: next.id, wasActive: false });
+        applicationMetrics.increment(`queue.${this.metricsName}.cancelled`);
+        this.publishMetrics();
         continue;
       }
 
       this.startTask(next);
     }
+  }
+
+  private publishMetrics(): void {
+    applicationMetrics.setGauge(`queue.${this.metricsName}.active`, this.active.size);
+    applicationMetrics.setGauge(`queue.${this.metricsName}.depth`, this.queue.length);
   }
 }
 

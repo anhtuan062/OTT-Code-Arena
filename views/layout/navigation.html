@@ -1,0 +1,33 @@
+<!-- NAVIGATION -->
+  <button id="sidebar-backdrop" class="sidebar-backdrop" type="button" aria-label="Đóng điều hướng" hidden></button>
+  <aside class="app-sidebar" id="app-nav" aria-label="Điều hướng chính" hidden>
+    <div class="sidebar-brand">
+      <span class="brand-symbol" aria-hidden="true"><svg viewBox="0 0 24 24">
+          <use href="#icon-shield"></use>
+        </svg></span>
+      <span><strong>OTT Code Arena</strong><small>THI ĐẤU LẬP TRÌNH</small></span>
+    </div>
+    <nav class="nav-links" aria-label="Không gian làm việc">
+      <button class="nav-link active" type="button" data-target="dashboard" aria-current="page"><svg class="ui-icon" aria-hidden="true"><use href="#icon-dashboard"></use></svg>Tổng quan</button>
+      <button class="nav-link role-nav competitor-nav" type="button" data-role="competitor" data-target="bots"><svg class="ui-icon" aria-hidden="true"><use href="#icon-users"></use></svg><span>Bot của tôi</span><span class="nav-badge" id="nav-badge-bots" hidden></span></button>
+      <button class="nav-link role-nav competitor-nav" type="button" data-role="competitor" data-target="tournaments"><svg class="ui-icon" aria-hidden="true"><use href="#icon-trophy"></use></svg><span>Giải đấu</span><span class="nav-badge" id="nav-badge-tourneys" hidden></span></button>
+      <button class="nav-link role-nav organizer-nav" type="button" data-role="organizer" data-target="tournaments"
+        data-scope="managed" hidden><svg class="ui-icon" aria-hidden="true"><use href="#icon-users"></use></svg>Quản lý giải đấu</button>
+      <button class="nav-link role-nav organizer-nav" type="button" data-role="organizer" data-target="operations" hidden><svg class="ui-icon" aria-hidden="true"><use href="#icon-activity"></use></svg>Vận hành hệ thống</button>
+    </nav>
+    <div class="sidebar-footer">Lập trình, kiểm thử, thi đấu.</div>
+  </aside>
+
+  <header class="app-topbar" id="app-topbar" hidden>
+    <button id="mobile-menu-toggle" class="mobile-menu-toggle" type="button" aria-label="Mở điều hướng"
+      aria-controls="app-nav" aria-expanded="false"><span></span><span></span><span></span></button>
+    <div class="topbar-title">
+      <p id="topbar-breadcrumb">Quản lý / Tổng quan</p>
+    </div>
+    <div class="topbar-user">
+      <span class="user-avatar" id="user-avatar" aria-hidden="true">U</span>
+      <span class="user-identity"><strong id="current-user">Người dùng</strong><small id="current-user-role">Người
+          chơi</small></span>
+      <button class="secondary-btn logout-button" id="logout-button" type="button"><svg class="ui-icon" aria-hidden="true"><use href="#icon-logout"></use></svg>Đăng xuất</button>
+    </div>
+  </header>

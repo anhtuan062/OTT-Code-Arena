@@ -1,0 +1,74 @@
+<!-- ORGANIZER OPERATIONS -->
+  <div id="operations" class="page operations-page">
+    <section class="operations-header">
+      <div>
+        <p class="eyebrow">Dành cho người tổ chức</p>
+        <h1>Vận hành hệ thống</h1>
+        <p class="operations-muted">Theo dõi năng lực máy, hàng đợi và tiến độ giải đấu. Màn hình này chỉ có quyền xem.</p>
+      </div>
+      <div class="operations-updated" aria-live="polite">
+        <span class="operations-status-dot" id="ops-status-dot"></span>
+        <span id="ops-last-updated">Chưa có dữ liệu</span>
+      </div>
+    </section>
+
+    <div id="ops-warning" class="operations-warning" role="status" hidden></div>
+    <div id="ops-error" class="operations-error" role="alert" hidden></div>
+
+    <section class="operations-grid" aria-label="Tình trạng máy chủ">
+      <article class="operations-card operations-capacity-card">
+        <div class="operations-card-title"><span>Năng lực máy</span><span id="ops-capacity-state" class="ops-badge ops-badge-muted">Chưa có dữ liệu</span></div>
+        <div class="operations-primary-value" id="ops-capacity-copy">Chưa có dữ liệu</div>
+        <div class="operations-meter-row"><span>CPU</span><strong id="ops-cpu">—</strong></div>
+        <div class="operations-meter"><span id="ops-cpu-meter"></span></div>
+        <div class="operations-meter-row"><span>RAM</span><strong id="ops-memory">—</strong></div>
+        <div class="operations-meter"><span id="ops-memory-meter"></span></div>
+        <p class="operations-note" id="ops-memory-free">RAM trống: —</p>
+      </article>
+      <article class="operations-card">
+        <div class="operations-card-title"><span>Thực thi Docker</span><span class="ops-card-icon">●</span></div>
+        <div class="operations-stat-pair"><div><strong id="ops-docker-active">—</strong><span>đang chạy</span></div><div><strong id="ops-docker-pending">—</strong><span>đang chờ</span></div></div>
+        <p class="operations-note">Thời gian chờ p95: <strong id="ops-docker-wait">—</strong></p>
+        <p class="operations-note">Thời gian chạy p95: <strong id="ops-docker-execution">—</strong></p>
+      </article>
+    </section>
+
+    <section class="operations-grid operations-grid-wide" aria-label="Hàng đợi và API">
+      <article class="operations-card">
+        <div class="operations-card-title"><span>Hàng đợi trận đấu</span></div>
+        <div class="operations-stat-pair"><div><strong id="ops-match-active">—</strong><span>đang chạy</span></div><div><strong id="ops-match-queued">—</strong><span>đang chờ</span></div></div>
+        <p class="operations-note">Chờ p95: <strong id="ops-match-wait">—</strong> · Chạy p95: <strong id="ops-match-execution">—</strong></p>
+      </article>
+      <article class="operations-card">
+        <div class="operations-card-title"><span>Hàng đợi kiểm tra Bot</span></div>
+        <div class="operations-stat-pair"><div><strong id="ops-preflight-active">—</strong><span>đang chạy</span></div><div><strong id="ops-preflight-queued">—</strong><span>đang chờ</span></div></div>
+        <p class="operations-note">Chờ p95: <strong id="ops-preflight-wait">—</strong> · Chạy p95: <strong id="ops-preflight-execution">—</strong></p>
+      </article>
+      <article class="operations-card">
+        <div class="operations-card-title"><span>Sức khỏe API</span></div>
+        <div class="operations-primary-value" id="ops-api-p95">—</div>
+        <p class="operations-note">Độ trễ p95</p>
+        <p class="operations-note">Tỷ lệ lỗi: <strong id="ops-api-errors">—</strong></p>
+      </article>
+    </section>
+
+    <section class="operations-grid operations-grid-wide" aria-label="Persistence và cache">
+      <article class="operations-card">
+        <div class="operations-card-title"><span>Độ trễ lưu trữ</span></div>
+        <p class="operations-note">Đọc p95: <strong id="ops-persistence-read">—</strong></p>
+        <p class="operations-note">Ghi p95: <strong id="ops-persistence-write">—</strong></p>
+        <p class="operations-note">Commit p95: <strong id="ops-persistence-commit">—</strong></p>
+      </article>
+      <article class="operations-card">
+        <div class="operations-card-title"><span>Bộ nhớ đệm dữ liệu</span></div>
+        <div class="operations-primary-value" id="ops-cache-efficiency">—</div>
+        <p class="operations-note">Lượt trúng: <strong id="ops-cache-hits">—</strong> · Lượt trượt: <strong id="ops-cache-misses">—</strong></p>
+        <p class="operations-note">Đọc dữ liệu gốc: <strong id="ops-cache-source-reads">—</strong></p>
+      </article>
+    </section>
+
+    <section class="operations-card operations-tournaments-card" aria-labelledby="ops-tournaments-title">
+      <div class="operations-card-title"><span id="ops-tournaments-title">Giải đấu đang hoạt động</span><span id="ops-tournament-count" class="operations-muted-inline">—</span></div>
+      <div id="ops-tournaments" class="operations-tournament-list" aria-live="polite"><p class="operations-empty">Chưa có dữ liệu giải đấu.</p></div>
+    </section>
+  </div>

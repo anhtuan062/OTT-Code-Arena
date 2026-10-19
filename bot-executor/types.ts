@@ -211,6 +211,12 @@ export interface SourceRevisionExecutor {
 
   /** Release artifacts retained for a completed match/session. */
   releaseRevisionScope?(scopeId: string): Promise<boolean>;
+
+  /** Clean up background timers and leases. */
+  close?(): void;
+
+  /** Stable identity for cached preflight results. */
+  getValidationIdentity?(): string;
 }
 
 /**
@@ -237,4 +243,6 @@ export interface DockerExecutorConfig extends ExecutorConfig {
   memoryLimit?: string;
   cpuLimit?: number;
   pidsLimit?: number;
+  /** Shared admission control for active Docker execution processes. */
+  dockerExecutionLimiter?: import('./docker-execution-limiter.js').DockerExecutionLimiter;
 }

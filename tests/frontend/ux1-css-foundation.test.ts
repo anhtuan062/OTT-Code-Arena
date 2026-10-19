@@ -1,5 +1,6 @@
 import { readFile } from 'node:fs/promises';
 import { describe, expect, it } from 'vitest';
+import { readAssembledFrontendStyles } from './frontend-fixtures';
 
 async function source(file: string): Promise<string> {
   return readFile(new URL(`../../${file}`, import.meta.url), 'utf8');
@@ -26,12 +27,12 @@ describe('UX.1 CSS foundation', () => {
   });
 
   it('loads the existing stylesheet before the application script and retains compatibility selectors', async () => {
-    const page = await source('index.html');
+    const [page, styles] = await Promise.all([source('index.html'), readAssembledFrontendStyles()]);
     expect(page.indexOf('<link rel="stylesheet" href="style.css">')).toBeGreaterThanOrEqual(0);
-    expect(page.indexOf('<link rel="stylesheet" href="style.css">')).toBeLessThan(page.indexOf('app.js'));
+    expect(page.indexOf('<link rel="stylesheet" href="style.css">')).toBeLessThan(page.indexOf('/js/page-loader.js'));
     for (const selector of ['.page', '.nav-link', '.status-badge', '.primary-btn', '.secondary-btn',
       '.card', '.modal-overlay', '.source-editor', '.data-table', '.app-sidebar', '.app-topbar']) {
-      expect(page).toContain(selector);
+      expect(styles).toContain(selector);
     }
   });
 

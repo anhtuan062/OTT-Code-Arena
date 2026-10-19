@@ -2,20 +2,29 @@ node_modules/
 dist/
 coverage/
 .vscode/
-data/*.sqlite
-data/*.sqlite-*
-data/**/*.tmp
-data/**/*.bak
+
+# SQLite & local runtime data
+data/**/*.sqlite*
+data/tournaments/
+!data/tournaments/.gitkeep
+
+# Temporary QA directories
+.qa-*/
+qa-*/
+.revision-owners/
+tmp/
+tmp-docker-probe/
+
+# Tooling and caches
 *.log
 .env
 .env.*
 !.env.example
 *.tmp
 *.bak
+__pycache__/
+*.pyc
 
-# Local agent state and corrupted recovery files
-.kilo/agent-manager.json
-.kilo/agent-manager.json.corrupt-*
-
-# Temporary local Docker probes
-tmp-docker-probe/
+# Local agent & sessions
+.kilo/
+.github/context-mode/

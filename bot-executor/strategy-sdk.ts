@@ -59,14 +59,16 @@ export async function getStrategySdkIdentity(runtimeId: SourceRuntimeId): Promis
 
 export async function materializeStrategySdk(runtimeId: SourceRuntimeId, targetRoot: string): Promise<void> {
   const root = sdkRoot();
-  await mkdir(targetRoot, { recursive: true, mode: 0o700 });
-  await writeFile(path.join(targetRoot, 'VERSION'), await readFile(path.join(root, 'VERSION')), { mode: 0o400 });
+  // The SDK is bind-mounted read-only into the non-root runtime container.
+  // Keep files immutable while allowing UID 65532 to traverse/read them.
+  await mkdir(targetRoot, { recursive: true, mode: 0o755 });
+  await writeFile(path.join(targetRoot, 'VERSION'), await readFile(path.join(root, 'VERSION')), { mode: 0o444 });
   if (runtimeId === 'cpp') {
-    await writeFile(path.join(targetRoot, 'ott_strategy_sdk.hpp'), await readFile(path.join(root, 'cpp', 'ott_strategy_sdk.hpp')), { mode: 0o400 });
+    await writeFile(path.join(targetRoot, 'ott_strategy_sdk.hpp'), await readFile(path.join(root, 'cpp', 'ott_strategy_sdk.hpp')), { mode: 0o444 });
     return;
   }
-  await writeFile(path.join(targetRoot, 'ott_strategy_sdk.py'), await readFile(path.join(root, 'python', 'ott_strategy_sdk.py')), { mode: 0o400 });
-  await writeFile(path.join(targetRoot, 'runner.py'), await readFile(path.join(root, 'python', 'runner.py')), { mode: 0o400 });
+  await writeFile(path.join(targetRoot, 'ott_strategy_sdk.py'), await readFile(path.join(root, 'python', 'ott_strategy_sdk.py')), { mode: 0o444 });
+  await writeFile(path.join(targetRoot, 'runner.py'), await readFile(path.join(root, 'python', 'runner.py')), { mode: 0o444 });
 }
 
 export function strategySdkRoot(): string { return sdkRoot(); }
