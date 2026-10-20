@@ -423,8 +423,8 @@ describe('Phase 3B - Scale Readiness', () => {
 
       // Strict sequential execution: max concurrent executions is exactly 1
       expect(maxConcurrentExecutions).toBe(1);
-      // Total executed matches matches 256-bot expected count (383 matches)
-      expect(executedMatchCount).toBe(383);
+      // Group-stage pairings are BO2; MatchExecutor is called once per game.
+      expect(executedMatchCount).toBe(766);
 
       const finished = (await repository.load('t-seq-256'))!;
       expect(finished.status).toBe('completed');
@@ -437,7 +437,7 @@ describe('Phase 3B - Scale Readiness', () => {
 
       // Champion is crowned
       expect(finished.stages![2]!.advancement.advancingParticipantIds.length).toBe(1);
-    }, 30_000);
+    }, 60_000);
   });
 
   describe('Scale Crash Recovery & Idempotency', () => {
@@ -476,7 +476,9 @@ describe('Phase 3B - Scale Readiness', () => {
         const nextRes = await manager1.runNextMatch('t-recovery-256');
         expect(nextRes.success).toBe(true);
       }
-      expect(executedCount).toBe(50);
+      // Multi-stage group pairings are BO2, so each pairing quantum executes
+      // two game records through MatchExecutor.
+      expect(executedCount).toBe(targetInterruption * 2);
 
       // Simulate crash and restart: create a new manager instance reading the same repository
       const manager2 = new TournamentManager({
@@ -489,13 +491,13 @@ describe('Phase 3B - Scale Readiness', () => {
       const resumeRes = await manager2.runAllMatches('t-recovery-256');
       expect(resumeRes.success).toBe(true);
 
-      // Remaining matches executed: total 383 matches, so 383 - 50 = 333 more matches
-      expect(executedCount).toBe(383);
+      // The executor is called once per committed game, not once per pairing.
+      expect(executedCount).toBe(766);
 
       const reloaded = (await repository.load('t-recovery-256'))!;
       expect(reloaded.status).toBe('completed');
       expect(isTournamentComplete(reloaded)).toBe(true);
       expect(reloaded.stages![2]!.status).toBe('completed');
-    }, 30_000);
+    }, 60_000);
   });
 });

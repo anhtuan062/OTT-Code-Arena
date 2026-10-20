@@ -17,6 +17,11 @@ function elfFixture(content: string): Buffer {
   return value;
 }
 
+async function writeExecutable(filePath: string, content: string | Buffer): Promise<void> {
+  await fs.writeFile(filePath, content);
+  await fs.chmod(filePath, 0o755);
+}
+
 async function fixture() {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'ott-compiled-cache-'));
   const ownerLeaseDir = path.join(root, 'owners');
@@ -31,7 +36,7 @@ describe('immutable compiled artifact cache', () => {
     const { root, cache } = await fixture();
     try {
       const source = path.join(root, 'bot');
-      await fs.writeFile(source, elfFixture('compiled-binary'));
+      await writeExecutable(source, elfFixture('compiled-binary'));
       const buildIdentity = identity('source-a');
       const published = await cache.publish(buildIdentity, source);
       expect(published?.manifest.cacheKey).toBe(compiledArtifactCacheKey(buildIdentity));
@@ -61,7 +66,7 @@ describe('immutable compiled artifact cache', () => {
       await new Promise(resolve => setTimeout(resolve, 75));
       expect(resolved).toBe(false);
       const source = path.join(root, 'bot-b');
-      await fs.writeFile(source, elfFixture('compiled-binary-b'));
+      await writeExecutable(source, elfFixture('compiled-binary-b'));
       await cache.publish(buildIdentity, source);
       await first.release();
       const acquired = await waiting;
@@ -83,7 +88,7 @@ describe('immutable compiled artifact cache', () => {
       expect(first.hit).toBeNull();
       const waiting = peers.map(peer => peer.acquire(buildIdentity, 2_000));
       const source = path.join(root, 'burst-bot');
-      await fs.writeFile(source, elfFixture('burst'));
+      await writeExecutable(source, elfFixture('burst'));
       await cache.publish(buildIdentity, source);
       const handles = await Promise.all(waiting);
       expect(handles.every(handle => handle.hit !== null)).toBe(true);
@@ -99,12 +104,12 @@ describe('immutable compiled artifact cache', () => {
     try {
       const firstIdentity = identity('source-c');
       const firstSource = path.join(root, 'bot-c');
-      await fs.writeFile(firstSource, elfFixture('first'));
+      await writeExecutable(firstSource, elfFixture('first'));
       await cache.publish(firstIdentity, firstSource);
       const held = await cache.acquire(firstIdentity, 1_000);
       const secondIdentity = identity('source-d');
       const secondSource = path.join(root, 'bot-d');
-      await fs.writeFile(secondSource, elfFixture('second'));
+      await writeExecutable(secondSource, elfFixture('second'));
       const constrained = new CompiledArtifactCache({ ...options, maxEntries: 1 });
       await constrained.publish(secondIdentity, secondSource);
       expect(await constrained.lookup(firstIdentity)).not.toBeNull();
@@ -179,7 +184,7 @@ describe('immutable compiled artifact cache', () => {
     try {
       const buildIdentity = identity('invalid');
       const source = path.join(root, 'invalid-bot');
-      await fs.writeFile(source, 'not-an-elf');
+      await writeExecutable(source, 'not-an-elf');
       await expect(cache.publish(buildIdentity, source)).resolves.toBeNull();
       const runtimeChanged = { ...buildIdentity, runtimeImageDigest: 'different-runtime' };
       expect(compiledArtifactCacheKey(runtimeChanged)).not.toBe(compiledArtifactCacheKey(buildIdentity));

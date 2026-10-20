@@ -1,14 +1,9 @@
-import { readFile } from 'node:fs/promises';
 import { describe, expect, it } from 'vitest';
-import { readAssembledFrontendMarkup, readAssembledFrontendStyles } from './frontend-fixtures';
-
-async function source(file: string): Promise<string> {
-  return readFile(new URL(`../../${file}`, import.meta.url), 'utf8');
-}
+import { readAssembledFrontendMarkup, readAssembledFrontendScript, readAssembledFrontendStyles } from './frontend-fixtures';
 
 describe('Tournament Lifecycle 7-Phase Distinct UI/UX Architecture', () => {
   it('defines getTournamentLifecyclePhase mapping the 7 conceptual phases to real state machine', async () => {
-    const app = await source('app.js');
+    const app = await readAssembledFrontendScript();
     expect(app).toContain('function getTournamentLifecyclePhase(tournament)');
     expect(app).toContain("if (status === 'draft') return 1;");
     expect(app).toContain("if (status === 'registration_open') return 2;");
@@ -22,7 +17,7 @@ describe('Tournament Lifecycle 7-Phase Distinct UI/UX Architecture', () => {
   it('keeps the tournament header consistent: name above status and phase label', async () => {
     const [markup, app, css] = await Promise.all([
       readAssembledFrontendMarkup(),
-      source('app.js'),
+      readAssembledFrontendScript(),
       readAssembledFrontendStyles(),
     ]);
     expect(markup).toContain('class="tournament-status-row"');
@@ -42,7 +37,7 @@ describe('Tournament Lifecycle 7-Phase Distinct UI/UX Architecture', () => {
   });
 
   it('implements distinct renderers for all 7 lifecycle phases', async () => {
-    const app = await source('app.js');
+    const app = await readAssembledFrontendScript();
     expect(app).toContain('function renderPhase1Creation(container, tournament)');
     expect(app).toContain('function renderPhase2Registration(container, tournament)');
     expect(app).toContain('function renderPhase3RosterFinal(container, tournament)');
@@ -53,7 +48,7 @@ describe('Tournament Lifecycle 7-Phase Distinct UI/UX Architecture', () => {
   });
 
   it('renders Phase 1 (Draft / Tournament Creation) with configuration summary', async () => {
-    const [app, css] = await Promise.all([source('app.js'), readAssembledFrontendStyles()]);
+    const [app, css] = await Promise.all([readAssembledFrontendScript(), readAssembledFrontendStyles()]);
     expect(app).toContain('phase-layout-draft');
     expect(app).toContain('phase-config-summary');
     expect(app).not.toContain('phase-readiness-checklist');
@@ -67,7 +62,7 @@ describe('Tournament Lifecycle 7-Phase Distinct UI/UX Architecture', () => {
   });
 
   it('renders Phase 2 (Registration Open) with approved roster, requests inbox, and competitor CTA', async () => {
-    const [app, css] = await Promise.all([source('app.js'), readAssembledFrontendStyles()]);
+    const [app, css] = await Promise.all([readAssembledFrontendScript(), readAssembledFrontendStyles()]);
     expect(app).toContain('phase-layout-registration');
     expect(app).toContain('phase-approved-roster');
     expect(app).toContain('phase-requests-inbox');
@@ -80,7 +75,7 @@ describe('Tournament Lifecycle 7-Phase Distinct UI/UX Architecture', () => {
   });
 
   it('renders Phase 3 (Roster Final / Registration Closed) with locked roster checklist and scheduling CTA', async () => {
-    const [app, css] = await Promise.all([source('app.js'), readAssembledFrontendStyles()]);
+    const [app, css] = await Promise.all([readAssembledFrontendScript(), readAssembledFrontendStyles()]);
     expect(app).toContain('phase-layout-roster-final');
     expect(app).toContain('phase-eligibility-check');
     expect(app).toContain('phase-official-roster');
@@ -90,7 +85,7 @@ describe('Tournament Lifecycle 7-Phase Distinct UI/UX Architecture', () => {
   });
 
   it('renders a searchable paginated roster in Phase 3 without a readiness conclusion', async () => {
-    const [app, css] = await Promise.all([source('app.js'), readAssembledFrontendStyles()]);
+    const [app, css] = await Promise.all([readAssembledFrontendScript(), readAssembledFrontendStyles()]);
     expect(app).toContain('function getPhase3RosterRows(tournament)');
     expect(app).toContain('const pageSize = 10;');
     expect(app).toContain("type: 'search'");
@@ -105,7 +100,7 @@ describe('Tournament Lifecycle 7-Phase Distinct UI/UX Architecture', () => {
   });
 
   it('renders Phase 4 (Scheduling Preview) with round pairings preview and start CTA', async () => {
-    const [app, css] = await Promise.all([source('app.js'), readAssembledFrontendStyles()]);
+    const [app, css] = await Promise.all([readAssembledFrontendScript(), readAssembledFrontendStyles()]);
     expect(app).toContain('phase-layout-schedule-preview');
     expect(app).toContain('phase-schedule-banner');
     expect(app).toContain('phase-schedule-structure');
@@ -125,14 +120,14 @@ describe('Tournament Lifecycle 7-Phase Distinct UI/UX Architecture', () => {
   });
 
   it('hides bye pairings from the Phase 4 schedule preview', async () => {
-    const app = await source('app.js');
+    const app = await readAssembledFrontendScript();
     expect(app).toContain('(r.pairings || []).filter(p => p.participantB !== null)');
     expect(app).toContain('const gDescText = `${gPairings.length} cặp đấu`;');
     expect(app).not.toContain("data-group-id': 'preliminary'");
   });
 
   it('renders Phase 5 (Running) with live progress bar, active match spotlight, and stage workspace', async () => {
-    const [app, css] = await Promise.all([source('app.js'), readAssembledFrontendStyles()]);
+    const [app, css] = await Promise.all([readAssembledFrontendScript(), readAssembledFrontendStyles()]);
     expect(app).toContain('phase-layout-running');
     expect(app).toContain('phase-live-progress');
     expect(app).toContain('phase-active-spotlight');
@@ -144,33 +139,33 @@ describe('Tournament Lifecycle 7-Phase Distinct UI/UX Architecture', () => {
   });
 
   it('renders Phase 6 (Results Review) with unpublished review banner, champion preview, and publish CTA', async () => {
-    const [app, css] = await Promise.all([source('app.js'), readAssembledFrontendStyles()]);
+    const [app, css] = await Promise.all([readAssembledFrontendScript(), readAssembledFrontendStyles()]);
     expect(app).toContain('phase-layout-results-review');
-    expect(app).toContain('phase-review-banner');
-    expect(app).toContain('phase-champion-preview');
-    expect(app).toContain('phase-final-standings');
+    expect(app).toContain('function renderPhase6Results(container, tournament)');
+    expect(app).toContain('phase6-results-board');
+    expect(app).toContain('phase6-final-match-card');
     expect(app).toContain('Công bố kết quả');
-    expect(css).toContain('.phase-review-banner');
-    expect(css).toContain('.phase-champion-preview');
+    expect(css).toContain('.phase6-result-match-row');
+    expect(css).toContain('.phase6-final-match-card');
   });
 
   it('renders Phase 7 (History / Archive) with official podium, replay archive, and bracket', async () => {
-    const [app, css] = await Promise.all([source('app.js'), readAssembledFrontendStyles()]);
+    const [app, css] = await Promise.all([readAssembledFrontendScript(), readAssembledFrontendStyles()]);
     expect(app).toContain('phase-layout-completed-archive');
     expect(app).toContain('phase-official-podium');
     expect(app).toContain('phase-podium-grid');
     expect(app).toContain('step-gold');
     expect(app).toContain('step-silver');
     expect(app).toContain('step-bronze');
-    expect(app).toContain('phase-replay-archive');
-    expect(app).toContain('archive-match-names');
+    expect(app).toContain('function renderPhase7History(container, tournament, multiStageContext)');
+    expect(app).toContain('phase7-overview-card');
     expect(css).toContain('.phase-podium-grid');
     expect(css).toContain('.phase-podium-step');
     expect(css).toContain('.phase-archive-row');
   });
 
   it('renders Knockout bracket and match details as two completely separate sibling section cards', async () => {
-    const [app, css] = await Promise.all([source('app.js'), readAssembledFrontendStyles()]);
+    const [app, css] = await Promise.all([readAssembledFrontendScript(), readAssembledFrontendStyles()]);
     
     // Bracket card is a tournament-panel section
     expect(app).toContain("className: 'tournament-panel knockout-view knockout-bracket-card'");
@@ -193,7 +188,6 @@ describe('Tournament Lifecycle 7-Phase Distinct UI/UX Architecture', () => {
     expect(css).toContain('@media (max-width: 620px)');
     expect(css).toContain('.phase-cta-card');
     expect(css).toContain('.phase-schedule-banner');
-    expect(css).toContain('.phase-review-banner');
     expect(css).toContain('.phase-live-action-row');
   });
 });

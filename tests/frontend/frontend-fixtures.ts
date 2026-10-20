@@ -29,6 +29,12 @@ const frontendStylesheets = [
   'styles/views/tournaments.css',
 ];
 
+const frontendModules = [
+  'constants.js', 'state.js', 'utils.js', 'navigation.js', 'auth.js', 'api.js',
+  'dashboard.js', 'bots.js', 'practice.js', 'tournaments.js', 'live.js',
+  'replay.js', 'events.js',
+];
+
 /**
  * Returns the markup that the page loader assembles at runtime.
  * index.html intentionally contains only fragment placeholders now.
@@ -40,5 +46,11 @@ export async function readAssembledFrontendMarkup(): Promise<string> {
 
 export async function readAssembledFrontendStyles(): Promise<string> {
   const files = await Promise.all(frontendStylesheets.map(readFrontendFile));
+  return files.join('\n');
+}
+
+/** Read the authoritative modular sources without depending on generated app.js. */
+export async function readAssembledFrontendScript(): Promise<string> {
+  const files = await Promise.all(frontendModules.map(file => readFrontendFile(`js/${file}`)));
   return files.join('\n');
 }

@@ -1,6 +1,6 @@
 import { readFile } from 'node:fs/promises';
 import { describe, expect, it } from 'vitest';
-import { readAssembledFrontendMarkup } from './frontend-fixtures';
+import { readAssembledFrontendMarkup, readAssembledFrontendScript, readFrontendFile } from './frontend-fixtures';
 
 async function source(file: string): Promise<string> {
   return readFile(new URL(`../../${file}`, import.meta.url), 'utf8');
@@ -21,7 +21,7 @@ describe('UX.4 Practice Runner', () => {
   });
 
   it('maps actual Practice error codes without inventing execution progress', async () => {
-    const app = await source('app.js');
+    const app = await readFrontendFile('js/practice.js');
     for (const code of ['EXECUTOR_UNAVAILABLE', 'COMPILATION_TIMEOUT', 'RUNTIME_TIMEOUT', 'PROCESS_CRASHED',
       'INVALID_JSON', 'EMPTY_OUTPUT', 'INVALID_MOVE', 'RESOURCE_LIMIT_EXCEEDED']) {
       expect(app).toContain(code);
@@ -32,7 +32,7 @@ describe('UX.4 Practice Runner', () => {
   });
 
   it('preserves revision/scenario identity and server-validated success semantics', async () => {
-    const app = await source('app.js');
+    const app = await readAssembledFrontendScript();
     expect(app).toContain('result.valid === true && result.accepted !== false');
     expect(app).toContain("['Revision', revision?.revisionId");
     expect(app).toContain("['Tình huống', scenario.label]");
@@ -41,7 +41,7 @@ describe('UX.4 Practice Runner', () => {
   });
 
   it('clears stale results on scenario changes and invalidates pending responses', async () => {
-    const app = await source('app.js');
+    const app = await readAssembledFrontendScript();
     expect(app).toContain("on('#practice-scenario', 'change'");
     expect(app).toContain('state.practiceRequestToken += 1;');
     expect(app).toContain('clearPracticeResult();');
@@ -50,7 +50,7 @@ describe('UX.4 Practice Runner', () => {
   });
 
   it('retains modal accessibility and retry-safe controls', async () => {
-    const [app, page] = await Promise.all([source('app.js'), readAssembledFrontendMarkup()]);
+    const [app, page] = await Promise.all([readAssembledFrontendScript(), readAssembledFrontendMarkup()]);
     expect(page).toContain('role="dialog"');
     expect(page).toContain('aria-modal="true"');
     expect(page).toContain('id="practice-error-details"');
