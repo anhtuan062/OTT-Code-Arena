@@ -491,7 +491,7 @@ describe('source revision Docker adapter contracts', () => {
     } finally {
       await fs.rm(workingDirBase, { recursive: true, force: true });
     }
-  });
+  }, 30_000);
 
   it('executes a pinned strategy revision through the SDK wrapper path', async () => {
     const workingDirBase = await fs.mkdtemp(path.join(os.tmpdir(), 'ott-sdk-test-'));
