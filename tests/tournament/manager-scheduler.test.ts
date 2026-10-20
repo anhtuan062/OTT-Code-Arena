@@ -433,6 +433,20 @@ describe('TournamentManager BO1 scheduler integration', () => {
     expect(executor.calls.filter(call => call === firstGameId)).toHaveLength(1);
     expect(await repository.loadMatchResult(id, firstGameId!)).not.toBeNull();
 
+    // With scheduler concurrency=2, the crash is injected into whichever
+    // series reaches the snapshot save first; executor call order is not a
+    // durable indication of which series was interrupted (especially on CI).
+    const afterCrash = (await repository.load(id))!;
+    const pendingPairingIds = new Set(afterCrash.rounds.flatMap(round => round.pairings)
+      .filter(pairing => pairing.status !== 'completed')
+      .map(pairing => pairing.pairingId));
+    const firstGameRecords = await Promise.all(executor.calls
+      .filter(call => /-g1$/.test(call))
+      .map(async matchId => ({ matchId, record: await repository.loadMatchResult(id, matchId) })));
+    const interruptedGame = firstGameRecords
+      .find(item => item.record?.seriesGameOf && pendingPairingIds.has(item.record.pairingId))?.record;
+    expect(interruptedGame).toBeDefined();
+
     const recoveryCalls: string[] = [];
     const recoveryExecutor: MatchExecutor = {
       async executeMatch(matchId, playerA, playerB) {
@@ -450,8 +464,8 @@ describe('TournamentManager BO1 scheduler integration', () => {
     expect((await recoveryManager.runAllMatches(id)).success).toBe(true);
     const recovered = await repository.load(id);
     expect(recovered!.rounds.flatMap(round => round.pairings).every(pairing => pairing.status === 'completed')).toBe(true);
-    expect(recoveryCalls).not.toContain(firstGameId);
-    const interruptedSeriesPrefix = firstGameId!.replace(/-g1$/, '');
+    expect(recoveryCalls.some(call => /-g1$/.test(call))).toBe(false);
+    const interruptedSeriesPrefix = interruptedGame!.seriesGameOf!;
     const interruptedSeriesCalls = recoveryCalls.filter(call => call.startsWith(`${interruptedSeriesPrefix}-`));
     expect(interruptedSeriesCalls).toEqual([`${interruptedSeriesPrefix}-g2`]);
   }, 30_000);
