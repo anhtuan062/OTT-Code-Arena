@@ -407,7 +407,9 @@ function goToBotsFromRegistration() {
 
 function renderTournamentList() {
   const list = $('#tournaments-list');
+  const pagination = $('#tournament-pagination');
   clearLoadingSkeleton(list);
+  if (pagination) pagination.hidden = true;
   const toolbar = $('#tournaments-toolbar');
   const createButton = $('#open-tournament-modal');
   if (state.tournamentListError) { toolbar.hidden = state.user?.role === 'competitor'; createButton.hidden = state.user?.role === 'competitor'; $('#tournaments-count').textContent = 'Không thể tải giải đấu'; return renderMessage(list, state.tournamentListError, loadTournaments); }
@@ -439,8 +441,17 @@ function renderTournamentList() {
   $('#tournaments-count').textContent = `${tournaments.length} / ${state.tournaments.length} giải đấu`;
   if (!hasTournaments) return renderTournamentEmpty('Bạn chưa có giải đấu nào', 'Tạo giải đấu để đăng ký Bot và bắt đầu thi đấu.');
   if (!tournaments.length) return renderTournamentEmpty(state.tournamentScope === 'mine' ? 'Chưa có yêu cầu tham gia' : 'Không tìm thấy giải đấu phù hợp', state.tournamentScope === 'mine' ? 'Các giải bạn đã gửi yêu cầu sẽ xuất hiện tại đây.' : 'Hãy thử tên khác hoặc xóa bộ lọc.', false);
-  if (competitor) return renderDiscoverableTournamentCards(list, tournaments);
-  tournaments.forEach(tournament => {
+  const pageSize = 8;
+  const totalPages = Math.ceil(tournaments.length / pageSize);
+  state.tournamentPage = Math.min(Math.max(1, state.tournamentPage), totalPages);
+  const pageStart = (state.tournamentPage - 1) * pageSize;
+  const pageTournaments = tournaments.slice(pageStart, pageStart + pageSize);
+  if (competitor) {
+    renderDiscoverableTournamentCards(list, pageTournaments);
+    renderTournamentPagination(totalPages);
+    return;
+  }
+  pageTournaments.forEach(tournament => {
     const card = create('article', { className: 'tournament-card' });
     const heading = create('div', { className: 'tournament-card-header' }); heading.append(create('h3', { text: tournament.name }), statusBadge(tournament.status)); card.appendChild(heading);
     const meta = create('div', { className: 'tournament-card-meta' });
@@ -453,6 +464,26 @@ function renderTournamentList() {
     footer.appendChild(actionButton('Xóa', () => confirmTournamentAction(tournament.tournamentId, state.authRevision, state.viewRevision, 'delete', 'Xóa giải đấu', tournament.name), `delete:${tournament.tournamentId}`, 'secondary-btn tournament-action tournament-action-danger'));
     card.appendChild(footer); list.appendChild(card);
   });
+  renderTournamentPagination(totalPages);
+}
+
+function renderTournamentPagination(totalPages) {
+  const pagination = $('#tournament-pagination');
+  if (!pagination) return;
+  clear(pagination);
+  if (totalPages <= 1) {
+    pagination.hidden = true;
+    return;
+  }
+  pagination.hidden = false;
+  const previous = create('button', { className: 'secondary-btn tournament-pagination-button', type: 'button', text: 'Trước' });
+  previous.disabled = state.tournamentPage === 1;
+  previous.addEventListener('click', () => { state.tournamentPage -= 1; renderTournamentList(); });
+  const pageLabel = create('span', { className: 'tournament-pagination-label', text: `Trang ${state.tournamentPage} / ${totalPages}` });
+  const next = create('button', { className: 'secondary-btn tournament-pagination-button', type: 'button', text: 'Sau' });
+  next.disabled = state.tournamentPage === totalPages;
+  next.addEventListener('click', () => { state.tournamentPage += 1; renderTournamentList(); });
+  pagination.append(previous, pageLabel, next);
 }
 
 function tournamentMetaItem(iconId, label) {
@@ -475,14 +506,15 @@ function renderDiscoverableTournamentCards(list, tournaments) {
   tournaments.forEach(tournament => {
     const card = create('article', { className: 'tournament-card' });
     const heading = create('div');
-    heading.append(create('h3', { text: tournament.name }), statusBadge(tournament.status));
+    heading.append(create('h3', { text: tournament.name }), statusBadge(tournament.status), tournamentParticipationBadge(tournament));
     card.appendChild(heading);
     const meta = create('div', { className: 'tournament-card-meta' });
-    meta.append(tournamentMetaItem('icon-git-branch', 'V\u00f2ng tr\u00f2n m\u1ed9t l\u01b0\u1ee3t'), tournamentMetaItem('icon-users', `${tournament.participantCount ?? 0} ng\u01b0\u1eddi tham gia`));
+    meta.append(tournamentMetaItem('icon-users', `${tournament.participantCount ?? 0} ng\u01b0\u1eddi tham gia`));
     card.appendChild(meta);
     const statusLabels = { pending: 'Yêu cầu tham gia đang chờ duyệt.', approved: 'Yêu cầu tham gia đã được duyệt.', rejected: 'Yêu cầu tham gia đã bị từ chối.' };
     const participation = create('p', { className: 'tournament-participation-state', text: tournament.myRequestStatus ? statusLabels[tournament.myRequestStatus] : 'Chưa gửi yêu cầu tham gia.', attrs: { 'aria-live': 'polite' } });
     card.appendChild(participation);
+    participation.hidden = true;
     const footer = create('div', { className: 'tournament-card-footer' });
     const published = tournament.status === 'completed' && Boolean(tournament.resultsPublishedAt);
     if (tournament.spectatorAccess) {
@@ -518,6 +550,25 @@ function renderDiscoverableTournamentCards(list, tournaments) {
     card.appendChild(footer);
     list.appendChild(card);
   });
+}
+
+function tournamentParticipationBadge(tournament) {
+  const requestStatus = tournament.myRequestStatus;
+  const joined = Boolean(tournament.participantId) || requestStatus === 'approved';
+  const state = joined ? 'joined' : requestStatus || 'none';
+  const labels = {
+    joined: 'Đã tham gia',
+    pending: 'Đang chờ duyệt',
+    rejected: 'Đã từ chối',
+    none: 'Chưa tham gia',
+  };
+  const badge = create('span', {
+    className: `tournament-participation-badge is-${state}`,
+    attrs: { 'aria-label': `Trạng thái tham gia: ${labels[state]}` },
+  });
+  const iconId = joined ? 'td-icon-check' : requestStatus === 'pending' ? 'td-icon-clock-3' : 'icon-user-round-plus';
+  badge.append(icon(iconId), create('span', { text: labels[state] }));
+  return badge;
 }
 
 async function loadParticipationStatus(tournamentId, target, requestButton) {
@@ -618,6 +669,7 @@ async function submitNewTournament() {
 
 async function viewTournament(id) {
   if (state.tournamentId !== id) state.detailRequestsFilter = 'pending';
+  state.tournamentDetailSource = state.activeView;
   state.tournamentId = id;
   navigate('tournament-detail');
   await refreshTournamentDetail();
@@ -5417,6 +5469,7 @@ async function loadMultiStageTournamentDetail(tournamentId, authRevision, viewRe
     state.tournamentRegistrationContext = { name: tournament.name || getMultiStageTournamentName(tournamentId), status: tournament.status };
     const name = tournament.name || getMultiStageTournamentName(tournamentId);
     $('#td-name').textContent = name;
+    updateTopbarTournamentBreadcrumb(name);
     const breadcrumbName = $('#td-breadcrumb-name'); if (breadcrumbName) breadcrumbName.textContent = name;
     const badge = $('#td-status'); badge.className = `status-badge status-${safeStatusClass(tournament.status)}`; badge.textContent = multiStageStatusLabel(tournament.status);
     const subtitle = $('#td-subtitle');
@@ -5503,6 +5556,7 @@ async function refreshTournamentDetail() {
     state.spectatorMode = tournament.spectatorAccess === true;
     state.tournamentRegistrationContext = { name: tournament.name, status: tournament.status };
     $('#td-name').textContent = tournament.name;
+    updateTopbarTournamentBreadcrumb(tournament.name);
     const breadcrumbName = $('#td-breadcrumb-name'); if (breadcrumbName) breadcrumbName.textContent = tournament.name;
     const badge = $('#td-status'); badge.className = `status-badge status-${safeStatusClass(tournament.status)}`; badge.textContent = localizeStatus(tournament.status);
     renderTournamentLifecycle(tournament);

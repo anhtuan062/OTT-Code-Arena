@@ -129,7 +129,9 @@ async function loadBots() {
 
 function renderBotList() {
   const list = $('#bots-list');
+  const pagination = $('#bot-pagination');
   if (typeof clearLoadingSkeleton === 'function') clearLoadingSkeleton(list);
+  if (pagination) pagination.hidden = true;
   const toolbar = $('#bots-toolbar');
   const createButton = $('#open-bot-modal');
   const query = state.botSearch.trim().toLocaleLowerCase();
@@ -152,7 +154,12 @@ function renderBotList() {
     return renderBotEmpty(list, 'Bạn chưa có Bot nào', 'Tạo Bot đầu tiên để xây dựng chiến thuật, quản lý phiên bản mã nguồn và tham gia giải đấu.');
   }
   if (!bots.length) return renderBotEmpty(list, 'Không tìm thấy Bot phù hợp', 'Hãy thử tên khác hoặc xóa nội dung tìm kiếm.', false);
-  bots.forEach(bot => {
+  const pageSize = 12;
+  const totalPages = Math.ceil(bots.length / pageSize);
+  state.botPage = Math.min(Math.max(1, Number.isFinite(state.botPage) ? state.botPage : 1), totalPages);
+  const pageStart = (state.botPage - 1) * pageSize;
+  const pageBots = bots.slice(pageStart, pageStart + pageSize);
+  pageBots.forEach(bot => {
     const card = create('article', { className: 'bot-card' });
     const header = create('div', { className: 'bot-card-header' });
     const identity = create('div', { className: 'bot-card-identity' });
@@ -199,6 +206,26 @@ function renderBotList() {
     });
     footer.appendChild(actions); card.appendChild(footer); list.appendChild(card);
   });
+  if (typeof renderBotPagination === 'function') renderBotPagination(totalPages);
+}
+
+function renderBotPagination(totalPages) {
+  const pagination = $('#bot-pagination');
+  if (!pagination) return;
+  clear(pagination);
+  if (totalPages <= 1) {
+    pagination.hidden = true;
+    return;
+  }
+  pagination.hidden = false;
+  const previous = create('button', { className: 'secondary-btn bot-pagination-button', type: 'button', text: 'Trước' });
+  previous.disabled = state.botPage === 1;
+  previous.addEventListener('click', () => { state.botPage -= 1; renderBotList(); });
+  const pageLabel = create('span', { className: 'bot-pagination-label', text: `Trang ${state.botPage} / ${totalPages}` });
+  const next = create('button', { className: 'secondary-btn bot-pagination-button', type: 'button', text: 'Sau' });
+  next.disabled = state.botPage === totalPages;
+  next.addEventListener('click', () => { state.botPage += 1; renderBotList(); });
+  pagination.append(previous, pageLabel, next);
 }
 
 function setSourceError(message = '') {
@@ -385,6 +412,18 @@ function syncWorkspaceStatus() {
   else setWorkspaceStatus(state.sourceWorkspaceBot ? 'Bản nháp mới' : 'Bản nháp mới');
 }
 
+function hasUnsavedBotWorkspaceChanges() {
+  if (!state.sourceDirty) return false;
+  const editor = $('#bot-source-editor');
+  const runtime = $('#bot-source-runtime');
+  const name = $('#bot-workspace-name');
+  return Boolean(editor && runtime && name && (
+    editor.value !== state.sourceInitialSource
+    || runtime.value !== state.sourceInitialRuntime
+    || name.value.trim() !== state.sourceInitialName
+  ));
+}
+
 function setSourceDirty(dirty) {
   state.sourceDirty = dirty;
   const marker = $('#bot-source-dirty');
@@ -494,8 +533,8 @@ async function deleteRevision() {
   }
 }
 
-async function loadRevisionSource(revision, mode = 'view') {
-  if (state.sourceDirty && !window.confirm('Bạn có thay đổi chưa lưu. Tiếp tục sẽ thay thế nội dung hiện tại?')) return;
+async function loadRevisionSource(revision, mode = 'view', confirmBeforeReplace = true) {
+  if (confirmBeforeReplace && hasUnsavedBotWorkspaceChanges() && !window.confirm('Bạn có thay đổi chưa lưu. Tiếp tục sẽ thay thế nội dung hiện tại?')) return;
   setSourceError();
   try {
     const result = await request(`/bots/${revision.botId}/revisions/${revision.revisionId}`);
@@ -503,6 +542,8 @@ async function loadRevisionSource(revision, mode = 'view') {
     updateEditorMetrics();
     $('#bot-source-runtime').value = ['cpp', 'python3'].includes(revision.runtimeId) ? revision.runtimeId : '';
     state.sourceRuntime = $('#bot-source-runtime').value || 'cpp';
+    state.sourceInitialSource = result.source;
+    state.sourceInitialRuntime = state.sourceRuntime;
     updateSourceRuntimeMeta($('#bot-source-runtime').value);
     updateSourceModeMeta(revision.executionMode, revision.sdkVersion);
     state.sourceExecutionMode = revision.executionMode || 'raw';
@@ -520,7 +561,7 @@ async function loadBotRevisions(bot) {
   state.sourceRevisions = await request(`/bots/${bot.id}/revisions`);
   renderRevisionList();
   const selected = state.sourceRevisions.find(revision => revision.selected);
-  if (selected) await loadRevisionSource(selected, 'view');
+  if (selected) await loadRevisionSource(selected, 'view', false);
   else {
     $('#bot-source-editor').value = STRATEGY_TEMPLATES.cpp;
     $('#bot-source-editor').readOnly = false;
@@ -528,17 +569,13 @@ async function loadBotRevisions(bot) {
     state.sourceExecutionMode = 'strategy';
     updateSourceModeMeta('strategy', '1.0.0');
     setWorkspaceStatus('Bản nháp mới');
-    setSourceDirty(true);
+    // Loading the starter template is not a user edit. Only subsequent
+    // input/runtime changes should make the workspace dirty.
+    setSourceDirty(false);
   }
 }
 
 function enhanceBotWorkspaceIcons() {
-  const breadcrumb = $('#bot-workspace-back');
-  if (breadcrumb && !breadcrumb.querySelector('svg')) {
-    const arrow = icon('icon-arrow-left'); arrow.classList.add('workspace-inline-icon');
-    breadcrumb.firstChild.textContent = '';
-    breadcrumb.prepend(arrow);
-  }
   const saveButton = $('#save-bot-source');
   if (saveButton && !saveButton.querySelector('svg')) {
     const saveIcon = icon('icon-save'); saveIcon.classList.add('ui-icon'); saveButton.prepend(saveIcon);
@@ -579,7 +616,8 @@ async function restoreBotWorkspace() {
 }
 
 async function openBotWorkspace(bot = null) {
-  if (state.sourceDirty && state.sourceWorkspaceBot?.id !== bot?.id && !window.confirm('Bạn có thay đổi chưa lưu. Tiếp tục sẽ đóng nội dung hiện tại?')) return;
+  if (state.activeView !== 'bot-workspace') state.botWorkspaceSource = state.activeView;
+  if (hasUnsavedBotWorkspaceChanges() && state.sourceWorkspaceBot?.id !== bot?.id && !window.confirm('Bạn có thay đổi chưa lưu. Tiếp tục sẽ đóng nội dung hiện tại?')) return;
   state.botWorkspaceMode = bot ? 'edit' : 'create';
   state.sourceWorkspaceBot = bot;
   state.botWorkspaceReadOnly = false;
@@ -601,9 +639,12 @@ async function openBotWorkspace(bot = null) {
   $('#save-bot-source').textContent = bot ? 'Lưu phiên bản' : 'Tạo Bot';
   $('#bot-source-runtime').value = useDraft ? savedDraft.runtimeId : 'cpp';
   state.sourceRuntime = useDraft ? savedDraft.runtimeId : 'cpp';
+  state.sourceInitialRuntime = $('#bot-source-runtime').value;
+  state.sourceInitialName = bot?.name || '';
   updateSourceRuntimeMeta(state.sourceRuntime);
   updateSourceModeMeta(bot ? '' : 'strategy', bot ? '' : '1.0.0');
   $('#bot-source-editor').value = useDraft ? savedDraft.source : (bot ? '' : STRATEGY_TEMPLATES.cpp);
+  state.sourceInitialSource = $('#bot-source-editor').value;
   updateEditorMetrics();
   $('#bot-source-editor').readOnly = false;
   setWorkspaceStatus(bot ? 'Đang chuẩn bị bản nháp' : 'Bản nháp mới');
@@ -669,12 +710,12 @@ async function saveBotSource() {
 async function selectRevision(revision) {
   const bot = state.sourceWorkspaceBot;
   if (!bot) return;
-  if (state.sourceDirty && !window.confirm('Bạn có thay đổi chưa lưu. Chọn phiên bản này sẽ thay thế nội dung hiện tại. Tiếp tục?')) return;
+  if (hasUnsavedBotWorkspaceChanges() && !window.confirm('Bạn có thay đổi chưa lưu. Chọn phiên bản này sẽ thay thế nội dung hiện tại. Tiếp tục?')) return;
   try {
     await api(`/bots/${bot.id}/revisions/${revision.revisionId}/select`, { method: 'POST', body: JSON.stringify({}) });
     bot.currentRevisionId = revision.revisionId;
     await loadBotRevisions(bot);
-    await loadRevisionSource(revision, 'draft');
+    await loadRevisionSource(revision, 'draft', false);
     showToast('Đã chọn phiên bản mã nguồn.', 'success');
   } catch (error) { setSourceError(error.message || 'Không thể chọn phiên bản mã nguồn.'); }
 }
@@ -829,18 +870,6 @@ async function deleteBot() {
   });
 }
 
-function syncTournamentScopeTabs() {
-  const tabs = $('#tournament-scope-tabs');
-  if (!tabs) return;
-  const isCompetitor = state.user?.role === 'competitor';
-  tabs.hidden = !isCompetitor;
-  tabs.querySelectorAll('.tournament-scope-tab').forEach(tab => {
-    const active = tab.dataset.scope === state.tournamentScope;
-    tab.classList.toggle('active', active);
-    tab.setAttribute('aria-selected', String(active));
-  });
-}
-
 async function loadTournaments() {
   const list = $('#tournaments-list');
   const authRevision = state.authRevision;
@@ -851,12 +880,11 @@ async function loadTournaments() {
   const pageTitle = $('.tournaments-workspace-header h2');
   const pageDescription = $('.tournaments-workspace-header p');
   const isCompetitor = state.user?.role === 'competitor';
-  syncTournamentScopeTabs();
-  const isDiscoverable = isCompetitor && state.tournamentScope === 'discoverable';
-  if (pageTitle) pageTitle.textContent = isDiscoverable ? 'Giải đấu đang mở' : isCompetitor ? 'Giải đấu của tôi' : 'Quản lý giải đấu';
-  if (pageDescription) pageDescription.textContent = isDiscoverable
-    ? 'Khám phá các giải đấu đang mở đăng ký và gửi yêu cầu tham gia.'
-    : isCompetitor ? 'Theo dõi các giải đấu bạn đã gửi yêu cầu hoặc đang tham gia.' : 'Tạo và quản lý các giải đấu giữa những Bot đã đăng ký.';
+  if (isCompetitor) state.tournamentScope = 'all';
+  if (pageTitle) pageTitle.textContent = isCompetitor ? 'Giải đấu' : 'Quản lý giải đấu';
+  if (pageDescription) pageDescription.textContent = isCompetitor
+    ? 'Khám phá giải đấu đang mở và theo dõi các giải bạn đã đăng ký hoặc tham gia.'
+    : 'Tạo và quản lý các giải đấu giữa những Bot đã đăng ký.';
   $('#tournaments-toolbar').hidden = true;
   $('#open-tournament-modal').hidden = true;
   renderLoadingSkeleton(list, 'tournament-skeleton', 4);
@@ -866,29 +894,35 @@ async function loadTournaments() {
     // Only competitors use the public discovery projection. Organizers must
     // load their owner-scoped list; the discovery projection intentionally
     // omits ownership fields and must never render management actions.
-    const path = state.user?.role === 'competitor'
-      ? (state.tournamentScope === 'mine' ? '/my/tournaments' : '/tournaments/discoverable')
-      : '/tournaments';
-    response = await request(path);
-    const scopedResponse = state.user?.role === 'competitor' && state.tournamentScope === 'discoverable'
-      // The discovery endpoint also supports finding a running tournament
-      // for live spectating, but terminal/draft tournaments do not belong in
-      // the "open tournaments" view.
-      ? response.filter(tournament => tournament.status === 'registration_open' || tournament.status === 'running')
-      : response;
-    const tournaments = state.user?.role === 'competitor' && state.tournamentScope === 'mine'
-      ? response.map(item => ({
+    if (isCompetitor) {
+      const [discoverablePayload, minePayload] = await Promise.all([
+        request('/tournaments/discoverable'),
+        request('/my/tournaments'),
+      ]);
+      const discoverable = Array.isArray(discoverablePayload) ? discoverablePayload : [];
+      const mine = Array.isArray(minePayload) ? minePayload : [];
+      const merged = new Map();
+      discoverable
+        .filter(tournament => tournament.status === 'registration_open' || tournament.status === 'running')
+        .forEach(tournament => merged.set(tournament.tournamentId, tournament));
+      mine.map(item => ({
         tournamentId: item.tournamentId,
         name: item.name,
         status: item.status,
         participantCount: item.participantCount ?? 0,
+        participantId: item.participantId || null,
         myRequestStatus: item.request?.status || null,
         resultsPublishedAt: item.resultsPublishedAt || null,
         registrationOpen: Boolean(item.registrationOpen),
-      }))
-      : scopedResponse;
+      })).forEach(tournament => {
+        merged.set(tournament.tournamentId, { ...merged.get(tournament.tournamentId), ...tournament });
+      });
+      response = [...merged.values()];
+    } else {
+      response = await request('/tournaments');
+    }
     if (!isCurrentView('tournaments', authRevision, viewRevision)) return;
-    state.tournaments = tournaments;
+    state.tournaments = Array.isArray(response) ? response : [];
     renderTournamentList();
   } catch (error) { if (isCurrentView('tournaments', authRevision, viewRevision)) { state.error = localizeErrorMessage(error.message || 'Không thể tải giải đấu.'); state.tournamentListError = state.error; $('#tournaments-count').textContent = 'Không thể tải giải đấu'; $('#tournaments-toolbar').hidden = true; $('#open-tournament-modal').hidden = false; renderMessage(list, state.error, loadTournaments); } }
   finally { state.loading.delete('tournaments'); }

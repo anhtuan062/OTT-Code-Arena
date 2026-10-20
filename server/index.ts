@@ -1008,15 +1008,17 @@ const fixedPracticeMatchHandler = async (req: express.Request, res: express.Resp
 
 app.post('/api/bots/:id/revisions/:revisionId/test-match', requireAuth, requireRole('competitor'), requireCsrf, (req, res) => fixedPracticeMatchHandler(req, res));
 
-app.post('/api/bots/draft/test-match', requireAuth, requireRole('competitor'), requireCsrf, (req, res) => {
+app.post('/api/bots/draft/test-match', requireAuth, requireRole('competitor'), requireCsrf, async (req, res) => {
   const source = typeof req.body?.source === 'string' ? req.body.source : '';
   const runtimeId = typeof req.body?.runtimeId === 'string' ? req.body.runtimeId : '';
   if (!source.trim()) return res.status(400).json({ error: 'Mã nguồn không được để trống.' });
   if (!isSupportedSourceRuntime(runtimeId)) return res.status(400).json({ error: 'Only C++17 and Python 3 revisions can be tested' });
   if (Buffer.byteLength(source, 'utf8') > MAX_SOURCE_BYTES) return res.status(400).json({ error: 'Mã nguồn không được vượt quá 64 KiB.' });
   const revisionId = `draft-${randomUUID()}`;
+  const executionMode = req.body?.executionMode === 'raw' ? 'raw' : 'strategy';
+  const sdk = executionMode === 'strategy' ? await getStrategySdkIdentity(runtimeId) : undefined;
   return fixedPracticeMatchHandler(req, res, {
-    revision: { bot_id: 'draft-bot', revision_id: revisionId, runtime_id: runtimeId, source_digest: 'draft', execution_mode: req.body?.executionMode === 'raw' ? 'raw' : 'strategy', sdk_version: req.body?.sdkVersion || null, sdk_digest: null },
+    revision: { bot_id: 'draft-bot', revision_id: revisionId, runtime_id: runtimeId, source_digest: createHash('sha256').update(source, 'utf8').digest('hex'), execution_mode: executionMode, sdk_version: sdk?.version || null, sdk_digest: sdk?.digest || null },
     source: Buffer.from(source, 'utf8'),
   });
 });

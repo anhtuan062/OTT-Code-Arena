@@ -41,7 +41,7 @@ describe('SPA rendering and request foundations', () => {
     expect(app).toContain('function toggleMobileNavigation');
     expect(app).toContain("state.tournamentScope = button.dataset.target === 'my-tournaments' ? 'mine' : 'discoverable'");
     expect(page).toContain('id="sidebar-backdrop"');
-    expect(page).toContain('id="tournament-tab-mine"');
+    expect(page).not.toContain('tournament-scope-tab');
   });
 
   it('keeps dashboard queue data organizer-only and role-specific', async () => {

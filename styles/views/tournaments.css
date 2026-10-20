@@ -542,7 +542,7 @@
     }
 
     .tournaments-page .tournament-grid {
-      grid-template-columns: repeat(3, minmax(0, 1fr));
+      grid-template-columns: repeat(4, minmax(0, 1fr));
       align-items: stretch;
       justify-content: stretch;
       gap: 16px;
@@ -660,6 +660,21 @@
       justify-content: flex-end;
       padding-top: 14px;
       border-top: 1px solid #e7ece8;
+    }
+
+    .tournament-pagination {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 12px;
+      margin-top: 20px;
+    }
+
+    .tournament-pagination-label {
+      min-width: 84px;
+      color: var(--text-secondary);
+      font-size: .78rem;
+      text-align: center;
     }
 
     .tournaments-page .tournament-card-id {

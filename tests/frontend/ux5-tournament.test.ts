@@ -5,7 +5,10 @@ describe('UX.5 tournament discovery, management, and registration', () => {
   it('uses the supported role projections and distinguishes search/filter empty states', async () => {
     const app = await readAssembledFrontendScript();
     const page = await readAssembledFrontendMarkup();
-    expect(app).toContain("state.tournamentScope === 'mine' ? '/my/tournaments' : '/tournaments/discoverable'");
+    expect(app).toContain("request('/tournaments/discoverable')");
+    expect(app).toContain("request('/my/tournaments')");
+    expect(app).toContain('merged.set(tournament.tournamentId');
+    expect(app).toContain('state.tournaments = Array.isArray(response) ? response : []');
     expect(app).toContain('state.tournamentStatusFilter === \'all\'');
     expect(app).toContain('Không tìm thấy giải đấu phù hợp');
     expect(app).toContain('Chưa có yêu cầu tham gia');
@@ -16,6 +19,10 @@ describe('UX.5 tournament discovery, management, and registration', () => {
   it('keeps cards role-aware and uses one actionable registration path', async () => {
     const app = await readAssembledFrontendScript();
     expect(app).toContain('function renderDiscoverableTournamentCards');
+    expect(app).toContain('const pageSize = 8');
+    expect(app).toContain('function renderTournamentPagination(totalPages)');
+    expect(app).toContain('function tournamentParticipationBadge(tournament)');
+    expect(app).toContain("joined: 'Đã tham gia'");
     expect(app).toContain("state.tournamentRegistrationContext = { name: tournament.name, status: tournament.status }");
     expect(app).toContain("actionButton('Xem chi tiết'");
     expect(app).toContain('const requestButton = actionButton');

@@ -42,4 +42,11 @@ describe('UX.1 CSS foundation', () => {
     expect(css).toContain('prefers-reduced-motion');
     expect(css).toContain('body.no-motion');
   });
+
+  it('uses one shared semantic palette for status badges', async () => {
+    const [css, page] = await Promise.all([source('style.css'), source('index.html')]);
+    expect(css).toContain('body .status-badge.status-running');
+    expect(css).toContain('body .status-badge.status-completed');
+    expect(page).toContain('body .status-badge.status-registration_open');
+  });
 });

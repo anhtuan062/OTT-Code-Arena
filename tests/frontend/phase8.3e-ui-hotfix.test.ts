@@ -23,7 +23,7 @@ describe('Phase 8.3e UI hotfixes', () => {
   it('provides responsive navigation and lifecycle focus', async () => {
     const [app, page] = await Promise.all([readAssembledFrontendScript(), readAssembledFrontendMarkup()]);
     expect(page).toContain('class="bottom-nav"');
-    expect(page).toContain('id="tournament-tab-mine"');
+    expect(page).not.toContain('tournament-scope-tab');
     expect(app).toContain("current.scrollIntoView({ inline: 'center', block: 'nearest' })");
   });
   it('explains why revision-backed Bots cannot be deleted', async () => {

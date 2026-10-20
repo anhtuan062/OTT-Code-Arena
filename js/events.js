@@ -27,10 +27,14 @@ function bindEvents() {
     if (link.dataset.target === 'tournaments' && link.dataset.scope) state.tournamentScope = link.dataset.scope;
     navigate(link.dataset.target);
   }));
-  document.querySelectorAll('.tournament-scope-tab').forEach(tab => on(tab, 'click', () => {
-    state.tournamentScope = tab.dataset.scope || 'discoverable';
-    navigate('tournaments');
-  }));
+  on(document, 'click', event => {
+    const breadcrumbLink = event.target?.closest?.('.topbar-breadcrumb-link');
+    if (!breadcrumbLink) return;
+    event.preventDefault();
+    const targetView = breadcrumbLink.getAttribute('href')?.slice(1) || 'tournaments';
+    if (targetView === 'tournaments' && state.user?.role === 'organizer') state.tournamentScope = 'managed';
+    navigate(targetView);
+  }, { feature: 'topbar breadcrumb navigation' });
     on('#show-register', 'click', () => setAuthMode('register'));
    on('#show-login', 'click', () => setAuthMode('login'));
   // Auth markup may be loaded as a page fragment after the initial bindings.
@@ -87,8 +91,12 @@ function bindEvents() {
     const bot = state.bots.find(item => item.id === event.target.value);
     void openBotWorkspace(bot || null);
   });
-  on('#bot-search', 'input', event => { state.botSearch = event.target.value; renderBotList(); });
-  on('#bot-workspace-name', 'input', () => { setSourceDirty(state.sourceDirty); persistBotWorkspaceDraft(); });
+  on('#bot-search', 'input', event => { state.botSearch = event.target.value; state.botPage = 1; renderBotList(); });
+  on('#bot-workspace-name', 'input', () => {
+    const nameChanged = ($('#bot-workspace-name')?.value.trim() || '') !== state.sourceInitialName;
+    setSourceDirty(state.sourceDirty || nameChanged);
+    persistBotWorkspaceDraft();
+  });
   on('#bot-workspace-name', 'keydown', event => {
     if (event.key !== 'Enter' || event.isComposing) return;
     event.preventDefault();
@@ -188,9 +196,8 @@ function bindEvents() {
     state.practiceRequestToken += 1;
     clearPracticeResult();
   });
-  on('#bot-workspace-back', 'click', () => navigate('bots'));
-   on('#tournament-search', 'input', event => { state.tournamentSearch = event.target.value; renderTournamentList(); });
-   on('#tournament-status-filter', 'change', event => { state.tournamentStatusFilter = event.target.value; renderTournamentList(); });
+    on('#tournament-search', 'input', event => { state.tournamentSearch = event.target.value; state.tournamentPage = 1; renderTournamentList(); });
+    on('#tournament-status-filter', 'change', event => { state.tournamentStatusFilter = event.target.value; state.tournamentPage = 1; renderTournamentList(); });
    on('#dashboard-tournament-search', 'input', event => { state.dashboardTournamentSearch = event.target.value; void loadDashboard(); });
    on('#dashboard-tournament-status', 'change', event => { state.dashboardTournamentStatus = event.target.value; void loadDashboard(); });
   on('#confirm-delete-bot', 'click', () => void deleteBot());
@@ -198,7 +205,7 @@ function bindEvents() {
   on('#confirm-tournament-action', 'click', () => { const pending = state.pendingTournamentAction; if (!pending) return; const revision = state.tournamentActionRevision; void runPending(`tournament:${pending.tournamentId}:${pending.action}`, $('#confirm-tournament-action'), async () => { await tournamentAction(pending.tournamentId, pending.authRevision, pending.viewRevision, pending.action); if (state.tournamentActionRevision === revision) closeModal('tournament-action-modal'); }); });
   on('#mobile-menu-toggle', 'click', toggleMobileNavigation); on('#sidebar-backdrop', 'click', closeMobileNavigation);
   on('#open-bot-guide', 'click', openBotGuide);
-  on('#back-to-tournaments', 'click', () => navigate('tournaments')); on('#btn-register-bot', 'click', () => { openRegistrationDialog(); void populateBotSelect(); });
+  on('#btn-register-bot', 'click', () => { openRegistrationDialog(); void populateBotSelect(); });
   on('#go-to-bots-from-registration', 'click', goToBotsFromRegistration);
   on('#retry-registration-bots', 'click', retryRegistrationBots);
   on('#reg-part-name', 'input', () => { $('#reg-part-name').setAttribute('aria-invalid', $('#reg-part-name').value.trim() ? 'false' : 'true'); });
@@ -228,7 +235,7 @@ function bindEvents() {
     } else trapModalFocus(event);
   }, { required: true, feature: 'global keyboard navigation' });
   on(window, 'beforeunload', event => {
-    if (!state.sourceDirty) return;
+    if (!hasUnsavedBotWorkspaceChanges()) return;
     event.preventDefault();
     event.returnValue = '';
   });

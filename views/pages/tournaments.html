@@ -1,9 +1,5 @@
 <!-- TOURNAMENTS LIST -->
   <div id="tournaments" class="page tournaments-page">
-    <div class="tournament-scope-tabs" id="tournament-scope-tabs" role="tablist" aria-label="Phạm vi giải đấu" hidden>
-      <button class="tournament-scope-tab active" id="tournament-tab-discoverable" type="button" role="tab" data-scope="discoverable" aria-selected="true">Giải đấu đang mở</button>
-      <button class="tournament-scope-tab" id="tournament-tab-mine" type="button" role="tab" data-scope="mine" aria-selected="false">Giải đấu của tôi</button>
-    </div>
     <div class="tournament-toolbar" id="tournaments-toolbar" hidden>
       <div class="tournament-toolbar-controls">
         <label class="bot-search" for="tournament-search"><svg class="ui-icon search-icon" aria-hidden="true"><use href="#icon-search"></use></svg><span class="visually-hidden">Tìm giải đấu theo tên</span><input id="tournament-search" type="search" placeholder="Tìm giải đấu theo tên" autocomplete="off"></label>
@@ -14,4 +10,5 @@
     </div>
     <section id="tournaments-list" class="tournament-grid" aria-live="polite" aria-label="Các giải đấu của bạn">
     </section>
+    <nav id="tournament-pagination" class="tournament-pagination" aria-label="Phân trang giải đấu" hidden></nav>
   </div>

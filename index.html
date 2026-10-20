@@ -323,6 +323,36 @@
       letter-spacing: .13em;
     }
 
+    .topbar-breadcrumb-link {
+      color: inherit;
+      text-decoration: none;
+      transition: color .15s ease, text-decoration-color .15s ease;
+    }
+
+    .topbar-breadcrumb-link:hover,
+    .topbar-breadcrumb-link:focus-visible {
+      color: #176b4d;
+      text-decoration: underline;
+      text-decoration-thickness: 1px;
+      text-underline-offset: 3px;
+    }
+
+    .topbar-breadcrumb-link:focus-visible {
+      outline: 2px solid #176b4d;
+      outline-offset: 3px;
+      border-radius: 2px;
+    }
+
+    .topbar-breadcrumb-separator {
+      margin: 0 .45em;
+      color: #91a097;
+      font-weight: 500;
+    }
+
+    .topbar-breadcrumb-current {
+      font-weight: 700;
+    }
+
     .topbar-title h1 {
       font-size: 1.15rem;
       letter-spacing: -.02em;
@@ -6241,6 +6271,52 @@
       .schedule-heading { align-items:flex-start; flex-direction:column; }
       .tournament-detail-redesign .schedule-table-scroll { overflow-x:auto; }
     }
+    /* Final My Bots toolbar refinement: keep the create action content-sized. */
+    body #bots.bots-page .bots-toolbar { gap: 14px; min-height: 48px; margin-bottom: 22px; padding: 10px 12px; border: 1px solid #dfe9e2; border-radius: 14px; background: #fff; }
+    body #bots.bots-page .bots-toolbar .bot-search { flex: 1 1 420px; max-width: 460px; }
+    body #bots.bots-page .bots-count { margin-left: auto; font-size: .76rem; white-space: nowrap; }
+    body #bots.bots-page .workspace-primary-action { display: inline-flex; width: fit-content; min-width: 0; flex: 0 0 auto; padding: 9px 13px; font-size: .84rem; white-space: nowrap; }
+    body #bots.bots-page .workspace-primary-action .ui-icon { width: 16px; height: 16px; flex: 0 0 auto; }
+    body #bots.bots-page .bot-pagination { display: flex; align-items: center; justify-content: center; gap: 12px; margin-top: 20px; }
+    body #bots.bots-page .bot-pagination-label { min-width: 84px; color: #6b7b71; font-size: .78rem; text-align: center; }
+    body #bots.bots-page .bot-pagination-button { width: auto; min-width: 72px; padding: 8px 12px; }
+    body #bots.bots-page .bot-actions .bot-action.primary-btn { border: 1px solid #b9ddc6; background: #edf8f1; color: #176b4d; box-shadow: none; }
+    body #bots.bots-page .bot-actions .bot-action.primary-btn:hover,
+    body #bots.bots-page .bot-actions .bot-action.primary-btn:focus-visible { border-color: #8fc5a2; background: #e0f2e7; color: #0f553c; box-shadow: none; transform: none; }
+    body #bots.bots-page .bot-actions .bot-delete { background: transparent; box-shadow: none; }
+    .bot-workspace-page .bot-workspace-selector { display: grid; width: min(260px, 100%); min-width: 0; gap: 8px; color: #65736a; font-size: .72rem; font-weight: 700; }
+    .bot-workspace-page .bot-workspace-selector > span { line-height: 1.2; }
+    .bot-workspace-page .bot-workspace-selector .input-shell { margin: 0; }
+    .bot-workspace-page .bot-workspace-selector .input-shell,
+    .bot-workspace-page .workspace-name-field .input-shell,
+    .bot-workspace-page .source-runtime-picker .input-shell { min-height: 42px; height: 42px; padding-top: 9px; padding-bottom: 9px; font-size: .82rem; }
+    @keyframes bots-rise-in-final {
+      from { opacity: 0; transform: translate3d(0, 14px, 0); }
+      to { opacity: 1; transform: translate3d(0, 0, 0); }
+    }
+    body #bots.bots-page.active .bots-toolbar,
+    body #bots.bots-page.active .bot-grid > * { animation: bots-rise-in-final .42s cubic-bezier(.22, 1, .36, 1) both; }
+    body #bots.bots-page.active .bot-grid > *:nth-child(2) { animation-delay: 55ms; }
+    body #bots.bots-page.active .bot-grid > *:nth-child(3) { animation-delay: 110ms; }
+    body #bots.bots-page.active .bot-grid > *:nth-child(4) { animation-delay: 165ms; }
+    body #bots.bots-page.active .bot-grid > *:nth-child(5) { animation-delay: 220ms; }
+    body #bots.bots-page.active .bot-grid > *:nth-child(6) { animation-delay: 275ms; }
+    body #bots.bots-page.active .bot-grid > *:nth-child(7) { animation-delay: 330ms; }
+    body #bots.bots-page.active .bot-grid > *:nth-child(8) { animation-delay: 385ms; }
+    body #bots.bots-page.active .bot-grid > *:nth-child(9) { animation-delay: 440ms; }
+    body #bots.bots-page.active .bot-grid > *:nth-child(10) { animation-delay: 495ms; }
+    body #bots.bots-page.active .bot-grid > *:nth-child(11) { animation-delay: 550ms; }
+    body #bots.bots-page.active .bot-grid > *:nth-child(12) { animation-delay: 605ms; }
+    @media (prefers-reduced-motion: reduce) {
+      body #bots.bots-page.active .bots-toolbar,
+      body #bots.bots-page.active .bot-grid > * { animation: none; }
+    }
+    @media (max-width: 640px) {
+      body #bots.bots-page .bots-toolbar { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 10px; padding: 10px; }
+      body #bots.bots-page .bots-toolbar .bot-search { grid-column: 1 / -1; max-width: none; }
+      body #bots.bots-page .workspace-primary-action { justify-self: end; margin-left: 0; }
+    }
+
     /* Final My Bots refinements */
     .bots-page { max-width: none !important; }
     .bots-page .bot-grid { width: 100%; }
@@ -6317,7 +6393,7 @@
     .bot-search { position: relative; width: min(100%, 340px); max-width: 340px; }
     .bot-search .search-icon { position: absolute; top: 50%; left: 13px; width: 25px; height: 25px; color: var(--text-faint); pointer-events: none; transform: translateY(-50%); }
     .bot-search input { padding-left: 40px; }
-    .bot-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 18px; align-items: stretch; }
+    .bot-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 18px; align-items: stretch; }
     .bot-card { display: flex; min-height: 216px; flex-direction: column; padding: 20px; border-radius: 14px; }
     .bot-card-identity { display: flex; min-width: 0; align-items: flex-start; gap: 11px; }
     .bot-card-icon { display: inline-flex; width: 36px; height: 36px; flex: 0 0 auto; align-items: center; justify-content: center; border-radius: 10px; background: #e8f4ed; color: #176b50; }
@@ -7311,6 +7387,87 @@
         margin: 4px 0 0;
       }
     }
+    /* Shared status palette: keep semantic states consistent across all views. */
+    body .status-badge.status-draft,
+    body .status-badge.status-scheduled,
+    body .status-badge.status-queued {
+      background: #f1f5f2;
+      border-color: #d8e1db;
+      color: #607066;
+    }
+
+    body .status-badge.status-registration_open {
+      background: #e7f0ff;
+      border-color: #c8dcff;
+      color: #285ea8;
+    }
+
+    body .status-badge.status-registration_closed {
+      background: #fff5df;
+      border-color: #f0d9a5;
+      color: #87611b;
+    }
+
+    body .status-badge.status-in_progress,
+    body .status-badge.status-active,
+    body .status-badge.status-running {
+      background: #e4f1eb;
+      border-color: #c4e3cd;
+      color: #176b3b;
+    }
+
+    body .status-badge.status-completed {
+      background: #def4e6;
+      border-color: #c2e5cf;
+      color: #137348;
+    }
+
+    body .status-badge.status-failed,
+    body .status-badge.status-error,
+    body .status-badge.status-cancelled {
+      background: #fff0ef;
+      border-color: #efc9c5;
+      color: #a0463e;
+    }
+
+    /* Compact tournament cards: keep the title/badges readable and the action area balanced. */
+    body .tournaments-page .tournament-card {
+      min-height: 164px;
+      gap: 12px;
+      padding: 18px;
+    }
+
+    body .tournaments-page .tournament-card > div:first-child {
+      flex-wrap: wrap;
+      row-gap: 8px;
+    }
+
+    body .tournaments-page .tournament-card > div:first-child h3 {
+      flex: 1 1 100%;
+    }
+
+    body .tournaments-page .tournament-card-footer {
+      padding-top: 10px;
+    }
+
+    body .tournaments-page .tournament-grid {
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+    }
+
+    .tournament-pagination {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 12px;
+      margin-top: 20px;
+    }
+
+    .tournament-pagination-label {
+      min-width: 84px;
+      color: var(--text-secondary);
+      font-size: .78rem;
+      text-align: center;
+    }
   </style>
   <link rel="stylesheet" href="styles/components/app-shell.css">
   <link rel="stylesheet" href="styles/views/auth.css">
@@ -7335,10 +7492,7 @@
     <nav class="nav-links" aria-label="Không gian làm việc">
       <button class="nav-link active" type="button" data-target="dashboard" aria-current="page"><svg class="ui-icon" aria-hidden="true"><use href="#icon-dashboard"></use></svg>Tổng quan</button>
       <button class="nav-link role-nav competitor-nav" type="button" data-role="competitor" data-target="bots"><svg class="ui-icon" aria-hidden="true"><use href="#icon-users"></use></svg><span>Bot của tôi</span><span class="nav-badge" id="nav-badge-bots" hidden></span></button>
-      <button class="nav-link role-nav competitor-nav" type="button" data-role="competitor" data-target="tournaments"
-        data-scope="discoverable"><svg class="ui-icon" aria-hidden="true"><use href="#icon-trophy"></use></svg><span>Giải đấu đang mở</span><span class="nav-badge" id="nav-badge-tourneys" hidden></span></button>
-      <button class="nav-link role-nav competitor-nav" type="button" data-role="competitor" data-target="tournaments"
-        data-scope="mine"><svg class="ui-icon" aria-hidden="true"><use href="#icon-trophy"></use></svg>Giải đấu của tôi</button>
+      <button class="nav-link role-nav competitor-nav" type="button" data-role="competitor" data-target="tournaments"><svg class="ui-icon" aria-hidden="true"><use href="#icon-trophy"></use></svg><span>Giải đấu</span><span class="nav-badge" id="nav-badge-tourneys" hidden></span></button>
       <button class="nav-link role-nav organizer-nav" type="button" data-role="organizer" data-target="tournaments"
         data-scope="managed" hidden><svg class="ui-icon" aria-hidden="true"><use href="#icon-users"></use></svg>Quản lý giải đấu</button>
     </nav>
@@ -7349,7 +7503,7 @@
     <button id="mobile-menu-toggle" class="mobile-menu-toggle" type="button" aria-label="Mở điều hướng"
       aria-controls="app-nav" aria-expanded="false"><span></span><span></span><span></span></button>
     <div class="topbar-title">
-      <p id="topbar-breadcrumb">Quản lý / Tổng quan</p>
+      <p id="topbar-breadcrumb"><span class="topbar-breadcrumb-current" aria-current="page">Quản lý giải đấu</span></p>
      
     </div>
     <div class="topbar-user">

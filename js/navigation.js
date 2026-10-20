@@ -28,8 +28,71 @@ function isCurrentView(view, authRevision, viewRevision, tournamentId) {
 }
 
 function canLeaveBotWorkspace() {
-  return state.activeView !== 'bot-workspace' || !state.sourceDirty
+  return state.activeView !== 'bot-workspace' || !hasUnsavedBotWorkspaceChanges()
     || window.confirm('Bạn có thay đổi chưa lưu. Bạn có chắc muốn rời không gian mã nguồn?');
+}
+
+function renderTopbarBreadcrumb(sectionTitle, currentTitle, showParent = true, parentTarget = 'tournaments') {
+  const topbarBreadcrumb = $('#topbar-breadcrumb');
+  if (!topbarBreadcrumb) return;
+
+  const current = create('span', {
+    className: 'topbar-breadcrumb-current',
+    text: currentTitle,
+    attrs: { 'aria-current': 'page' },
+  });
+
+  if (!showParent) {
+    topbarBreadcrumb.replaceChildren(current);
+    return;
+  }
+
+  const sectionLink = create('a', {
+    className: 'topbar-breadcrumb-link',
+    text: sectionTitle,
+    attrs: {
+      href: `#${parentTarget}`,
+      'aria-label': `Về ${sectionTitle}`,
+    },
+  });
+  const separator = create('span', {
+    className: 'topbar-breadcrumb-separator',
+    text: '/',
+    attrs: { 'aria-hidden': 'true' },
+  });
+
+  topbarBreadcrumb.replaceChildren(sectionLink, separator, current);
+}
+
+function updateTopbarTournamentBreadcrumb(name) {
+  if (state.activeView !== 'tournament-detail' || !name) return;
+  renderTopbarBreadcrumb(getTournamentDetailParentTitle(), name, true);
+}
+
+function getTournamentDetailParentTitle() {
+  if (state.tournamentDetailSource === 'dashboard') return 'Tổng quan';
+  if (state.tournamentDetailSource === 'tournaments') {
+    return state.user?.role === 'organizer'
+      ? 'Quản lý giải đấu'
+      : state.tournamentScope === 'mine' ? 'Giải đấu của tôi' : 'Giải đấu';
+  }
+  return state.user?.role === 'organizer' ? 'Quản lý' : 'Giải đấu';
+}
+
+function getBotWorkspaceParent() {
+  if (state.botWorkspaceSource === 'dashboard') return { title: 'Tổng quan', target: 'dashboard' };
+  if (state.botWorkspaceSource === 'tournaments' || state.botWorkspaceSource === 'tournament-detail') return { title: 'Giải đấu', target: 'tournaments' };
+  return { title: 'Bot của tôi', target: 'bots' };
+}
+
+function getReplayParent(sectionTitle) {
+  if (state.replayContext?.practice && state.practiceReplayParent) return state.practiceReplayParent;
+  if (state.replayContext?.practice && (state.practiceSourceMode === 'create' || !state.sourceWorkspaceBot?.id)) {
+    return { title: 'Tạo Bot', target: 'bot-workspace' };
+  }
+  return state.replayContext?.practice
+    ? { title: 'Bot của tôi', target: 'bots' }
+    : { title: sectionTitle, target: 'tournaments' };
 }
 
 function navigate(view, options = {}) {
@@ -40,7 +103,10 @@ function navigate(view, options = {}) {
   if (view !== 'tournament-detail' && typeof stopMultiStagePolling === 'function') stopMultiStagePolling();
   if (view !== 'tournament-detail' && typeof stopPhase2PreflightPolling === 'function') stopPhase2PreflightPolling();
   if (view === 'bot-workspace' && state.user?.role !== 'competitor') return false;
-  if (view !== state.activeView && !canLeaveBotWorkspace()) return false;
+  // Opening the practice replay does not replace the draft; keep the editor
+  // state intact without treating the preview transition as a destructive exit.
+  const isPracticeReplay = view === 'replay-view' && state.replayContext?.practice === true;
+  if (view !== state.activeView && !isPracticeReplay && !canLeaveBotWorkspace()) return false;
   if (view !== 'replay-view') {
     stopReplayPlayback();
     if (typeof stopPracticeReplay === 'function') stopPracticeReplay();
@@ -64,17 +130,21 @@ function navigate(view, options = {}) {
     link.classList.toggle('active', active);
     link.setAttribute('aria-current', active ? 'page' : 'false');
   });
-  const pageTitles = { dashboard: state.user?.role === 'organizer' ? 'Tổng quan giải đấu' : 'Tổng quan', bots: 'Bot của tôi', 'bot-workspace': 'Tạo Bot', tournaments: state.tournamentScope === 'mine' ? 'Giải đấu của tôi' : state.user?.role === 'organizer' ? 'Quản lý giải đấu' : 'Giải đấu đang mở', 'tournament-detail': 'Chi tiết giải đấu', 'replay-view': 'Xem lại trận đấu' };
+  const tournamentCache = Array.isArray(state.tournaments) ? state.tournaments : [];
+  const pageTitles = { dashboard: state.user?.role === 'organizer' ? 'Tổng quan giải đấu' : 'Tổng quan', bots: 'Bot của tôi', 'bot-workspace': 'Tạo Bot', tournaments: state.user?.role === 'organizer' ? 'Quản lý giải đấu' : 'Giải đấu', 'tournament-detail': state.currentTournament?.name || tournamentCache.find(tournament => tournament.tournamentId === state.tournamentId)?.name || 'Chi tiết giải đấu', 'replay-view': 'Xem lại trận đấu' };
   const pageTitle = $('#page-title');
   if (pageTitle) pageTitle.textContent = pageTitles[view] || 'OTT Code Arena';
-  const topbarBreadcrumb = $('#topbar-breadcrumb');
-  if (topbarBreadcrumb) {
-    const sectionTitle = state.user?.role === 'organizer' ? 'Quản lý' : 'Giải đấu';
-    const currentTitle = view === 'dashboard'
-      ? 'Tổng quan'
-      : pageTitles[view] || 'OTT Code Arena';
-    topbarBreadcrumb.textContent = `${sectionTitle} / ${currentTitle}`;
-  }
+  const sectionTitle = state.user?.role === 'organizer' ? 'Quản lý' : 'Giải đấu';
+  const currentTitle = view === 'dashboard'
+    ? 'Tổng quan'
+    : pageTitles[view] || 'OTT Code Arena';
+  const botWorkspaceParent = view === 'bot-workspace' ? getBotWorkspaceParent() : null;
+  const replayParent = view === 'replay-view' ? getReplayParent(sectionTitle) : null;
+  const breadcrumbParent = view === 'tournament-detail'
+    ? getTournamentDetailParentTitle()
+    : replayParent?.title || botWorkspaceParent?.title || sectionTitle;
+  const breadcrumbTarget = replayParent?.target || botWorkspaceParent?.target || 'tournaments';
+  renderTopbarBreadcrumb(breadcrumbParent, currentTitle, ['bot-workspace', 'tournament-detail', 'replay-view'].includes(view), breadcrumbTarget);
   closeMobileNavigation();
   target.classList.add('active');
   if (view === 'dashboard') void loadDashboard();

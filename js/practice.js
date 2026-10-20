@@ -382,6 +382,12 @@ function openCurrentPracticeRunner() {
   const runtimeId = $('#bot-source-runtime')?.value;
   const source = $('#bot-source-editor')?.value || '';
   if (!source.trim()) return setSourceError('Mã nguồn không được để trống.');
+  state.practiceSourceMode = state.sourceWorkspaceBot?.id ? 'edit' : 'create';
+  const previousBreadcrumb = $('#topbar-breadcrumb .topbar-breadcrumb-current')?.textContent?.trim();
+  state.practiceReplayParent = {
+    title: previousBreadcrumb || 'Tạo Bot',
+    target: state.activeView || 'bot-workspace',
+  };
   if (state.sourceDirty || !currentPracticeRevision()) {
     state.practiceDraft = { source, runtimeId, executionMode: state.sourceExecutionMode };
     openPracticeRunner({ botId: state.sourceWorkspaceBot?.id || 'draft-bot', revisionId: 'draft-current', label: 'Bản nháp hiện tại', runtimeId, executionMode: state.sourceExecutionMode });

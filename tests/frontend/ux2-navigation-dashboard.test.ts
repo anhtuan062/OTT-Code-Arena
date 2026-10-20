@@ -7,8 +7,9 @@ describe('UX.2 role-aware navigation and dashboard', () => {
   it('defines role-specific navigation without unsupported destinations', async () => {
     const page = await readAssembledFrontendMarkup();
     expect(page).toContain('data-role="competitor" data-target="bots"');
-    expect(page).toContain('data-scope="discoverable"');
-    expect(page).toContain('data-scope="mine"');
+    expect(page).not.toContain('tournament-scope-tab');
+    expect(page).not.toContain('id="tournament-tab-discoverable"');
+    expect(page).not.toContain('id="tournament-tab-mine"');
     expect(page).toContain('data-role="organizer"');
     expect(page).toContain('data-scope="managed"');
     expect(page).not.toContain('data-target="results"');
@@ -33,13 +34,20 @@ describe('UX.2 role-aware navigation and dashboard', () => {
     expect(page).toContain('id="sidebar-backdrop"');
     expect(app).toContain('function toggleMobileNavigation()');
     expect(app).toContain('function closeMobileNavigation()');
-    expect(app).toContain('if (view !== state.activeView && !canLeaveBotWorkspace()) return false;');
+      expect(app).toContain('if (view !== state.activeView && !isPracticeReplay && !canLeaveBotWorkspace()) return false;');
   });
   it('updates the visible shell breadcrumb when opening tournament details', async () => {
     const [page, app] = await Promise.all([readAssembledFrontendMarkup(), source('app.js')]);
     expect(page).toContain('id="topbar-breadcrumb"');
+    expect(page).toContain('class="topbar-breadcrumb-current" aria-current="page"');
     expect(app).toContain("const topbarBreadcrumb = $('#topbar-breadcrumb');");
     expect(app).toContain("const sectionTitle = state.user?.role === 'organizer' ? 'Quản lý' : 'Giải đấu';");
-    expect(app).toContain('topbarBreadcrumb.textContent = `${sectionTitle} / ${currentTitle}`;');
+    expect(app).toContain("className: 'topbar-breadcrumb-link'");
+    expect(app).toContain('updateTopbarTournamentBreadcrumb(name);');
+    expect(app).toContain("'tournament-detail': state.currentTournament?.name");
+    expect(app).toContain("if (state.tournamentDetailSource === 'dashboard') return 'Tổng quan';");
+    expect(app).toContain("const botWorkspaceParent = view === 'bot-workspace' ? getBotWorkspaceParent() : null;");
+    expect(app).toContain("['bot-workspace', 'tournament-detail', 'replay-view'].includes(view)");
+    expect(app).toContain("feature: 'topbar breadcrumb navigation'");
   });
 });
