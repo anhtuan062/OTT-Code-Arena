@@ -1,0 +1,94 @@
+name: Cloudflare Pages CD
+
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cloudflare-pages-full-frontend
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy full frontend to Cloudflare Pages
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_branch == 'main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment:
+      name: production-pages
+    steps:
+      - name: Check out the CI-tested commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          fetch-depth: 1
+
+      - name: Reject stale successful CI commits
+        env:
+          EXPECTED_SHA: ${{ github.event.workflow_run.head_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --no-tags --depth=1 origin refs/heads/main:refs/remotes/origin/main
+          checked_out_sha="$(git rev-parse HEAD)"
+          current_main_sha="$(git rev-parse refs/remotes/origin/main)"
+          test "$checked_out_sha" = "$EXPECTED_SHA"
+          test "$current_main_sha" = "$EXPECTED_SHA" || {
+            echo "Refusing deployment: successful CI commit is no longer current main" >&2
+            exit 1
+          }
+
+      - name: Validate separate Pages project configuration
+        env:
+          PAGES_PROJECT: ${{ vars.CLOUDFLARE_PAGES_PROJECT }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$PAGES_PROJECT" =~ ^[a-z0-9][a-z0-9-]{0,62}$ ]]
+          test "$PAGES_PROJECT" = "ott-code-arena" || {
+            echo "Refusing deployment: full frontend must target the ott-code-arena Pages project" >&2
+            exit 1
+          }
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20.19.5'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build the standalone frontend
+        run: npm run build:public
+
+      - name: Validate Pages assets and Functions layout
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f dist/public/index.html
+          test -f dist/public/app.js
+          test -f dist/public/style.css
+          test -f functions/api/'[[path]].ts'
+          test ! -e dist/public/functions
+
+          forbidden="$(find dist/public -type f \( \
+            -name '*.sqlite' -o -name '*.sqlite-*' -o -name '*.db' -o \
+            -name '.env' -o -name '.env.*' -o -name '*.pem' -o -name '*.key' \
+          \) -print)"
+          test -z "$forbidden"
+
+      - name: Deploy full frontend Pages project
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: pages deploy dist/public --project-name=${{ vars.CLOUDFLARE_PAGES_PROJECT }}
