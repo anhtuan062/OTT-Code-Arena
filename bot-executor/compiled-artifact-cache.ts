@@ -435,7 +435,7 @@ export class CompiledArtifactCache {
           await fs.rename(stagingPath, guardPath);
         } catch (error) {
           await fs.rm(stagingPath, { recursive: true, force: true }).catch(() => {});
-          if ((error as NodeJS.ErrnoException).code !== 'EEXIST' && (error as NodeJS.ErrnoException).code !== 'EPERM') throw error;
+          if (!['EEXIST', 'ENOTEMPTY', 'EPERM'].includes((error as NodeJS.ErrnoException).code ?? '')) throw error;
           await this.recoverEntryGuard(guardPath);
           await delay(10);
           continue;
