@@ -173,6 +173,44 @@ describe('source revision Docker adapter contracts', () => {
     }
   });
 
+  it('stages source and SDK bytes through owned Docker volumes without host mounts', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'ott-volume-staging-'));
+    try {
+      const sourceDir = path.join(root, 'source');
+      const sdkDir = path.join(root, 'sdk');
+      await fs.mkdir(sourceDir); await fs.mkdir(sdkDir);
+      const files = {
+        'strategy.cpp': Buffer.from('trusted source'),
+        VERSION: Buffer.from('1.0.0'),
+        'ott_strategy_sdk.hpp': Buffer.from('trusted sdk'),
+      };
+      for (const [name, value] of Object.entries(files)) {
+        await fs.writeFile(path.join(name === 'strategy.cpp' ? sourceDir : sdkDir, name), value);
+      }
+      const executor = createRevisionDockerExecutor({ ...config(), workingDirBase: root, dockerVolumeStaging: true }) as any;
+      vi.spyOn(executor, 'dockerCommandBounded').mockResolvedValue('');
+      const run = vi.spyOn(executor, 'runContainer').mockImplementation(async (executionId: string, args: string[], input: string | Buffer | undefined) => ({
+        code: 0, stdout: executionId.endsWith('-verify')
+          ? `${createHash('sha256').update(files['strategy.cpp']).digest('hex')}  /app/source/strategy.cpp\n` +
+            `${createHash('sha256').update(files.VERSION).digest('hex')}  /app/sdk/VERSION\n` +
+            `${createHash('sha256').update(files['ott_strategy_sdk.hpp']).digest('hex')}  /app/sdk/ott_strategy_sdk.hpp\n`
+          : '', stderr: '', timedOut: false, killed: false, cancelled: false,
+        elapsedMs: 1, cleanupMs: 0, cleanupSucceeded: true,
+      }));
+      await executor.prepareVolumeWorkspace(executor.newVolumeWorkspace('volume-stage'), sourceDir, sdkDir, 'cpp');
+      const stageCalls = run.mock.calls.filter(([executionId]) => executionId.includes('-source-') || executionId.includes('-sdk-'));
+      expect(stageCalls).toHaveLength(3);
+      for (const [, args, input] of stageCalls) {
+        expect(args.some(value => value.includes(`${sourceDir}:`) || value.includes(`${sdkDir}:`))).toBe(false);
+        expect(args.some(value => value.includes(':/app/source:rw') || value.includes(':/app/sdk:rw'))).toBe(true);
+        expect(Buffer.isBuffer(input)).toBe(true);
+      }
+      expect(stageCalls.map(([, , input]) => (input as Buffer).toString())).toEqual(expect.arrayContaining(['trusted source', '1.0.0', 'trusted sdk']));
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+
   it('provides an immutable identity for each strategy SDK runtime', async () => {
     const cpp = await getStrategySdkIdentity('cpp');
     const python = await getStrategySdkIdentity('python3');

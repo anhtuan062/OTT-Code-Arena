@@ -63,6 +63,8 @@ export interface RevisionDockerExecutorConfig {
   compiledArtifactCacheMaxEntries?: number;
   /** Opt-in bridge for C++ artifacts compiled in ephemeral Docker volumes. */
   cppEphemeralArtifactCache?: boolean;
+  /** Stage source/SDK bytes into Docker volumes instead of host bind paths. */
+  dockerVolumeStaging?: boolean;
 }
 
 export type DockerResourceKind = 'compile' | 'runtime' | 'warm' | 'volume' | 'workspace' | 'artifact-import' | 'artifact-export';
@@ -406,6 +408,7 @@ export class RevisionDockerExecutor {
       defaultPreparationTimeoutMs: 10_000,
       cppCompilationBackend: 'bind',
       cppEphemeralArtifactCache: false,
+      dockerVolumeStaging: false,
       ...config,
     };
     this.config.cppCompilationBackend = resolveCppCompilationBackend(config.cppCompilationBackend);
@@ -822,6 +825,7 @@ export class RevisionDockerExecutor {
             artifactDigest: provenance.artifactDigest,
           };
           if (artifactKey && context.revisionScopeId) this.preparedArtifacts.set(artifactKey, artifact);
+          retainArtifact = Boolean(artifactKey && context.revisionScopeId);
           return this.executePreparedRuntime(context, revision, request, artifact, timings);
         }
       }
@@ -1082,6 +1086,27 @@ export class RevisionDockerExecutor {
     }
 
     const stage = async (suffix: string, hostDir: string, volume: string, target: string): Promise<void> => {
+      if (this.config.dockerVolumeStaging) {
+        const names = (await fs.readdir(hostDir, { withFileTypes: true }))
+          .filter(entry => entry.isFile() && /^[A-Za-z0-9_.-]+$/.test(entry.name))
+          .map(entry => entry.name);
+        for (const name of names) {
+          const content = await fs.readFile(path.join(hostDir, name));
+          const destination = `${target}/${name}`;
+          const stageScript = `set -eu; umask 022; cat > ${target}/.ott-stage.tmp; mv -f ${target}/.ott-stage.tmp ${destination}`;
+          const result = await this.runContainer(
+            `stage-${workspace.jobId}-${suffix}-${name.replaceAll('.', '-')}`,
+            this.workspaceUtilityArgs(`stage-${workspace.jobId}-${suffix}-${name.replaceAll('.', '-')}`, workspace, [
+              '-v', volumeMount(volume, target, 'rw'),
+            ], ['/bin/sh', '-c', stageScript], true),
+            content, this.remainingPreparationMs(deadline), signal,
+          );
+          if (result.cancelled) throw new ExecutionCancelledError();
+          if (result.timedOut) throw new WorkspacePreparationError(`Staging ${suffix} timed out`, true);
+          if (result.code !== 0) throw new WorkspacePreparationError(`Staging ${suffix} failed`);
+        }
+        return;
+      }
       const result = await this.runContainer(
         `stage-${workspace.jobId}-${suffix}`,
         this.workspaceUtilityArgs(`stage-${workspace.jobId}-${suffix}`, workspace, [
@@ -1366,7 +1391,7 @@ export class RevisionDockerExecutor {
   private async runContainer(
     executionId: string,
     args: string[],
-    input: string | undefined,
+    input: string | Buffer | undefined,
     timeoutMs: number,
     signal?: AbortSignal
   ): Promise<{ code: number | null; stdout: string; stderr: string; timedOut: boolean; killed: boolean; cancelled: boolean; elapsedMs: number; cleanupMs: number; cleanupSucceeded: boolean }> {

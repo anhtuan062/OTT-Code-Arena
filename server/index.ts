@@ -254,6 +254,7 @@ export async function initServer(storageDir?: string) {
       defaultCompileTimeoutMs: Math.max(30_000, Number(process.env.BOT_CPP_COMPILE_TIMEOUT_MS ?? 120_000)),
       defaultPreparationTimeoutMs: 10000,
       cppCompilationBackend,
+      dockerVolumeStaging: process.env.BOT_DOCKER_VOLUME_STAGING?.trim().toLowerCase() === 'true',
       ...compiledArtifactCacheConfig,
     });
   }
