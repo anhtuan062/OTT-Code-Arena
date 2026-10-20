@@ -472,7 +472,9 @@ describe('source revision Docker adapter contracts', () => {
           const binary = Buffer.alloc(64);
           binary.set([0x7f, 0x45, 0x4c, 0x46, 2, 1], 0);
           binary.writeUInt16LE(0x3e, 18);
-          await fs.writeFile(path.join(outputDir, 'bot'), binary);
+          const binaryPath = path.join(outputDir, 'bot');
+          await fs.writeFile(binaryPath, binary);
+          await fs.chmod(binaryPath, 0o755);
           return { code: 0, stdout: '', stderr: '', timedOut: false, killed: false, cancelled: false };
         }
         return { code: 0, stdout: '{"move":{"piece_id":"A-dam-1","from":"c1","to":"c2"}}\n', stderr: '', timedOut: false, killed: false, cancelled: false };

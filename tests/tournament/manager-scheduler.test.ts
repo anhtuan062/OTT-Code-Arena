@@ -451,7 +451,9 @@ describe('TournamentManager BO1 scheduler integration', () => {
     const recovered = await repository.load(id);
     expect(recovered!.rounds.flatMap(round => round.pairings).every(pairing => pairing.status === 'completed')).toBe(true);
     expect(recoveryCalls).not.toContain(firstGameId);
-    expect(recoveryCalls.every(call => /-g2$/.test(call))).toBe(true);
+    const interruptedSeriesPrefix = firstGameId!.replace(/-g1$/, '');
+    const interruptedSeriesCalls = recoveryCalls.filter(call => call.startsWith(`${interruptedSeriesPrefix}-`));
+    expect(interruptedSeriesCalls).toEqual([`${interruptedSeriesPrefix}-g2`]);
   }, 30_000);
 
   it('runs multi-stage BO2/BO3 series through the QA concurrency-2 scheduler and advances stages authoritatively', async () => {
