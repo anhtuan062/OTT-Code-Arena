@@ -7,7 +7,6 @@ const templatePath = path.join(root, 'index.html');
 const pageParts = [
   ['section', 'auth-screen', 'views/pages/auth.html'],
   ['div', 'dashboard', 'views/pages/dashboard.html'],
-  ['div', 'operations', 'views/pages/operations.html'],
   ['div', 'bot-workspace', 'views/pages/bot-workspace.html'],
   ['div', 'bots', 'views/pages/bots.html'],
   ['div', 'tournaments', 'views/pages/tournaments.html'],

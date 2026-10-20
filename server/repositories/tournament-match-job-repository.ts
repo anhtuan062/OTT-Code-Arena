@@ -112,6 +112,25 @@ export class SqlTournamentMatchJobRepository implements MatchJobStore {
     return result.changes === 1;
   }
 
+  requeue(tournamentId: string, pairingId: string, reason?: unknown): boolean {
+    const timestamp = now();
+    const result = this.db.prepare(`
+      UPDATE tournament_match_jobs
+      SET status='queued', lease_owner=NULL, lease_expires_at=NULL,
+          last_error=?, fencing_token=fencing_token+1, updated_at=?
+      WHERE tournament_id=? AND pairing_id=?
+        AND (status='queued' OR status='failed' OR
+             (status='running' AND lease_expires_at IS NOT NULL AND lease_expires_at <= ?))
+    `).run(
+      reason instanceof Error ? reason.message.slice(0, 500) : reason ? String(reason).slice(0, 500) : null,
+      timestamp,
+      tournamentId,
+      pairingId,
+      timestamp,
+    );
+    return result.changes === 1;
+  }
+
   private finish(claim: MatchJobClaim, status: 'completed'): boolean {
     const timestamp = now();
     const result = this.db.prepare(`UPDATE tournament_match_jobs SET status=?, lease_owner=NULL, lease_expires_at=NULL, completed_at=?, updated_at=? WHERE job_id=? AND status='running' AND lease_owner=? AND fencing_token=?`).run(status, timestamp, timestamp, claim.jobId, claim.leaseOwner, claim.fencingToken);

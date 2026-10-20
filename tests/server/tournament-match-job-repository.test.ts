@@ -290,4 +290,73 @@ describe('SQLite tournament match jobs', () => {
     expect(jobs.claim('t1', p.pairingId, 'resume-worker', 1000)?.attemptCount).toBe(claim.attemptCount + 1);
     db.close();
   });
+
+  it('fences an expired lease during organizer requeue and rejects a live lease', async () => {
+    const { db, jobs } = await open();
+    jobs.ensureForTournament('t1', [pairing('p1')]);
+    const live = jobs.claim('t1', 'p1', 'worker-a', 1000)!;
+    expect(jobs.requeue('t1', 'p1', 'organizer')).toBe(false);
+    expect(jobs.get('t1', 'p1')?.leaseOwner).toBe(live.leaseOwner);
+
+    // Use the repository's minimum lease window, then requeue atomically.
+    expect(jobs.release(live, 'test')).toBe(true);
+    const expired = jobs.claim('t1', 'p1', 'worker-b', 1);
+    expect(expired).not.toBeNull();
+    await new Promise(resolve => setTimeout(resolve, 5));
+    expect(jobs.requeue('t1', 'p1', 'organizer')).toBe(true);
+    const queued = jobs.get('t1', 'p1')!;
+    expect(queued.status).toBe('queued');
+    expect(queued.leaseOwner).toBeNull();
+    expect(queued.fencingToken).toBe(expired!.fencingToken + 1);
+    expect(jobs.complete(expired!)).toBe(false);
+    db.close();
+  });
+
+  it('requeues a failed series through the manager without deleting its checkpoint', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'ott-manager-requeue-'));
+    dirs.push(dir);
+    const repository = new FileTournamentRepository({ baseDir: path.join(dir, 'tournaments') });
+    await repository.initialize();
+    const db = await initializeDatabase({ path: path.join(dir, 'arena.sqlite') });
+    const jobs = new SqlTournamentMatchJobRepository(db);
+    const executor: MatchExecutor = {
+      isAvailable: async () => true,
+      executeMatch: async () => { throw new Error('not reached'); },
+    };
+    const manager = new TournamentManager({ repository, executor });
+    await manager.createTournament('requeue-series', 'Requeue series', 'round_robin');
+    const tournament = (await repository.load('requeue-series'))!;
+    tournament.participants = [0, 1].map(index => ({
+      participantId: `p${index}`, name: `p${index}`,
+      bot: { botId: `b${index}`, player: 'A' as const, command: 'mock' }, registeredAt: new Date().toISOString(),
+    }));
+    tournament.matchConfig.bestOf = 3;
+    tournament.status = 'registration_closed';
+    await repository.save(tournament);
+    await manager.generateSchedule('requeue-series');
+    await manager.startTournament('requeue-series');
+    const failed = (await repository.load('requeue-series'))!;
+    const target = failed.rounds[0]!.pairings[0]!;
+    target.status = 'failed';
+    target.failureCode = 'DOCKER_INFRASTRUCTURE';
+    target.failureReason = 'Docker execution infrastructure failed';
+    target.seriesProgress = { format: 'bo3', bestOf: 3, seed: 'checkpoint-seed', nextGame: 2, winsA: 1, winsB: 0, games: [] };
+    await repository.save(failed);
+    jobs.ensureForTournament('requeue-series', failed.rounds.flatMap(round => round.pairings));
+    manager.setMatchJobStore(jobs, 'requeue-worker', 1000);
+
+    const claim = jobs.claim('requeue-series', target.pairingId, 'old-worker', 1000)!;
+    expect(await manager.requeuePairing('requeue-series', target.pairingId)).toMatchObject({ success: false });
+    expect(jobs.release(claim, 'failed attempt')).toBe(true);
+    expect(await manager.requeuePairing('requeue-series', target.pairingId)).toMatchObject({ success: true });
+    const reloaded = (await repository.load('requeue-series'))!;
+    expect(reloaded.rounds[0]!.pairings[0]).toMatchObject({
+      status: 'scheduled',
+      seriesProgress: { seed: 'checkpoint-seed', nextGame: 2, winsA: 1, winsB: 0 },
+    });
+    expect((await manager.requeuePairing('requeue-series', target.pairingId)).success).toBe(false);
+
+    db.close();
+    repository.close();
+  });
 });

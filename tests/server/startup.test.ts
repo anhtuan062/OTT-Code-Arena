@@ -5,7 +5,7 @@ import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { closeServer, isDirectExecution, startServer } from '../../server/index.js';
+import { closeServer, isDirectExecution, resolveCompiledArtifactCacheConfig, startServer } from '../../server/index.js';
 
 const tsxCli = path.resolve('node_modules/tsx/dist/cli.mjs');
 const children: ReturnType<typeof spawn>[] = [];
@@ -52,6 +52,25 @@ function waitForExit(child: ReturnType<typeof spawn>): Promise<number | null> {
 }
 
 describe('server startup', () => {
+  it('keeps compiled-artifact caching disabled by default and enables bounded local configuration explicitly', () => {
+    expect(resolveCompiledArtifactCacheConfig({})).toMatchObject({
+      cppEphemeralArtifactCache: false,
+      compiledArtifactCacheMaxBytes: 512 * 1024 * 1024,
+      compiledArtifactCacheMaxEntries: 128,
+    });
+    expect(resolveCompiledArtifactCacheConfig({
+      BOT_CPP_EPHEMERAL_ARTIFACT_CACHE: 'true',
+      BOT_COMPILED_ARTIFACT_CACHE_DIR: 'C:\\qa-cache',
+      BOT_COMPILED_ARTIFACT_CACHE_MAX_BYTES: '536870912',
+      BOT_COMPILED_ARTIFACT_CACHE_MAX_ENTRIES: '128',
+    })).toEqual({
+      cppEphemeralArtifactCache: true,
+      compiledArtifactCacheDir: 'C:\\qa-cache',
+      compiledArtifactCacheMaxBytes: 536870912,
+      compiledArtifactCacheMaxEntries: 128,
+    });
+  });
+
   it('detects direct execution using portable module identity', () => {
     const modulePath = path.resolve('dist/server/index.js');
     expect(isDirectExecution(pathToFileURL(modulePath).href, modulePath)).toBe(true);

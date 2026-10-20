@@ -217,6 +217,121 @@ function renderReplaySummaryV2(replay) {
   if (active) $('#r-match-id').textContent = String(replayParentSeriesEnvelope()?.matchId || active.matchId || state.replayMatchId || '—');
 }
 
+class PublicReplayTerminalError extends Error {
+  constructor(message) { super(message); this.name = 'PublicReplayTerminalError'; this.publicReplayTerminal = true; }
+}
+
+class PublicReplayUnavailableError extends Error {
+  constructor(message) { super(message); this.name = 'PublicReplayUnavailableError'; this.publicReplayRecoverable = true; }
+}
+
+function publicReplayBaseUrl() {
+  const configured = typeof window !== 'undefined' ? window.OTT_PUBLIC_REPLAY_BASE_URL : '';
+  if (typeof configured !== 'string' || !configured.trim()) return null;
+  try {
+    const url = new URL(configured, window.location.origin);
+    if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.hash) throw new Error('invalid public replay base');
+    if (!url.pathname.endsWith('/')) url.pathname += '/';
+    url.search = '';
+    return url;
+  } catch {
+    throw new PublicReplayTerminalError('Cấu hình replay công khai không hợp lệ.');
+  }
+}
+
+function publicReplaySafeId(value) { return typeof value === 'string' && /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(value); }
+function publicReplayHash(value) { return typeof value === 'string' && /^[a-f0-9]{64}$/.test(value); }
+
+function publicReplayUrl(base, relativePath) {
+  if (typeof relativePath !== 'string' || !relativePath || relativePath.includes('\\') || relativePath.includes('%')) {
+    throw new PublicReplayTerminalError('Đường dẫn replay công khai không hợp lệ.');
+  }
+  if (/^(?:[a-z][a-z0-9+.-]*:|\/\/)/i.test(relativePath) || relativePath.split('/').some(part => part === '..' || part === '.')) {
+    throw new PublicReplayTerminalError('Đường dẫn replay công khai không an toàn.');
+  }
+  const resolved = new URL(relativePath, base);
+  if (resolved.origin !== base.origin || resolved.search || resolved.hash) throw new PublicReplayTerminalError('Đường dẫn replay công khai không an toàn.');
+  return resolved;
+}
+
+async function publicReplayFetchJson(url, missingMessage) {
+  let response;
+  try { response = await fetch(url, { credentials: 'omit', cache: 'no-store', headers: { Accept: 'application/json' } }); }
+  catch { throw new PublicReplayUnavailableError('Không thể kết nối kho replay công khai.'); }
+  if (response.status === 404) throw new PublicReplayUnavailableError(missingMessage);
+  if (!response.ok) throw new PublicReplayTerminalError(`Kho replay công khai trả về lỗi ${response.status}.`);
+  let bytes;
+  try { bytes = await response.arrayBuffer(); }
+  catch { throw new PublicReplayUnavailableError('Không thể đọc dữ liệu replay công khai.'); }
+  try { return JSON.parse(new TextDecoder().decode(bytes)); }
+  catch { throw new PublicReplayTerminalError('Dữ liệu replay công khai không hợp lệ.'); }
+}
+
+async function publicReplaySha256(bytes) {
+  if (!globalThis.crypto?.subtle) throw new PublicReplayTerminalError('Trình duyệt không hỗ trợ kiểm tra toàn vẹn replay.');
+  const digest = await globalThis.crypto.subtle.digest('SHA-256', bytes);
+  return Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('');
+}
+
+function publicReplayShapeMatches(replay, requestedMatchId) {
+  if (!isReplayShape(replay)) return false;
+  if (replay.matchId === requestedMatchId) return true;
+  return Array.isArray(replay.series?.games) && replay.series.games.some(game => game?.matchId === requestedMatchId && isReplayShape(game.replay));
+}
+
+async function loadPublicReplay(tournamentId, requestedMatchId, seriesContext = null) {
+  const base = publicReplayBaseUrl();
+  if (!base) return null;
+  if (!publicReplaySafeId(tournamentId) || !publicReplaySafeId(requestedMatchId)) throw new PublicReplayTerminalError('Định danh replay công khai không hợp lệ.');
+  const manifestUrl = publicReplayUrl(base, `tournaments/${tournamentId}/index.json`);
+  const manifest = await publicReplayFetchJson(manifestUrl, 'Không tìm thấy manifest replay công khai.');
+  if (!manifest || manifest.schemaVersion !== 1 || manifest.tournamentId !== tournamentId) throw new PublicReplayTerminalError('Manifest replay công khai không hợp lệ.');
+  if (manifest.status !== 'published') throw new PublicReplayTerminalError('Replay công khai đã bị thu hồi hoặc chưa được phát hành.');
+  if (!Array.isArray(manifest.entries)) throw new PublicReplayTerminalError('Manifest replay công khai không hợp lệ.');
+  const aggregateMatchId = publicReplaySafeId(seriesContext?.matchId) ? seriesContext.matchId : requestedMatchId;
+  const entry = manifest.entries.find(item => item?.matchId === aggregateMatchId);
+  if (!entry || !publicReplaySafeId(entry.matchId) || !publicReplayHash(entry.replayHash) || entry.matchId !== aggregateMatchId) {
+    throw new PublicReplayUnavailableError('Không tìm thấy replay công khai cho trận đấu này.');
+  }
+  const expectedPath = `tournaments/${tournamentId}/matches/${entry.matchId}-${entry.replayHash}.json`;
+  if (entry.path !== expectedPath || entry.sha256 !== entry.replayHash) throw new PublicReplayTerminalError('Manifest replay công khai không toàn vẹn.');
+  const replayUrl = publicReplayUrl(base, entry.path);
+  let response;
+  try { response = await fetch(replayUrl, { credentials: 'omit', cache: 'no-store', headers: { Accept: 'application/json' } }); }
+  catch { throw new PublicReplayUnavailableError('Không thể kết nối replay công khai.'); }
+  if (response.status === 404) throw new PublicReplayUnavailableError('Không tìm thấy tệp replay công khai.');
+  if (!response.ok) throw new PublicReplayTerminalError(`Tệp replay công khai trả về lỗi ${response.status}.`);
+  let bytes;
+  try { bytes = await response.arrayBuffer(); }
+  catch { throw new PublicReplayUnavailableError('Không thể đọc tệp replay công khai.'); }
+  if (await publicReplaySha256(bytes) !== entry.replayHash) throw new PublicReplayTerminalError('Replay công khai không vượt qua kiểm tra SHA-256.');
+  let replay;
+  try { replay = JSON.parse(new TextDecoder().decode(bytes)); }
+  catch { throw new PublicReplayTerminalError('JSON replay công khai không hợp lệ.'); }
+  if (!publicReplayShapeMatches(replay, requestedMatchId)) throw new PublicReplayTerminalError('Replay công khai không khớp với trận đấu được yêu cầu.');
+  return replay;
+}
+
+async function loadReplayWithAuthorizedFallback(tournamentId, matchId, seriesContext = null) {
+  let publicReplayError = null;
+  try {
+    const replay = await loadPublicReplay(tournamentId, matchId, seriesContext);
+    if (replay) return replay;
+  } catch (error) {
+    publicReplayError = error;
+  }
+  // A static export is deliberately public-only.  It must not turn a revoked,
+  // corrupt or missing public artifact into an API request just because the
+  // embedding page happens to have an application session.
+  if (typeof window !== 'undefined' && window.OTT_PUBLIC_REPLAY_STATIC_ONLY) {
+    throw publicReplayError || new Error('Replay công khai không khả dụng.');
+  }
+  if (!await ensureReplaySession()) throw publicReplayError || new Error('Cần đăng nhập để xem replay này.');
+  return api(state.spectatorMode
+    ? `/tournaments/${tournamentId}/spectator/matches/${matchId}/replay`
+    : `/tournaments/${tournamentId}/replays/${matchId}`);
+}
+
 function replayPieceSideMap() {
   const series = replayParentSeries();
   const identities = replayParentSeriesEnvelope()?.participantIdentities || {};
@@ -257,7 +372,6 @@ function renderReplayPieceCounts(board, sideMap = replayPieceSideMap()) {
 }
 
 async function playReplay(tournamentId, matchId, seriesContext = null) {
-  if (!await ensureReplaySession()) return;
   closeModal('tiebreaker-resolution-modal');
   stopReplayPlayback();
   stopLiveMatchPolling();
@@ -280,9 +394,7 @@ async function playReplay(tournamentId, matchId, seriesContext = null) {
   const replayViewRevision = state.viewRevision;
   let replay;
   try {
-    replay = await api(state.spectatorMode
-      ? `/tournaments/${tournamentId}/spectator/matches/${matchId}/replay`
-      : `/tournaments/${tournamentId}/replays/${matchId}`);
+    replay = await loadReplayWithAuthorizedFallback(tournamentId, matchId, seriesContext);
     if (!isReplayShape(replay)) throw new Error('Dữ liệu xem lại không hợp lệ.');
     if (replay.series && !availableSeriesReplayIndexes(replay).length) throw new Error('Series không có ván nào có dữ liệu xem lại hợp lệ.');
   }
@@ -297,7 +409,8 @@ async function playReplay(tournamentId, matchId, seriesContext = null) {
     }
     return;
   }
-  if (!state.user || state.authRevision !== authRevision || state.replayRevision !== replayRevision
+  const staticReplayOnly = typeof window !== 'undefined' && window.OTT_PUBLIC_REPLAY_STATIC_ONLY === true;
+  if ((!state.user && !staticReplayOnly) || state.authRevision !== authRevision || state.replayRevision !== replayRevision
     || state.activeView !== 'replay-view' || state.viewRevision !== replayViewRevision
     || state.tournamentId !== tournamentId || state.replayContext?.matchId !== matchId) return;
   state.replay = replay;

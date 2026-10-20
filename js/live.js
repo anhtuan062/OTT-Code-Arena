@@ -59,10 +59,19 @@ function showLiveGameResultModal(snapshot, completedGame = null) {
   if (score) score.textContent = series ? `Tỷ số ${series.winsA ?? 0}-${series.winsB ?? 0}` : 'Kết quả đã được ghi nhận';
   const nextGame = series?.nextGame || (series && Number(game) < Number(series.bestOf || 3) ? Number(game) + 1 : null);
   const currentParticipants = snapshot.currentParticipants || snapshot.participants || {};
-  const winnerSide = transition ? snapshot.winner : (series?.winner || snapshot.winner);
-  const winnerParticipants = transition ? currentParticipants : snapshot.participants;
-  const winnerName = winnerSide && winnerParticipants?.[winnerSide]?.participantName
-    ? winnerParticipants[winnerSide].participantName
+  const seriesDecidedWinner = (series?.winner === 'A' || series?.winner === 'B' || series?.winner === 'draw')
+    ? series.winner
+    : (series && typeof series.winsA === 'number' && typeof series.winsB === 'number' && (!series.active || series.winsA >= 2 || series.winsB >= 2)
+      ? (series.winsA > series.winsB ? 'A' : series.winsB > series.winsA ? 'B' : (series.winsA === series.winsB && !series.active ? 'draw' : null))
+      : null);
+  const winnerSide = transition
+    ? snapshot.winner
+    : (seriesDecidedWinner || (series ? null : snapshot.winner));
+  const winnerParticipants = transition ? currentParticipants : (snapshot.participants || currentParticipants);
+  const winnerName = winnerSide && winnerSide !== 'draw'
+    ? (winnerSide === 'A' ? (playerA?.participantName || fixedA?.participantName || fixedA?.name || winnerParticipants?.A?.participantName)
+      : winnerSide === 'B' ? (playerB?.participantName || fixedB?.participantName || fixedB?.name || winnerParticipants?.B?.participantName)
+      : (winnerParticipants?.[winnerSide]?.participantName || null))
     : null;
   const setText = (selector, value) => { const element = $(selector); if (element) element.textContent = value || '—'; };
   setText('#live-game-player-a', fixedA?.participantName || fixedA?.name);
@@ -76,10 +85,12 @@ function showLiveGameResultModal(snapshot, completedGame = null) {
   scoreA?.classList.toggle('is-leading', Boolean(series && (series.winsA ?? 0) > (series.winsB ?? 0)));
   scoreB?.classList.toggle('is-leading', Boolean(series && (series.winsB ?? 0) > (series.winsA ?? 0)));
   const winnerLabel = $('#live-game-result-winner');
-  if (winnerLabel) winnerLabel.textContent = transition ? 'Kết quả ván đã được ghi nhận' : (winnerName ? `${winnerName} chiến thắng` : 'Kết quả đã được ghi nhận');
+  if (winnerLabel) winnerLabel.textContent = transition
+    ? 'Kết quả ván đã được ghi nhận'
+    : (winnerSide === 'draw' ? 'Trận đấu kết thúc với kết quả hòa' : (winnerName ? `${winnerName} chiến thắng` : 'Kết quả đã được ghi nhận'));
   if (next) next.textContent = transition
     ? (nextGame ? `Đang chuẩn bị Ván ${nextGame}` : 'Đang chuẩn bị ván tiếp theo')
-    : (winnerName ? `${winnerName} chiến thắng` : 'Kết quả đã được ghi nhận');
+    : (winnerSide === 'draw' ? 'Trận đấu kết thúc với kết quả hòa' : (winnerName ? `${winnerName} chiến thắng` : 'Kết quả đã được ghi nhận'));
   const close = $('#live-game-result-close');
   if (close) close.hidden = transition;
   const modal = $('#live-game-result-modal');

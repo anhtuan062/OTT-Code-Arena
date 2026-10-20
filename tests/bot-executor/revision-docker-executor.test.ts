@@ -1,8 +1,10 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterAll, describe, expect, it, vi } from 'vitest';
 import { createHash } from 'node:crypto';
+import { EventEmitter } from 'node:events';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import { PassThrough } from 'node:stream';
 import {
   buildCppCompileDockerArgs,
   buildCppRuntimeDockerArgs,
@@ -12,15 +14,20 @@ import {
   createRevisionDockerExecutor,
   buildStrategyCppVolumeCompileDockerArgs,
   buildCppVolumeRuntimeDockerArgs,
+  buildCppArtifactImportDockerArgs,
+  buildCppArtifactExportDockerArgs,
   resolveCppCompilationBackend,
   WorkspacePreparationError,
   ownershipLabels,
+  ExecutionCancelledError,
 } from '@bot-executor/index.js';
 import type { RevisionDockerExecutorConfig } from '@bot-executor/revision-docker-executor.js';
-import { buildStrategyCppCompileDockerArgs, buildStrategyPythonRuntimeDockerArgs } from '@bot-executor/revision-docker-executor.js';
+import { ArtifactTransferError, buildStrategyCppCompileDockerArgs, buildStrategyPythonRuntimeDockerArgs } from '@bot-executor/revision-docker-executor.js';
 import { getStrategySdkIdentity, STRATEGY_SDK_VERSION } from '@bot-executor/strategy-sdk.js';
+import { DockerExecutionLimiter } from '@bot-executor/docker-execution-limiter.js';
 
 const digest = (name: string) => `ghcr.io/ott-code-arena/${name}@sha256:${'a'.repeat(64)}`;
+const testCacheDir = path.join(os.tmpdir(), 'ott-revision-cache-tests', String(process.pid));
 const config = (): RevisionDockerExecutorConfig => ({
   imageRegistry: {
     cppCompilerImage: digest('cpp-compiler'),
@@ -30,6 +37,11 @@ const config = (): RevisionDockerExecutorConfig => ({
   },
   executionPolicy: 'sandbox-required',
   dockerBinary: 'docker',
+  compiledArtifactCacheDir: testCacheDir,
+});
+
+afterAll(async () => {
+  await fs.rm(testCacheDir, { recursive: true, force: true });
 });
 
 const sourceRevision = (runtimeId: 'cpp' | 'python3', source: string) => ({
@@ -148,6 +160,19 @@ describe('source revision Docker adapter contracts', () => {
     }
   });
 
+  it('builds pinned, host-mount-free artifact transfer utilities', () => {
+    const ownership = { environment: 'qa', storageNamespace: 'arena', serverInstanceId: 'server', revisionScopeId: 'match', kind: 'artifact-import' as const };
+    const imported = buildCppArtifactImportDockerArgs(config(), 'artifact-import', 'ott-bin-one', 'eph-one', ownership);
+    const exported = buildCppArtifactExportDockerArgs(config(), 'artifact-export', 'ott-bin-one', 'eph-one', { ...ownership, kind: 'artifact-export' });
+    expect(imported).toEqual(expect.arrayContaining(['ott-bin-one:/app/bin:rw', '--platform', 'linux/amd64', '/bin/sh', '-c']));
+    expect(exported).toEqual(expect.arrayContaining(['ott-bin-one:/app/bin:ro', '--platform', 'linux/amd64', '/bin/cat', '/app/bin/bot']));
+    for (const args of [imported, exported]) {
+      expect(args).toEqual(expect.arrayContaining(['--network', 'none', '--read-only', '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges:true']));
+      expect(args.some(arg => arg.includes(':/host') || arg.includes('C:\\'))).toBe(false);
+      expect(args).toContain(digest('cpp-compiler'));
+    }
+  });
+
   it('provides an immutable identity for each strategy SDK runtime', async () => {
     const cpp = await getStrategySdkIdentity('cpp');
     const python = await getStrategySdkIdentity('python3');
@@ -195,6 +220,75 @@ describe('source revision Docker adapter contracts', () => {
       .map(([args]) => (args as string[])[2]);
     expect(inspected).toEqual([config().imageRegistry.cppCompilerImage, config().imageRegistry.cppRuntimeImage]);
     expect(inspected).not.toContain(config().imageRegistry.python3RuntimeImage);
+  });
+
+  it('caches successful availability checks independently for each runtime', async () => {
+    const executor = createRevisionDockerExecutor(config()) as any;
+    vi.spyOn(executor, 'ensureOwnershipReady').mockResolvedValue(undefined);
+    const recovery = vi.spyOn(executor, 'recoverOwnedResources').mockResolvedValue({ reclaimed: [], preserved: [] });
+    const docker = vi.spyOn(executor, 'dockerCommand').mockResolvedValue('');
+
+    await expect(executor.isAvailable('cpp')).resolves.toBe(true);
+    await expect(executor.isAvailable('cpp')).resolves.toBe(true);
+
+    expect(recovery).toHaveBeenCalledTimes(1);
+    expect(docker.mock.calls.filter(([args]) => (args as string[])[0] === 'version')).toHaveLength(1);
+    expect(docker.mock.calls.filter(([args]) => (args as string[])[0] === 'image')).toHaveLength(2);
+
+    await expect(executor.isAvailable('python3')).resolves.toBe(true);
+    await expect(executor.isAvailable('python3')).resolves.toBe(true);
+    expect(docker.mock.calls.filter(([args]) => (args as string[])[0] === 'image')).toHaveLength(3);
+  });
+
+  it('deduplicates concurrent availability probes and does not cache failures', async () => {
+    const executor = createRevisionDockerExecutor(config()) as any;
+    vi.spyOn(executor, 'ensureOwnershipReady').mockResolvedValue(undefined);
+    vi.spyOn(executor, 'recoverOwnedResources').mockResolvedValue({ reclaimed: [], preserved: [] });
+    let failVersion = true;
+    let releaseVersion!: () => void;
+    const versionGate = new Promise<void>(resolve => { releaseVersion = resolve; });
+    const docker = vi.spyOn(executor, 'dockerCommand').mockImplementation(async (args: string[]) => {
+      if (args[0] === 'version' && failVersion) {
+        await versionGate;
+        failVersion = false;
+        throw new Error('Docker daemon unavailable');
+      }
+      return '';
+    });
+
+    const first = executor.isAvailable('cpp');
+    const second = executor.isAvailable('cpp');
+    releaseVersion();
+    await expect(first).resolves.toBe(false);
+    await expect(second).resolves.toBe(false);
+    await expect(executor.isAvailable('cpp')).resolves.toBe(true);
+
+    expect(docker.mock.calls.filter(([args]) => (args as string[])[0] === 'version')).toHaveLength(2);
+    expect(docker.mock.calls.filter(([args]) => (args as string[])[0] === 'image')).toHaveLength(2);
+  });
+
+  it('invalidates a runtime cache after an infrastructure execution failure', async () => {
+    const executor = createRevisionDockerExecutor(config()) as any;
+    vi.spyOn(executor, 'ensureOwnershipReady').mockResolvedValue(undefined);
+    vi.spyOn(executor, 'recoverOwnedResources').mockResolvedValue({ reclaimed: [], preserved: [] });
+    const docker = vi.spyOn(executor, 'dockerCommand').mockResolvedValue('');
+
+    await expect(executor.isAvailable('cpp')).resolves.toBe(true);
+    const versionCallsBeforeFailure = docker.mock.calls.filter(([args]) => (args as string[])[0] === 'version').length;
+    const executeMeasured = vi.spyOn(executor, 'executeMeasuredRevision').mockResolvedValue({
+      success: false,
+      error: { code: 'EXECUTOR_ERROR', message: 'Docker runtime disappeared', stage: 'docker_infrastructure' },
+      exitCode: null, timedOut: false, stdout: '', stderr: '', durationMs: 0,
+    });
+
+    await expect(executor.executeRevision(
+      { executionId: 'infra-failure-1', matchId: 'match-1', turn: 1, player: 'A' },
+      sourceRevision('cpp', 'print("ok")'), request,
+    )).resolves.toMatchObject({ success: false, error: { stage: 'docker_infrastructure' } });
+    expect(executeMeasured).toHaveBeenCalledTimes(1);
+
+    await expect(executor.isAvailable('cpp')).resolves.toBe(true);
+    expect(docker.mock.calls.filter(([args]) => (args as string[])[0] === 'version')).toHaveLength(versionCallsBeforeFailure + 1);
   });
 
   it('builds a shell-free fixed C++ compile command with isolation controls', () => {
@@ -324,6 +418,43 @@ describe('source revision Docker adapter contracts', () => {
     }
   });
 
+  it('reuses a verified C++ artifact across separate match executions', async () => {
+    const workingDirBase = await fs.mkdtemp(path.join(os.tmpdir(), 'ott-cross-match-cache-'));
+    try {
+      const executor = createRevisionDockerExecutor({
+        ...config(), workingDirBase, compiledArtifactCacheDir: path.join(workingDirBase, 'cache'),
+      }) as any;
+      vi.spyOn(executor, 'isAvailable').mockResolvedValue(true);
+      let compileCount = 0;
+      const run = vi.spyOn(executor, 'runContainer').mockImplementation(async (executionId: string, args: string[]) => {
+        if (executionId.endsWith('-compile')) {
+          compileCount += 1;
+          const outputMount = args.find(value => value.endsWith(':/app/output:rw'))!;
+          const outputDir = outputMount.slice(0, -':/app/output:rw'.length);
+          const binary = Buffer.alloc(64);
+          binary.set([0x7f, 0x45, 0x4c, 0x46, 2, 1], 0);
+          binary.writeUInt16LE(0x3e, 18);
+          await fs.writeFile(path.join(outputDir, 'bot'), binary);
+          return { code: 0, stdout: '', stderr: '', timedOut: false, killed: false, cancelled: false };
+        }
+        return { code: 0, stdout: '{"move":{"piece_id":"A-dam-1","from":"c1","to":"c2"}}\n', stderr: '', timedOut: false, killed: false, cancelled: false };
+      });
+      const revision = sourceRevision('cpp', 'int main() { return 0; }');
+      const first = await executor.executeRevision(
+        { executionId: 'cache-match-1', matchId: 'cache-match-1', turn: 1, player: 'A' }, revision, request,
+      );
+      const second = await executor.executeRevision(
+        { executionId: 'cache-match-2', matchId: 'cache-match-2', turn: 1, player: 'A' }, revision, request,
+      );
+      expect(first.success).toBe(true);
+      expect(second.success).toBe(true);
+      expect(compileCount).toBe(1);
+      expect(run.mock.calls.filter(call => String(call[0]).endsWith('-compile'))).toHaveLength(1);
+    } finally {
+      await fs.rm(workingDirBase, { recursive: true, force: true });
+    }
+  });
+
   it('executes a pinned strategy revision through the SDK wrapper path', async () => {
     const workingDirBase = await fs.mkdtemp(path.join(os.tmpdir(), 'ott-sdk-test-'));
     try {
@@ -448,6 +579,7 @@ describe('source revision Docker adapter contracts', () => {
       const prepared: Array<{ marker: string; sourceVolume: string; outputVolume: string }> = [];
       vi.spyOn(executor, 'prepareVolumeWorkspace').mockImplementation(async (workspace: any) => { prepared.push(workspace); });
       vi.spyOn(executor, 'validateVolumeArtifact').mockResolvedValue('b'.repeat(64));
+      const cacheAcquire = vi.spyOn(executor.compiledArtifactCache, 'acquire');
       vi.spyOn(executor, 'cleanupVolumeWorkspace').mockResolvedValue(true);
       vi.spyOn(executor, 'runContainer').mockImplementation(async (executionId: string) => executionId.endsWith('-compile')
         ? { code: 0, stdout: '', stderr: '', timedOut: false, killed: false, cancelled: false, elapsedMs: 5, cleanupMs: 1, cleanupSucceeded: true }
@@ -470,7 +602,163 @@ describe('source revision Docker adapter contracts', () => {
       expect(new Set(prepared.flatMap(item => [item.sourceVolume, item.outputVolume])).size).toBe(4);
       expect(first.provenance).toMatchObject({ compilationBackend: 'ephemeral-volume', artifactDigest: 'b'.repeat(64) });
       expect(first.timings).toMatchObject({ preparationBudgetMs: 10_000, timeoutPhase: null, cleanupSucceeded: true });
+      expect(cacheAcquire).not.toHaveBeenCalled();
     } finally { await fs.rm(workingDirBase, { recursive: true, force: true }); }
+  });
+
+  it('skips C++ compilation on an ephemeral-volume cache hit and imports into the fresh volume', async () => {
+    const workingDirBase = await fs.mkdtemp(path.join(os.tmpdir(), 'ott-volume-cache-hit-'));
+    try {
+      const sdk = await getStrategySdkIdentity('cpp');
+      const executor = createRevisionDockerExecutor({
+        ...config(), workingDirBase, cppCompilationBackend: 'ephemeral-volume', cppEphemeralArtifactCache: true,
+      }) as any;
+      vi.spyOn(executor, 'isAvailable').mockResolvedValue(true);
+      vi.spyOn(executor, 'prepareVolumeWorkspace').mockResolvedValue(undefined);
+      vi.spyOn(executor, 'validateVolumeArtifact').mockResolvedValue('a'.repeat(64));
+      vi.spyOn(executor, 'cleanupVolumeWorkspace').mockResolvedValue(true);
+      const acquire = vi.spyOn(executor.compiledArtifactCache, 'acquire').mockResolvedValue({
+        hit: { manifest: { artifactDigest: 'a'.repeat(64) }, artifactPath: 'cache-artifact', entryDir: 'cache-entry' } as any,
+        release: vi.fn(async () => {}),
+      });
+      const transfer = vi.spyOn(executor, 'importArtifactToVolume').mockResolvedValue(undefined);
+      const run = vi.spyOn(executor, 'runContainer').mockResolvedValue({
+        code: 0, stdout: '{"move":{"piece_id":"A-rock-1","from":"a1","to":"a2"}}\n', stderr: '', timedOut: false,
+        killed: false, cancelled: false, elapsedMs: 2, cleanupMs: 0, cleanupSucceeded: true,
+      });
+      const source = 'Move chooseMove(const GameState&, const std::vector<Move>& m){return m.front();}';
+      const result = await executor.executeRevision(
+        { executionId: 'volume-cache-hit', matchId: 'match', turn: 1, player: 'A' },
+        { execution: { ...sourceRevision('cpp', source).execution, executionMode: 'strategy', sdkVersion: sdk.version, sdkDigest: sdk.digest }, source: Buffer.from(source) },
+        request,
+      );
+      expect(result.success).toBe(true);
+      expect(acquire).toHaveBeenCalledOnce();
+      expect(transfer).toHaveBeenCalledOnce();
+      expect(run.mock.calls.some(call => String(call[0]).endsWith('-compile'))).toBe(false);
+    } finally { await fs.rm(workingDirBase, { recursive: true, force: true }); }
+  });
+
+  it('falls back to clean compilation after a recoverable import failure', async () => {
+    const workingDirBase = await fs.mkdtemp(path.join(os.tmpdir(), 'ott-volume-cache-import-fallback-'));
+    try {
+      const sdk = await getStrategySdkIdentity('cpp');
+      const executor = createRevisionDockerExecutor({ ...config(), workingDirBase, cppCompilationBackend: 'ephemeral-volume', cppEphemeralArtifactCache: true }) as any;
+      vi.spyOn(executor, 'isAvailable').mockResolvedValue(true);
+      vi.spyOn(executor, 'prepareVolumeWorkspace').mockResolvedValue(undefined);
+      vi.spyOn(executor, 'validateVolumeArtifact').mockResolvedValue('a'.repeat(64));
+      vi.spyOn(executor, 'cleanupVolumeWorkspace').mockResolvedValue(true);
+      vi.spyOn(executor.compiledArtifactCache, 'acquire').mockResolvedValue({
+        hit: { manifest: { artifactDigest: 'a'.repeat(64) }, artifactPath: 'cache-artifact', entryDir: 'cache-entry' } as any,
+        release: vi.fn(async () => {}),
+      });
+      vi.spyOn(executor, 'importArtifactToVolume').mockRejectedValue(new ArtifactTransferError('daemon unavailable'));
+      const run = vi.spyOn(executor, 'runContainer').mockImplementation(async (executionId: string) => executionId.endsWith('-compile')
+        ? { code: 0, stdout: '', stderr: '', timedOut: false, killed: false, cancelled: false, elapsedMs: 3, cleanupMs: 0, cleanupSucceeded: true }
+        : { code: 0, stdout: '{"move":{"piece_id":"A-rock-1","from":"a1","to":"a2"}}\n', stderr: '', timedOut: false, killed: false, cancelled: false, elapsedMs: 2, cleanupMs: 0, cleanupSucceeded: true });
+      const source = 'Move chooseMove(const GameState&, const std::vector<Move>& m){return m.front();}';
+      const result = await executor.executeRevision(
+        { executionId: 'volume-cache-import-fallback', matchId: 'match', turn: 1, player: 'A' },
+        { execution: { ...sourceRevision('cpp', source).execution, executionMode: 'strategy', sdkVersion: sdk.version, sdkDigest: sdk.digest }, source: Buffer.from(source) }, request,
+      );
+      expect(result.success).toBe(true);
+      expect(run.mock.calls.some(call => String(call[0]).endsWith('-compile'))).toBe(true);
+    } finally { await fs.rm(workingDirBase, { recursive: true, force: true }); }
+  });
+
+  it('fails closed on imported artifact validation failure without running or recompiling', async () => {
+    const workingDirBase = await fs.mkdtemp(path.join(os.tmpdir(), 'ott-volume-cache-import-invalid-'));
+    try {
+      const sdk = await getStrategySdkIdentity('cpp');
+      const executor = createRevisionDockerExecutor({ ...config(), workingDirBase, cppCompilationBackend: 'ephemeral-volume', cppEphemeralArtifactCache: true }) as any;
+      vi.spyOn(executor, 'isAvailable').mockResolvedValue(true);
+      vi.spyOn(executor, 'prepareVolumeWorkspace').mockResolvedValue(undefined);
+      vi.spyOn(executor, 'validateVolumeArtifact').mockRejectedValue(new Error('invalid ELF'));
+      vi.spyOn(executor, 'cleanupVolumeWorkspace').mockResolvedValue(true);
+      vi.spyOn(executor.compiledArtifactCache, 'acquire').mockResolvedValue({
+        hit: { manifest: { artifactDigest: 'a'.repeat(64) }, artifactPath: 'cache-artifact', entryDir: 'cache-entry' } as any,
+        release: vi.fn(async () => {}),
+      });
+      vi.spyOn(executor, 'importArtifactToVolume').mockResolvedValue(undefined);
+      const run = vi.spyOn(executor, 'runContainer');
+      const source = 'Move chooseMove(const GameState&, const std::vector<Move>& m){return m.front();}';
+      const result = await executor.executeRevision(
+        { executionId: 'volume-cache-import-invalid', matchId: 'match', turn: 1, player: 'A' },
+        { execution: { ...sourceRevision('cpp', source).execution, executionMode: 'strategy', sdkVersion: sdk.version, sdkDigest: sdk.digest }, source: Buffer.from(source) }, request,
+      );
+      expect(result).toMatchObject({ success: false, error: { stage: 'artifact_validation' } });
+      expect(run).not.toHaveBeenCalled();
+    } finally { await fs.rm(workingDirBase, { recursive: true, force: true }); }
+  });
+
+  it.each([
+    ['empty', [] as Buffer[], /empty/],
+    ['oversized', [Buffer.alloc(64 * 1024 * 1024 + 1)] as Buffer[], /64 MiB/],
+    ['corrupted', [Buffer.from('not-an-elf-binary')], /ELF amd64/],
+  ])('rejects %s streamed exports and removes the temporary artifact', async (_name, chunks, error) => {
+    const workingDirBase = await fs.mkdtemp(path.join(os.tmpdir(), 'ott-volume-cache-export-invalid-'));
+    try {
+      const executor = createRevisionDockerExecutor({ ...config(), workingDirBase, cppCompilationBackend: 'ephemeral-volume', cppEphemeralArtifactCache: true }) as any;
+      const workspace = executor.newVolumeWorkspace('export-test');
+      vi.spyOn(executor, 'runArtifactTransfer').mockImplementation(async (_id: string, _args: string[], _signal: AbortSignal | undefined, stream: (proc: any) => Promise<void>) => {
+        async function* output(): AsyncGenerator<Buffer> { for (const chunk of chunks) yield chunk; }
+        await stream({ stdout: output() });
+      });
+      await expect(executor.exportArtifactFromVolume('export-invalid', workspace)).rejects.toThrow(error);
+      const files = await fs.readdir(path.join(workingDirBase, 'source-exec', 'export-invalid')).catch(() => []);
+      expect(files.filter(file => file.includes('.artifact-export.'))).toHaveLength(0);
+    } finally { await fs.rm(workingDirBase, { recursive: true, force: true }); }
+  }, 20_000);
+
+  it('propagates cancellation during import and never falls back to compilation', async () => {
+    const workingDirBase = await fs.mkdtemp(path.join(os.tmpdir(), 'ott-volume-cache-cancel-'));
+    try {
+      const sdk = await getStrategySdkIdentity('cpp');
+      const executor = createRevisionDockerExecutor({ ...config(), workingDirBase, cppCompilationBackend: 'ephemeral-volume', cppEphemeralArtifactCache: true }) as any;
+      vi.spyOn(executor, 'isAvailable').mockResolvedValue(true);
+      vi.spyOn(executor, 'prepareVolumeWorkspace').mockResolvedValue(undefined);
+      vi.spyOn(executor, 'cleanupVolumeWorkspace').mockResolvedValue(true);
+      const acquire = vi.spyOn(executor.compiledArtifactCache, 'acquire').mockResolvedValue({ hit: { manifest: {}, artifactPath: 'cache', entryDir: 'entry' } as any, release: vi.fn(async () => {}) });
+      const transfer = vi.spyOn(executor, 'importArtifactToVolume').mockRejectedValue(new ExecutionCancelledError());
+      const run = vi.spyOn(executor, 'runContainer');
+      const source = 'Move chooseMove(const GameState&, const std::vector<Move>& m){return m.front();}';
+      await expect(executor.executeRevision(
+        { executionId: 'volume-cache-cancel', matchId: 'match', turn: 1, player: 'A' },
+        { execution: { ...sourceRevision('cpp', source).execution, executionMode: 'strategy', sdkVersion: sdk.version, sdkDigest: sdk.digest }, source: Buffer.from(source) }, request,
+      )).rejects.toBeInstanceOf(ExecutionCancelledError);
+      expect(acquire).toHaveBeenCalledOnce();
+      expect(transfer).toHaveBeenCalledOnce();
+      expect(run).not.toHaveBeenCalled();
+    } finally { await fs.rm(workingDirBase, { recursive: true, force: true }); }
+  });
+
+  it('holds the limiter permit until a cancelled utility process has actually closed', async () => {
+    const limiter = new DockerExecutionLimiter(1);
+    const executor = createRevisionDockerExecutor({ ...config(), dockerExecutionLimiter: limiter, defaultCompileTimeoutMs: 5_000 }) as any;
+    const fake = new EventEmitter() as any;
+    fake.stdin = new PassThrough();
+    fake.stdout = new PassThrough();
+    fake.stderr = new PassThrough();
+    fake.killed = false;
+    fake.kill = () => { fake.killed = true; fake.emit('close', 137); };
+    vi.spyOn(executor, 'spawnArtifactProcess').mockReturnValue(fake);
+    vi.spyOn(executor, 'removeContainer').mockResolvedValue(true);
+    vi.spyOn(executor, 'dockerCommand').mockImplementation(async (args: string[]) => {
+      if (args[0] === 'kill') await new Promise(resolve => setTimeout(resolve, 40));
+      return '';
+    });
+    const controller = new AbortController();
+    const transfer = executor.runArtifactTransfer('utility-cancel', [], controller.signal, async (proc: any) => { proc.stdin.end(); });
+    await vi.waitFor(() => expect(limiter.active).toBe(1));
+    const next = limiter.acquire(undefined, 'next-execution');
+    await vi.waitFor(() => expect(limiter.pending).toBe(1));
+    controller.abort();
+    expect(limiter.pending).toBe(1);
+    await expect(transfer).rejects.toBeInstanceOf(ExecutionCancelledError);
+    const release = await next;
+    release();
+    expect(limiter.active).toBe(0);
+    expect(limiter.pending).toBe(0);
   });
 
   it('classifies volume staging timeout separately and still cleans owned volumes', async () => {
@@ -554,6 +842,31 @@ describe('source revision Docker adapter contracts', () => {
     await expect(executor.cleanupVolumeWorkspace(workspace)).resolves.toBe(false);
     expect(docker).toHaveBeenCalledTimes(3);
     expect(docker.mock.calls.some(call => (call[0] as string[]).includes('rm'))).toBe(false);
+  });
+
+  it('retries only transient volume-in-use cleanup races', async () => {
+    const executor = createRevisionDockerExecutor({ ...config(), cppCompilationBackend: 'ephemeral-volume' }) as any;
+    const workspace = executor.newVolumeWorkspace();
+    const raw = JSON.stringify({
+      'ott.owner.environment': workspace.ownership.environment,
+      'ott.owner.storage-namespace': workspace.ownership.storageNamespace,
+      'ott.owner.server-instance': workspace.ownership.serverInstanceId,
+      'ott.owner.revision-scope': workspace.ownership.revisionScopeId,
+      'ott.owner.kind': 'volume',
+      'ott.source.workspace': workspace.marker,
+    });
+    expect(executor.parseOwnershipLabels(raw)).not.toBeNull();
+    let removeAttempts = 0;
+    vi.spyOn(executor, 'dockerCommandBounded').mockImplementation(async (args: string[]) => {
+      if (args[0] === 'volume' && args[1] === 'inspect') return raw;
+      if (args[0] === 'volume' && args[1] === 'rm') {
+        removeAttempts += 1;
+        if (removeAttempts === 1) throw new Error('volume is in use');
+      }
+      return '';
+    });
+    await expect(executor.cleanupVolumeWorkspace(workspace)).resolves.toBe(true);
+    expect(removeAttempts).toBe(4);
   });
 
   it('keeps raw C++ on bind compilation and stages Python Strategy in an isolated volume', async () => {

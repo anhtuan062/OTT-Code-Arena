@@ -427,14 +427,50 @@ describe('Phase 3G: Tournament Recovery Hardening', () => {
     expect(knockoutStage.status).toBe('in_progress');
     const koPairing = knockoutStage.rounds![0]!.pairings[0]!;
 
-    // Configure executor to produce a draw for this elimination pairing
+    // A knockout pairing is BO3. A draw is an aggregate recovery fixture,
+    // not a single game result: the executor receives the concrete game IDs
+    // below, while the aggregate record remains unresolved for the organizer.
     const matchId = `${tournamentId}-${koPairing.pairingId}`;
-    executor.matchWinners.set(matchId, 'draw');
-
-    // Run the pairing - should become pending_tiebreaker
-    const result = await manager.runPairingById(tournamentId, koPairing.pairingId);
-    expect(result.success).toBe(false);
-    expect(result.error).toContain('tiebreaker pending');
+    const gameIds = [1, 2].map(number => `${matchId}-g${number}`);
+    const drawRecord: TournamentMatchRecord = {
+      matchId,
+      pairingId: koPairing.pairingId,
+      participantA: koPairing.participantA,
+      participantB: koPairing.participantB,
+      winner: null,
+      terminationReason: 'draw_agreement',
+      turnCount: 16,
+      durationMs: 100,
+      replayRef: matchId,
+      completedAt: new Date().toISOString(),
+      series: {
+        format: 'bo3',
+        bestOf: 3,
+        seed: 'recovery-fixture-seed',
+        winsA: 1,
+        winsB: 1,
+        winner: 'draw',
+        games: gameIds.map((gameId, index) => ({
+          gameNumber: (index + 1) as 1 | 2,
+          matchId: gameId,
+          participantA: koPairing.participantA,
+          participantB: koPairing.participantB!,
+          winner: index === 0 ? 'A' : 'B',
+          winnerParticipantId: index === 0 ? koPairing.participantA : koPairing.participantB,
+          terminationReason: 'goal_reached',
+          turnCount: 8,
+          durationMs: 50,
+          replayRef: gameId,
+          completedAt: new Date().toISOString(),
+        })),
+      },
+    };
+    koPairing.status = 'in_progress';
+    koPairing.matchId = matchId;
+    await repository.saveMatchResult(tournamentId, matchId, drawRecord, { matchId, winner: null } as any);
+    await repository.save(tourney);
+    await (manager as any).reconcileInterruptedPairings(tourney, [drawRecord]);
+    await repository.save(tourney);
 
     const tourneyWithPending = (await repository.load(tournamentId))!;
     const koStageAfterDraw = tourneyWithPending.stages!.find(s => s.stageType === 'knockout')!;

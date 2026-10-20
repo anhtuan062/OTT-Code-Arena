@@ -235,6 +235,95 @@ suite('DockerExecutionLimiter host QA', () => {
     expect(recovered.timedOut).toBe(false);
     expect(limiter.active).toBe(0);
   }, 60_000);
+
+  it('bridges the ephemeral-volume cache across isolated matches and skips the second compile', async () => {
+    const cacheRoot = path.join(root, 'compiled-cache');
+    const bridge = createRevisionDockerExecutor({
+      imageRegistry: configuredRuntimeImageRegistry('sandbox-required', process.env),
+      executionPolicy: 'sandbox-required', workingDirBase: path.join(root, 'bridge'),
+      compiledArtifactCacheDir: cacheRoot, resourceEnvironment: 'qa',
+      storageNamespace: `bridge-${randomUUID().replaceAll('-', '')}`,
+      serverInstanceId: `vitest-bridge-${process.pid}-${randomUUID().replaceAll('-', '')}`,
+      cppCompilationBackend: 'ephemeral-volume', cppEphemeralArtifactCache: true,
+      defaultPreparationTimeoutMs: 20_000, defaultTimeoutMs: 5_000, defaultCompileTimeoutMs: 60_000,
+      dockerExecutionLimiter: limiter,
+    });
+    try {
+      expect(await bridge.isAvailable('cpp')).toBe(true);
+      const first = await bridge.executeRevision(
+        { executionId: 'bridge-cache-miss', matchId: 'bridge-match-a', turn: 1, player: 'A', timeoutMs: QA_RUNTIME_TIMEOUT_MS },
+        { execution: revisionExecution('bridge', strategySdk), source: CPP_SOURCE }, request,
+      );
+      const second = await bridge.executeRevision(
+        { executionId: 'bridge-cache-hit', matchId: 'bridge-match-b', turn: 1, player: 'A', timeoutMs: QA_RUNTIME_TIMEOUT_MS },
+        { execution: revisionExecution('bridge', strategySdk), source: CPP_SOURCE }, request,
+      );
+      expect(first.success, JSON.stringify(first)).toBe(true);
+      expect(second.success, JSON.stringify(second)).toBe(true);
+      expect(first.timings.compilationContainerMs).toBeGreaterThan(0);
+      expect(second.timings.compilationContainerMs).toBeNull();
+      expect(second.provenance?.artifactDigest).toMatch(/^[a-f0-9]{64}$/);
+      const speedup = second.durationMs > 0 ? (first.durationMs / second.durationMs).toFixed(2) : 'n/a';
+      console.log(`[P2 bridge QA] miss=${first.durationMs}ms hit=${second.durationMs}ms speedup=${speedup}x compileMiss=${first.timings.compilationContainerMs}ms compileHit=null`);
+      expect(limiter.active).toBe(0);
+    } finally { bridge.close(); }
+  }, 180_000);
+
+  it('benchmarks repeated ephemeral-volume cache misses, cold-process hits and warm hits', async () => {
+    const cacheRoot = path.join(root, 'compiled-cache-benchmark');
+    const storageNamespace = `bridge-bench-${randomUUID().replaceAll('-', '')}`;
+    const makeExecutor = (suffix: string) => createRevisionDockerExecutor({
+      imageRegistry: configuredRuntimeImageRegistry('sandbox-required', process.env),
+      executionPolicy: 'sandbox-required', workingDirBase: path.join(root, `bench-${suffix}`),
+      compiledArtifactCacheDir: cacheRoot, resourceEnvironment: 'qa', storageNamespace,
+      serverInstanceId: `vitest-bench-${process.pid}-${suffix}-${randomUUID().replaceAll('-', '')}`,
+      cppCompilationBackend: 'ephemeral-volume', cppEphemeralArtifactCache: true,
+      defaultPreparationTimeoutMs: 20_000, defaultTimeoutMs: 5_000, defaultCompileTimeoutMs: 60_000,
+      dockerExecutionLimiter: limiter,
+    });
+    const revision = (id: string, source: Buffer) => ({
+      execution: { ...revisionExecution(id, strategySdk), sourceDigest: createHash('sha256').update(source).digest('hex') }, source,
+    });
+    const run = async (executor: ReturnType<typeof createRevisionDockerExecutor>, id: string, source: Buffer) => {
+      const result = await executor.executeRevision(
+        { executionId: id, matchId: id, turn: 1, player: 'A', timeoutMs: QA_RUNTIME_TIMEOUT_MS },
+        revision(id, source), request,
+      );
+      expect(result.success, JSON.stringify(result)).toBe(true);
+      return result;
+    };
+    const percentile = (values: number[], p: number) => {
+      const sorted = [...values].sort((a, b) => a - b);
+      return sorted[Math.min(sorted.length - 1, Math.ceil(sorted.length * p) - 1)]!;
+    };
+    const misses = Array.from({ length: 4 }, (_, index) => Buffer.from(`${CPP_SOURCE.toString('utf8')}\n// isolated-cache-miss-${index}`));
+    const missExecutor = makeExecutor('miss');
+    const missResults: Awaited<ReturnType<typeof run>>[] = [];
+    try {
+      expect(await missExecutor.isAvailable('cpp')).toBe(true);
+      for (let index = 0; index < misses.length; index++) missResults.push(await run(missExecutor, `bridge-bench-miss-${index}`, misses[index]!));
+    } finally { missExecutor.close(); }
+    const coldHitExecutor = makeExecutor('cold-hit');
+    const coldHitResults: Awaited<ReturnType<typeof run>>[] = [];
+    try {
+      expect(await coldHitExecutor.isAvailable('cpp')).toBe(true);
+      coldHitResults.push(await run(coldHitExecutor, 'bridge-bench-cold-hit', misses[0]!));
+    } finally { coldHitExecutor.close(); }
+    const warmHitExecutor = makeExecutor('warm-hit');
+    const warmHitResults: Awaited<ReturnType<typeof run>>[] = [];
+    try {
+      expect(await warmHitExecutor.isAvailable('cpp')).toBe(true);
+      for (let index = 0; index < misses.length; index++) warmHitResults.push(await run(warmHitExecutor, `bridge-bench-warm-hit-${index}`, misses[index]!));
+    } finally { warmHitExecutor.close(); }
+    const missLatency = missResults.map(result => result.durationMs);
+    const hitLatency = [...coldHitResults, ...warmHitResults].map(result => result.durationMs);
+    const allHits = [...coldHitResults, ...warmHitResults];
+    expect(missResults.every(result => (result.timings.compilationContainerMs ?? 0) > 0)).toBe(true);
+    expect(allHits.every(result => result.timings.compilationContainerMs === null)).toBe(true);
+    console.log(`[P2 bridge benchmark] samples miss=${missLatency.length} hit=${hitLatency.length} hitRatio=${(allHits.length / (missResults.length + allHits.length)).toFixed(2)} missP50=${percentile(missLatency, 0.50)}ms missP95=${percentile(missLatency, 0.95)}ms hitP50=${percentile(hitLatency, 0.50)}ms hitP95=${percentile(hitLatency, 0.95)}ms compileSaved=${allHits.length}/${allHits.length} coldHit=${coldHitResults[0]!.durationMs}ms warmHitP50=${percentile(warmHitResults.map(result => result.durationMs), 0.50)}ms`);
+    expect(limiter.active).toBe(0);
+    expect(limiter.pending).toBe(0);
+  }, 300_000);
 });
 
 describe('Docker limiter QA setup cleanup', () => {

@@ -35,6 +35,9 @@ const DEFAULT_COMPARISON_ORDER = [1, 2] as const;
 const CPP_SOURCE = Buffer.from(
   'Move chooseMove(const GameState&, const std::vector<Move>& legalMoves) { return legalMoves.front(); }',
 );
+const PYTHON_SOURCE = Buffer.from(
+  'def choose_move(state, legal_moves):\n    return legal_moves[0]\n',
+);
 const REQUIRED_RUNTIME_ENV = [
   'BOT_TRUSTED_IMAGE_REGISTRIES',
   'BOT_CPP_COMPILER_IMAGE',
@@ -62,10 +65,10 @@ function configuredQaRegistry() {
   return configuredRuntimeImageRegistry('sandbox-required', process.env);
 }
 
-function matchConfig(): Tournament['matchConfig'] {
+function matchConfig(maxTurns = 200): Tournament['matchConfig'] {
   return {
     protocolVersion: '0.1.0',
-    maxTurns: 200,
+    maxTurns,
     turnTimeoutMs: 60_000,
     maxStdoutBytes: 1024 * 1024,
     maxStderrBytes: 1024 * 1024,
@@ -78,7 +81,7 @@ function matchConfig(): Tournament['matchConfig'] {
   };
 }
 
-function participants(count: number, sdk: { version: string; digest: string }, sourceDigest: string): TournamentParticipant[] {
+function participants(count: number, sdk: { version: string; digest: string }, sourceDigest: string, runtimeId: 'cpp' | 'python3'): TournamentParticipant[] {
   return Array.from({ length: count }, (_, index) => {
     const suffix = index + 1;
     const execution: SourceRevisionExecution = {
@@ -86,7 +89,7 @@ function participants(count: number, sdk: { version: string; digest: string }, s
       competitorId: `series-qa-competitor-${suffix}`,
       botId: `series-qa-bot-${suffix}`,
       revisionId: `series-qa-revision-${suffix}`,
-      runtimeId: 'cpp',
+      runtimeId,
       sourceDigest,
       executionMode: 'strategy',
       sdkVersion: sdk.version,
@@ -124,6 +127,9 @@ interface QaStats {
     executionMs: number;
     active: number;
   }>;
+  turnMetrics: Array<{ matchId: string; totalMs: number; readinessMs: number; compilationMs: number | null; lifecycleMs: number; cleanupMs: number; cleanupSucceeded: boolean }>;
+  pairingStarts: Map<string, number>;
+  pairingEnds: Map<string, number>;
 }
 
 function createStats(): QaStats {
@@ -137,7 +143,18 @@ function createStats(): QaStats {
     prematureAdvancement: false,
     checkpoints: [],
     limiterEvents: [],
+    turnMetrics: [],
+    pairingStarts: new Map(),
+    pairingEnds: new Map(),
   };
+}
+
+interface BenchmarkExecutorOptions {
+  runtimeId: 'cpp' | 'python3';
+  availability: 'baseline' | 'cached';
+  artifactCache: boolean;
+  turnBudget?: number;
+  cacheRoot?: string;
 }
 
 function gameParts(matchId: string): { pairingMatchId: string; gameNumber: number } {
@@ -182,10 +199,47 @@ interface QaContext {
   stats: QaStats;
   releaseRevisionScopes: string[];
   sourceByRevision: Map<string, Buffer>;
+  benchmarkOptions: BenchmarkExecutorOptions;
 }
 
 const QA_RUN_TIMEOUT_MS = 540_000;
 const QA_DRAIN_TIMEOUT_MS = 45_000;
+const BENCHMARK_CASE_TIMEOUT_MS = 180_000;
+const BENCHMARK_CASE_DRAIN_TIMEOUT_MS = 30_000;
+
+async function runPairingWithDeadline(
+  context: QaContext,
+  pairingId: string,
+  timeoutMs = BENCHMARK_CASE_TIMEOUT_MS,
+): Promise<Awaited<ReturnType<TournamentManager['runPairingById']>>> {
+  const runPromise = context.manager.runPairingById(context.tournament.tournamentId, pairingId);
+  let timeoutHandle: NodeJS.Timeout | undefined;
+  let timedOut = false;
+  try {
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      timeoutHandle = setTimeout(() => {
+        timedOut = true;
+        reject(new Error(`QA benchmark case deadline exceeded after ${timeoutMs}ms`));
+      }, timeoutMs);
+    });
+    return await Promise.race([runPromise, timeoutPromise]);
+  } catch (error) {
+    if (!timedOut) throw error;
+    const drained = await Promise.race([
+      runPromise.then(() => true, () => true),
+      new Promise<false>(resolve => setTimeout(() => resolve(false), BENCHMARK_CASE_DRAIN_TIMEOUT_MS)),
+    ]);
+    if (!drained) {
+      throw new Error(
+        `QA benchmark case did not drain within ${BENCHMARK_CASE_DRAIN_TIMEOUT_MS}ms; ` +
+        `limiter active=${context.limiter.active}, pending=${context.limiter.pending}`,
+      );
+    }
+    throw error;
+  } finally {
+    if (timeoutHandle) clearTimeout(timeoutHandle);
+  }
+}
 
 async function runWithAbortAndDrain(
   context: QaContext,
@@ -230,16 +284,18 @@ async function createContext(
   stats = createStats(),
   schedulerConcurrency: 1 | 2 = 2,
   fixtureSeed = '',
+  benchmarkOptions: BenchmarkExecutorOptions = { runtimeId: 'cpp', availability: 'cached', artifactCache: false },
 ): Promise<QaContext> {
-  const sdk = await getStrategySdkIdentity('cpp');
-  const sourceDigest = createHash('sha256').update(CPP_SOURCE).digest('hex');
+  const sdk = await getStrategySdkIdentity(benchmarkOptions.runtimeId);
+  const source = benchmarkOptions.runtimeId === 'cpp' ? CPP_SOURCE : PYTHON_SOURCE;
+  const sourceDigest = createHash('sha256').update(source).digest('hex');
   const tournamentId = `qa-series-${randomUUID().replaceAll('-', '')}`;
-  const tournamentParticipants = participants(count, sdk, sourceDigest);
+  const tournamentParticipants = participants(count, sdk, sourceDigest, benchmarkOptions.runtimeId);
   const tournament = createMultiStageTournament({
     tournamentId,
     name: count === 4 ? 'QA BO2 Group' : 'QA BO3 Elimination',
     participants: tournamentParticipants,
-    matchConfig: matchConfig(),
+      matchConfig: matchConfig(benchmarkOptions.turnBudget ?? 200),
     options: {},
   });
   tournament.status = 'running';
@@ -280,11 +336,36 @@ async function createContext(
     ownerLeaseTtlMs: 5_000,
     workingDirBase: path.join(root, 'work'),
     cppCompilationBackend: 'ephemeral-volume',
+    cppEphemeralArtifactCache: benchmarkOptions.artifactCache,
+    compiledArtifactCacheDir: benchmarkOptions.cacheRoot,
     defaultPreparationTimeoutMs: 20_000,
     defaultCompileTimeoutMs: 60_000,
     defaultTimeoutMs: 60_000,
     dockerExecutionLimiter: limiter,
   });
+  if (benchmarkOptions.availability === 'baseline') {
+    const originalAvailability = revisionExecutor.isAvailable.bind(revisionExecutor);
+    (revisionExecutor as any).isAvailable = async (runtimeId?: 'cpp' | 'python3') => {
+      (revisionExecutor as any).invalidateAvailability(runtimeId);
+      return originalAvailability(runtimeId);
+    };
+  }
+  const originalExecuteRevision = revisionExecutor.executeRevision.bind(revisionExecutor);
+  (revisionExecutor as any).executeRevision = async (...args: Parameters<typeof revisionExecutor.executeRevision>) => {
+    const result = await originalExecuteRevision(...args);
+    const timings = result.timings;
+    const executionContext = args[0] as { matchId?: string };
+    stats.turnMetrics.push({
+      matchId: executionContext.matchId ?? 'unknown',
+      totalMs: result.durationMs,
+      readinessMs: timings.imageReadinessMs,
+      compilationMs: timings.compilationContainerMs,
+      lifecycleMs: (timings.workspacePreparationMs ?? 0) + (timings.artifactValidationMs ?? 0) + timings.cleanupMs,
+      cleanupMs: timings.cleanupMs,
+      cleanupSucceeded: timings.cleanupSucceeded,
+    });
+    return result;
+  };
   const originalRelease = revisionExecutor.releaseRevisionScope.bind(revisionExecutor);
   const trackedRevisionExecutor = new Proxy(revisionExecutor, {
     get(target, property, receiver) {
@@ -300,7 +381,7 @@ async function createContext(
   const sourceByRevision = new Map(
     tournamentParticipants.map(participant => {
       const execution = participant.bot.execution as SourceRevisionExecution;
-      return [`${execution.botId}:${execution.revisionId}`, CPP_SOURCE] as const;
+      return [`${execution.botId}:${execution.revisionId}`, source] as const;
     }),
   );
   const resolveRevision = async (execution: SourceRevisionExecution) =>
@@ -348,6 +429,7 @@ async function createContext(
       stats.lastSidesByPairing.set(pairingMatchId, { playerA: playerA.botId, playerB: playerB.botId });
       if (stats.calls.includes(matchId)) throw new Error(`Duplicate Docker game execution: ${matchId}`);
       stats.calls.push(matchId);
+      stats.pairingStarts.set(pairingMatchId, stats.pairingStarts.get(pairingMatchId) ?? performance.now());
       stats.activePairings.add(pairingMatchId);
       stats.peakActivePairings = Math.max(stats.peakActivePairings, stats.activePairings.size);
 
@@ -362,6 +444,7 @@ async function createContext(
       try {
         return await rawExecutor.executeMatch(matchId, playerA, playerB, config, callbacks, signal);
       } finally {
+        stats.pairingEnds.set(pairingMatchId, performance.now());
         stats.activePairings.delete(pairingMatchId);
       }
     },
@@ -379,7 +462,7 @@ async function createContext(
       }
     },
   });
-  return { root, repository, manager, tournament, limiter, stats, releaseRevisionScopes, sourceByRevision };
+  return { root, repository, manager, tournament, limiter, stats, releaseRevisionScopes, sourceByRevision, benchmarkOptions };
 }
 
 function assertDurableTriad(root: string, tournamentId: string, matchId: string): Promise<void> {
@@ -440,6 +523,45 @@ async function summarizeSeriesRun(
     failures: run.success ? [] : [run.error ?? 'unknown tournament failure'],
     cleanup: { active: context.limiter.active, pending: context.limiter.pending },
     schedulerCheckpoints: context.stats.checkpoints.length,
+  };
+}
+
+function percentile(values: number[], p: number): number {
+  const sorted = [...values].sort((a, b) => a - b);
+  return sorted.length === 0 ? 0 : sorted[Math.min(sorted.length - 1, Math.ceil(sorted.length * p) - 1)]!;
+}
+
+function summarizeEndToEndPerformance(context: QaContext, startedAt: number, run: Awaited<ReturnType<TournamentManager['runAllMatches']>>) {
+  const turns = context.stats.turnMetrics;
+  const pairingDurations = [...context.stats.pairingStarts.entries()]
+    .map(([pairingId, start]) => ({ pairingId, durationMs: (context.stats.pairingEnds.get(pairingId) ?? performance.now()) - start }));
+  const total = turns.map(turn => turn.totalMs);
+  const compilation = turns.flatMap(turn => turn.compilationMs === null ? [] : [turn.compilationMs]);
+  const lifecycle = turns.map(turn => turn.lifecycleMs);
+  const cacheEligible = context.benchmarkOptions.runtimeId === 'cpp';
+  const firstTurnByMatch = new Map<string, typeof turns[number]>();
+  for (const turn of turns) if (!firstTurnByMatch.has(turn.matchId)) firstTurnByMatch.set(turn.matchId, turn);
+  const cacheProbeTurns = [...firstTurnByMatch.values()];
+  const cacheHits = cacheEligible ? cacheProbeTurns.filter(turn => turn.compilationMs === null).length : null;
+  const cacheMisses = cacheEligible ? cacheProbeTurns.filter(turn => turn.compilationMs !== null).length : null;
+  return {
+    runtime: context.benchmarkOptions.runtimeId,
+    availability: context.benchmarkOptions.availability,
+    p2: context.benchmarkOptions.artifactCache,
+    elapsedMs: Date.now() - startedAt,
+    runSuccess: run.success,
+    pairingCount: pairingDurations.length,
+    pairingDurationMs: {
+      p50: percentile(pairingDurations.map(item => item.durationMs), 0.50),
+      p95: percentile(pairingDurations.map(item => item.durationMs), 0.95),
+      samples: pairingDurations.length,
+    },
+    turnDurationMs: { p50: percentile(total, 0.50), p95: percentile(total, 0.95), samples: total.length },
+    compilationMs: { p50: percentile(compilation, 0.50), p95: percentile(compilation, 0.95), samples: compilation.length },
+    dockerLifecycleMs: { p50: percentile(lifecycle, 0.50), p95: percentile(lifecycle, 0.95), samples: lifecycle.length },
+    availabilityReadinessMs: { p50: percentile(turns.map(turn => turn.readinessMs), 0.50), p95: percentile(turns.map(turn => turn.readinessMs), 0.95) },
+    cache: cacheEligible ? { hits: cacheHits, misses: cacheMisses, ratio: (cacheHits! + cacheMisses!) > 0 ? cacheHits! / (cacheHits! + cacheMisses!) : 0 } : null,
+    cleanup: { samples: turns.length, failures: turns.filter(turn => !turn.cleanupSucceeded).length, totalMs: turns.reduce((sum, turn) => sum + turn.cleanupMs, 0) },
   };
 }
 
@@ -634,6 +756,185 @@ suite('Series-aware scheduler RevisionDockerExecutor QA', () => {
       parallel: { concurrency: 2, ...parallel },
     })}\n`);
   }, 1_200_000);
+
+  it('compares baseline, P0-only and P0+P2 on identical isolated BO2/BO3 C++/Python pairings', async () => {
+    const allVariants: Array<{ name: string; availability: 'baseline' | 'cached'; artifactCache: boolean }> = [
+      { name: 'baseline', availability: 'baseline', artifactCache: false },
+      { name: 'p0-only', availability: 'cached', artifactCache: false },
+      { name: 'p0-p2', availability: 'cached', artifactCache: true },
+    ];
+    const fixtures = [
+      { name: 'BO2', count: 4 },
+      { name: 'BO3', count: 2 },
+    ] as const;
+    const rows: Array<Record<string, unknown>> = [];
+    const bounded = process.env.OTT_P0_P2_BOUNDED_QA === 'true';
+    const variants = bounded ? allVariants.filter(variant => variant.name !== 'baseline') : allVariants;
+    const runtimes = bounded ? (['cpp'] as const) : (['cpp', 'python3'] as const);
+    const fixtureFilter = process.env.OTT_P0_P2_FIXTURE;
+    const selectedFixtures = fixtureFilter === 'BO2' || fixtureFilter === 'BO3'
+      ? fixtures.filter(fixture => fixture.name === fixtureFilter)
+      : fixtures;
+    const requestedRepetitions = Number(process.env.OTT_P0_P2_REPETITIONS ?? (bounded ? '3' : '1'));
+    const repetitions = Number.isInteger(requestedRepetitions) && requestedRepetitions > 0
+      ? Math.min(requestedRepetitions, 3)
+      : 1;
+    const requestedMaxCases = Number(process.env.OTT_P0_P2_MAX_CASES ?? '12');
+    const defaultMaxCases = bounded ? selectedFixtures.length * variants.length * repetitions : 12;
+    const maxCases = Number.isInteger(requestedMaxCases) && requestedMaxCases > 0 ? Math.min(requestedMaxCases, 12) : defaultMaxCases;
+    process.stdout.write(`P0_P2_MATRIX_START ${JSON.stringify({ expectedCases: bounded ? defaultMaxCases : 12, maxCases, bounded, fixtureFilter: fixtureFilter ?? null, repetitions })}\n`);
+    caseLoop: for (const runtimeId of runtimes) {
+      for (const fixture of selectedFixtures) {
+        for (let repetition = 1; repetition <= repetitions; repetition++) {
+          const orderedVariants = repetition % 2 === 1 ? variants : [...variants].reverse();
+          for (const variant of orderedVariants) {
+          if (rows.length >= maxCases) break caseLoop;
+          const caseStartedAt = Date.now();
+          process.stdout.write(`P0_P2_CASE_START ${JSON.stringify({ case: rows.length + 1, runtimeId, fixture: fixture.name, variant: variant.name, repetition })}\n`);
+          const root = await fs.mkdtemp(path.join(os.tmpdir(), `ott-p0-p2-${runtimeId}-${fixture.name}-${variant.name}-`));
+          const repository = new FileTournamentRepository({ baseDir: path.join(root, 'storage') });
+          let context: QaContext;
+          try {
+            process.stdout.write(`P0_P2_CASE_PHASE ${JSON.stringify({ case: rows.length + 1, phase: 'setup' })}\n`);
+            context = await createContext(
+              fixture.count, repository, root, createStats(), 1,
+              `p0-p2-identical-${runtimeId}-${fixture.name}`,
+              {
+                runtimeId,
+                availability: variant.availability,
+                artifactCache: runtimeId === 'cpp' && variant.artifactCache,
+                turnBudget: 20,
+                cacheRoot: path.join(root, 'cache'),
+              },
+            );
+          } catch (error) {
+            repository.close();
+            await fs.rm(root, { recursive: true, force: true });
+            throw error;
+          }
+          contexts.push(context);
+          const current = await repository.load(context.tournament.tournamentId);
+          expect(current).toBeDefined();
+          const initialPairings = getAllTournamentPairings(current!);
+          const stageTypeOf = (pairing: TournamentPairing) =>
+            current!.stages?.find(stage => stage.stageId === pairing.stageId)?.stageType ?? null;
+          const groupPairings = initialPairings.filter(pairing =>
+            pairing.participantB !== null && stageTypeOf(pairing) === 'group_stage' && pairing.status === 'scheduled',
+          );
+          if (fixture.name === 'BO2') expect(groupPairings.length).toBeGreaterThan(0);
+          process.stdout.write(`P0_P2_CASE_PHASE ${JSON.stringify({
+            case: rows.length + 1,
+            phase: 'pairing-selected',
+            fixture: fixture.name,
+            groupPairingIds: groupPairings.slice(0, 2).map(pairing => pairing.pairingId),
+            stageType: fixture.name === 'BO2' ? 'group_stage' : 'scheduler-created-knockout',
+            initialStages: initialPairings
+              .filter(pairing => pairing.participantB !== null)
+              .map(pairing => ({ pairingId: pairing.pairingId, stageType: stageTypeOf(pairing), status: pairing.status })),
+          })}\n`);
+          const startedAt = Date.now();
+          process.stdout.write(`P0_P2_CASE_PHASE ${JSON.stringify({ case: rows.length + 1, phase: 'execute' })}\n`);
+          let run: Awaited<ReturnType<TournamentManager['runPairingById']>>;
+          try {
+            if (fixture.name === 'BO2') {
+              expect(groupPairings.length).toBeGreaterThanOrEqual(2);
+              run = await runPairingWithDeadline(context, groupPairings[0]!.pairingId);
+              const secondRun = await runPairingWithDeadline(context, groupPairings[1]!.pairingId);
+              expect(secondRun.success, JSON.stringify(secondRun)).toBe(true);
+              run = secondRun;
+            } else {
+              run = await runWithAbortAndDrain(context) as Awaited<ReturnType<TournamentManager['runPairingById']>>;
+            }
+          } catch (error) {
+            process.stdout.write(`P0_P2_CASE_ERROR ${JSON.stringify({
+              case: rows.length + 1,
+              error: error instanceof Error ? error.message : String(error),
+              elapsedMs: Date.now() - caseStartedAt,
+              limiter: { active: context.limiter.active, pending: context.limiter.pending },
+              turnSamples: context.stats.turnMetrics.length,
+            })}\n`);
+            throw error;
+          }
+          expect(run.success, JSON.stringify(run)).toBe(true);
+          const final = await repository.load(context.tournament.tournamentId);
+          expect(final).toBeDefined();
+          const finalPairings = getAllTournamentPairings(final!);
+          if (fixture.name === 'BO2') {
+            const completedGroup = finalPairings.filter(pairing =>
+              groupPairings.some(selected => selected.pairingId === pairing.pairingId) && pairing.status === 'completed',
+            );
+            process.stdout.write(`P0_P2_FIXTURE_CHECK ${JSON.stringify(completedGroup.map(pairing => ({
+              pairingId: pairing.pairingId,
+              status: pairing.status,
+              format: pairing.matchResult?.series?.format ?? null,
+              gameCount: pairing.matchResult?.series?.games?.length ?? 0,
+            })))}\n`);
+            expect(completedGroup.every(pairing => pairing.matchResult?.series?.format === 'bo2')).toBe(true);
+            expect(completedGroup.every(pairing => pairing.matchResult?.series?.games.length === 2)).toBe(true);
+          } else {
+            const knockoutPairings = finalPairings.filter(pairing =>
+              final!.stages?.find(stage => stage.stageId === pairing.stageId)?.stageType === 'knockout' &&
+              pairing.status === 'completed',
+            );
+            expect(knockoutPairings.length).toBeGreaterThan(0);
+            for (const knockout of knockoutPairings) {
+              const games = knockout.matchResult?.series?.games ?? [];
+              expect(games.length).toBeGreaterThanOrEqual(2);
+              expect(games.length).toBeLessThanOrEqual(3);
+              const firstTwoDifferent = games.length >= 2 && games[0]!.winnerParticipantId !== games[1]!.winnerParticipantId;
+              expect(games.length).toBe(firstTwoDifferent ? 3 : 2);
+            }
+          }
+          const performance = summarizeEndToEndPerformance(context, startedAt, run);
+          const row = {
+            case: rows.length + 1,
+            fixture: fixture.name,
+            variant: variant.name,
+            stageType: fixture.name === 'BO2' ? 'group_stage' : 'knockout',
+            caseElapsedMs: Date.now() - caseStartedAt,
+            ...performance,
+          };
+          rows.push(row);
+          process.stdout.write(`P0_P2_CASE_RESULT ${JSON.stringify(row)}\n`);
+          if (runtimeId === 'cpp') {
+            const cache = performance.cache as { hits: number; misses: number; ratio: number } | null;
+            expect(cache).not.toBeNull();
+            expect(cache!.misses).toBeGreaterThan(0);
+            if (variant.artifactCache) expect(cache!.hits).toBeGreaterThan(0);
+            else expect(cache!.hits).toBe(0);
+          }
+          expect(context.limiter.active).toBe(0);
+          expect(context.limiter.pending).toBe(0);
+          expect(context.stats.turnMetrics.length).toBeGreaterThan(0);
+          }
+        }
+      }
+    }
+    const aggregate = selectedFixtures.flatMap(fixture => variants.map(variant => {
+      const matching = rows.filter(row => row.fixture === fixture.name && row.variant === variant.name);
+      const pairingP50 = matching.map(row => (row.pairingDurationMs as { p50: number }).p50);
+      const cache = matching.map(row => row.cache as { hits: number; misses: number; ratio: number });
+      const median = (values: number[]) => percentile(values, 0.5);
+      const mean = pairingP50.reduce((sum, value) => sum + value, 0) / Math.max(pairingP50.length, 1);
+      const stddev = Math.sqrt(pairingP50.reduce((sum, value) => sum + ((value - mean) ** 2), 0) / Math.max(pairingP50.length, 1));
+      return {
+        fixture: fixture.name,
+        variant: variant.name,
+        samples: matching.length,
+        pairingDurationMs: { median: median(pairingP50), min: Math.min(...pairingP50), max: Math.max(...pairingP50), stddev },
+        cache: {
+          hits: cache.reduce((sum, item) => sum + item.hits, 0),
+          misses: cache.reduce((sum, item) => sum + item.misses, 0),
+        },
+        compilationMs: matching.map(row => (row.compilationMs as { p50: number }).p50),
+        cleanupFailures: matching.reduce((sum, row) => sum + (row.cleanup as { failures: number }).failures, 0),
+      };
+    }));
+    process.stdout.write(`P0_P2_AGGREGATE ${JSON.stringify(aggregate)}\n`);
+    process.stdout.write(`P0_P2_END_TO_END_COMPARISON ${JSON.stringify(rows)}\n`);
+    expect(rows).toHaveLength(maxCases);
+    expect(rows.every(row => row.runSuccess === true)).toBe(true);
+  }, 1_800_000);
 });
 
 describe('Series scheduler deterministic draw contract', () => {

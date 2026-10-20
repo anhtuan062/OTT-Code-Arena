@@ -1,10 +1,11 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import request from 'supertest';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import {
   appExport,
+  getTournamentManager,
   initServer,
   isServerShuttingDown,
   shutdownServer,
@@ -45,5 +46,20 @@ describe('coordinated graceful shutdown', () => {
     expect(response.status).toBe(503);
     expect(response.body.error).toBe('Server is shutting down');
     await expect(shuttingDown).resolves.toEqual({ closed: true, timedOut: false });
+  });
+
+  it('does not publish closed when manager cleanup fails and allows one retry', async () => {
+    const manager = getTournamentManager();
+    const closeSpy = vi.spyOn(manager, 'close')
+      .mockRejectedValueOnce(new Error('simulated manager close failure'));
+
+    await expect(shutdownServer(1_000)).rejects.toThrow('simulated manager close failure');
+    expect(closeSpy).toHaveBeenCalledTimes(1);
+
+    closeSpy.mockRestore();
+    const retrySpy = vi.spyOn(manager, 'close');
+    await expect(shutdownServer(1_000)).resolves.toEqual({ closed: true, timedOut: false });
+    expect(retrySpy).toHaveBeenCalledTimes(1);
+    retrySpy.mockRestore();
   });
 });

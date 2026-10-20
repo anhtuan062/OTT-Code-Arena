@@ -199,6 +199,13 @@ export class MatchRunner {
           player: currentPlayer,
           runtimeId: botDef.execution?.kind === 'source-revision' ? botDef.execution.runtimeId : 'legacy',
           executionMode: botDef.execution?.kind === 'source-revision' ? (botDef.execution.executionMode ?? 'raw') : 'legacy',
+          ...(botResult.timings ? {
+            imageReadinessMs: botResult.timings.imageReadinessMs,
+            compilationContainerMs: botResult.timings.compilationContainerMs,
+            runtimeContainerMs: botResult.timings.runtimeContainerMs,
+            cleanupMs: botResult.timings.cleanupMs,
+            totalMs: botResult.timings.totalMs,
+          } : {}),
           ...(botDef.execution?.kind === 'source-revision' && botDef.execution.sdkVersion ? { sdkVersion: botDef.execution.sdkVersion } : {}),
           ...(botDef.execution?.kind === 'source-revision' && botDef.execution.sdkDigest ? { sdkDigest: botDef.execution.sdkDigest } : {}),
           ...(botResult.provenance?.compilationBackend ? { compilationBackend: botResult.provenance.compilationBackend } : {}),

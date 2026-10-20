@@ -5,3 +5,12 @@ data
 tmp
 tests
 *.log
+.runtime
+.wrangler
+maintenance-backups
+static-replay-preview
+_p0-release-candidate
+ott-recovery-build-*
+ott-timing-diagnostics-fix
+qa-*
+.qa-*

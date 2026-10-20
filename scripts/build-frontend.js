@@ -10,7 +10,6 @@ const moduleFiles = [
   'auth.js',
   'api.js',
   'dashboard.js',
-  'operations.js',
   'bots.js',
   'practice.js',
   'tournaments.js',

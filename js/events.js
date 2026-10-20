@@ -250,7 +250,8 @@ if (window.ResizeObserver) {
   if (editor) new ResizeObserver(updateEditorMetrics).observe(editor);
 }
 updateEditorMetrics();
-setAuthMode('login', false); setupReplayCoordinates(); void restoreSession();
+setAuthMode('login', false); setupReplayCoordinates();
+if (!(typeof window !== 'undefined' && window.OTT_PUBLIC_REPLAY_STATIC_ONLY === true)) void restoreSession();
 initAuthMotion();
 setInterval(() => {
   if (state.user) void refreshQueueStats();

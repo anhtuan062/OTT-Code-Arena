@@ -46,6 +46,12 @@ export interface ExecutionDiagnostic {
   player: Player;
   runtimeId: SourceRuntimeId | 'legacy';
   executionMode: 'raw' | 'strategy' | 'legacy';
+  /** Bounded host-observed timing facts; absent on legacy persisted diagnostics. */
+  imageReadinessMs?: number;
+  compilationContainerMs?: number | null;
+  runtimeContainerMs?: number | null;
+  cleanupMs?: number;
+  totalMs?: number;
   sdkVersion?: string;
   sdkDigest?: string;
   compilationBackend?: 'bind' | 'ephemeral-volume';

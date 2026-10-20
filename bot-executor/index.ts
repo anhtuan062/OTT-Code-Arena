@@ -119,6 +119,8 @@ export {
   buildStrategyCppCompileDockerArgs,
   buildStrategyCppVolumeCompileDockerArgs,
   buildCppVolumeRuntimeDockerArgs,
+  buildCppArtifactImportDockerArgs,
+  buildCppArtifactExportDockerArgs,
   buildStrategyPythonRuntimeDockerArgs,
   resolveCppCompilationBackend,
   WorkspacePreparationError,

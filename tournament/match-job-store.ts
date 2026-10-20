@@ -31,4 +31,10 @@ export interface MatchJobStore {
   assertLease(claim: MatchJobClaim): boolean | Promise<boolean>;
   complete(claim: MatchJobClaim): boolean | Promise<boolean>;
   release(claim: MatchJobClaim, error?: unknown): boolean | Promise<boolean>;
+  get?(tournamentId: string, pairingId: string): MatchJobRecord | null | Promise<MatchJobRecord | null>;
+  /**
+   * Atomically return an expired/non-running job to the queue and fence any
+   * previous worker. Active leases must be rejected by the implementation.
+   */
+  requeue?(tournamentId: string, pairingId: string, reason?: unknown): boolean | Promise<boolean>;
 }

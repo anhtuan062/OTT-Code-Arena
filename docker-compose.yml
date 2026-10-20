@@ -1,0 +1,45 @@
+services:
+  ott:
+    build:
+      context: .
+      dockerfile: Dockerfile.app
+    ports:
+      - "${PORT:-3000}:3000"
+    environment:
+      NODE_ENV: "${NODE_ENV:-development}"
+      EXECUTION_POLICY: "${EXECUTION_POLICY:-development}"
+      PORT: "3000"
+      TOURNAMENT_DATA_DIR: /app/data/tournaments
+      BOT_EXECUTION_WORKDIR: /app/.runtime/source-execution
+      BOT_CPP_EPHEMERAL_ARTIFACT_CACHE: "${BOT_CPP_EPHEMERAL_ARTIFACT_CACHE:-false}"
+      BOT_COMPILED_ARTIFACT_CACHE_DIR: /app/.runtime/compiled-artifacts
+      BOT_COMPILED_ARTIFACT_CACHE_MAX_BYTES: "${BOT_COMPILED_ARTIFACT_CACHE_MAX_BYTES:-536870912}"
+      BOT_COMPILED_ARTIFACT_CACHE_MAX_ENTRIES: "${BOT_COMPILED_ARTIFACT_CACHE_MAX_ENTRIES:-128}"
+      BOT_CPP_COMPILATION_BACKEND: "${BOT_CPP_COMPILATION_BACKEND:-ephemeral-volume}"
+      ENABLE_SOURCE_REVISION_EXECUTION: "${ENABLE_SOURCE_REVISION_EXECUTION:-false}"
+      ENABLE_MULTI_STAGE: "${ENABLE_MULTI_STAGE:-true}"
+      OTT_ENABLE_SERIES_SCHEDULER: "${OTT_ENABLE_SERIES_SCHEDULER:-true}"
+      OTT_SERIES_MATCH_CONCURRENCY: "${OTT_SERIES_MATCH_CONCURRENCY:-2}"
+      OTT_ENABLE_SERIES_CONCURRENCY_2: "${OTT_ENABLE_SERIES_CONCURRENCY_2:-true}"
+      OTT_DOCKER_EXECUTION_CONCURRENCY: "${OTT_DOCKER_EXECUTION_CONCURRENCY:-1}"
+      BOT_TRUSTED_IMAGE_REGISTRIES: "${BOT_TRUSTED_IMAGE_REGISTRIES:-docker.io,ghcr.io}"
+      BOT_DOCKER_IMAGE: "${BOT_DOCKER_IMAGE:-ghcr.io/anhtuan062/ott-phase6e-bot@sha256:78c1972c29f1385eacd32f715a24ec41013b5883fb5f8fe0f2c597358d3bf70d}"
+      CORS_ORIGIN: "${CORS_ORIGIN:-}"
+      TRUSTED_PROXY_CIDRS: "${TRUSTED_PROXY_CIDRS:-}"
+    volumes:
+      - ott-data:/app/data
+      - ott-runtime:/app/.runtime
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+
+volumes:
+  ott-data:
+  ott-runtime:

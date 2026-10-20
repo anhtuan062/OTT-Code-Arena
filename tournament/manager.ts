@@ -230,6 +230,7 @@ export class TournamentManager {
   private readonly activeSchedulers = new Map<string, { cancel(reason?: unknown): void; stopDispatching?(): void }>();
   private readonly cancelledTournaments = new Set<string>();
   private readonly activePairingExecutions = new Set<string>();
+  private readonly closeWaiters = new Set<() => void>();
   private readonly pendingResultWrites = new Map<string, Set<Promise<void>>>();
   private readonly terminalTransitionLocks = new Map<string, Promise<void>>();
   private readonly tournamentWriteLocks = new Map<string, Promise<void>>();
@@ -250,6 +251,8 @@ export class TournamentManager {
   private readonly liveHistories = new Map<string, LiveMatchSnapshot[]>();
   private readonly liveSubscribers = new Map<string, Set<(snapshot: LiveMatchSnapshot) => void>>();
   private shuttingDown = false;
+  private closeRequested = false;
+  private closeFinalized = false;
 
   constructor(config: TournamentAppConfig) {
     this.repository = config.repository;
@@ -314,12 +317,26 @@ export class TournamentManager {
     return this.shuttingDown;
   }
 
-  close(): void {
+  async close(): Promise<void> {
     this.beginShutdown();
+    this.closeRequested = true;
+    if (this.closeFinalized) return;
+    if (this.activeSchedulers.size > 0 || this.activePairingExecutions.size > 0 || this.pendingResultWrites.size > 0) {
+      await new Promise<void>(resolve => this.closeWaiters.add(resolve));
+    }
+    if (this.closeFinalized) return;
     this.liveSnapshots.clear();
     this.liveHistories.clear();
     this.liveSubscribers.clear();
     this.repository.close?.();
+    this.closeFinalized = true;
+  }
+
+  private notifyCloseWaiters(): void {
+    if (!this.closeRequested) return;
+    if (this.activeSchedulers.size > 0 || this.activePairingExecutions.size > 0 || this.pendingResultWrites.size > 0) return;
+    for (const resolve of this.closeWaiters) resolve();
+    this.closeWaiters.clear();
   }
 
   private liveKey(tournamentId: string, matchId: string): string {
@@ -1058,7 +1075,7 @@ export class TournamentManager {
         signal => this.runFairMatchQuantum(tournamentId, signal),
         signal,
       );
-      if (dispatched.cancelled || signal?.aborted || this.cancelledTournaments.has(tournamentId)) {
+      if (dispatched.cancelled || this.shuttingDown || signal?.aborted || this.cancelledTournaments.has(tournamentId)) {
         return { success: false, error: 'Tournament execution cancelled' };
       }
       if (dispatched.failures.length > 0) {
@@ -1392,6 +1409,7 @@ export class TournamentManager {
       scheduleResult = await scheduler.run(initialTournament);
     } finally {
       this.activeSchedulers.delete(tournamentId);
+      this.notifyCloseWaiters();
     }
 
     if (scheduleResult.cancelled || this.shuttingDown || signal?.aborted || this.cancelledTournaments.has(tournamentId)) {
@@ -1463,6 +1481,69 @@ export class TournamentManager {
     }
 
     return this.runPairing(tournament, pairing);
+  }
+
+  /** Retry one failed pairing without changing the rest of the schedule. */
+  async requeuePairing(tournamentId: string, pairingId: string): Promise<TournamentOperationResult<null>> {
+    if (this.shuttingDown) return { success: false, error: 'Tournament execution paused for shutdown' };
+    const current = await this.loadTournament(tournamentId);
+    if (!current.success || !current.data) return { success: false, error: current.error };
+    const pairing = this.findTournamentPairing(current.data, pairingId);
+    if (!pairing) return { success: false, error: `Pairing ${pairingId} not found` };
+    if (pairing.participantB === null) return { success: false, error: 'Cannot requeue a bye pairing' };
+    if (pairing.status === 'pending_tiebreaker' || pairing.tiebreakerStatus === 'pending' || pairing.failureCode === 'UNRESOLVED_DRAW') {
+      return { success: false, error: 'Pairing is waiting for organizer tiebreaker resolution, not a retryable execution failure' };
+    }
+    if (pairing.status !== 'failed' && pairing.status !== 'in_progress') {
+      return { success: false, error: `Pairing cannot be requeued (current: ${pairing.status})` };
+    }
+
+    if (this.matchJobStore) {
+      const job = await this.matchJobStore.get?.(tournamentId, pairingId);
+      if (job?.status === 'running' && (!job.leaseExpiresAt || job.leaseExpiresAt > new Date().toISOString())) {
+        return { success: false, error: 'Pairing has an active or indeterminate durable lease and cannot be requeued' };
+      }
+      if (this.matchJobStore.requeue && !(await this.matchJobStore.requeue(tournamentId, pairingId, 'Organizer requeue'))) {
+        return { success: false, error: 'Pairing durable job is not safely requeueable' };
+      }
+    } else if (pairing.status === 'in_progress') {
+      return { success: false, error: 'Cannot requeue an in-progress pairing without durable lease fencing' };
+    }
+
+    return this.mutateTournament(tournamentId, async tournament => {
+      const fresh = this.findTournamentPairing(tournament, pairingId);
+      if (!fresh) return { success: false, error: `Pairing ${pairingId} not found` };
+      if (fresh.status !== 'failed' && fresh.status !== 'in_progress') {
+        return { success: false, error: `Pairing changed before requeue (current: ${fresh.status})` };
+      }
+      if (fresh.status === 'in_progress' && this.matchJobStore === undefined) {
+        return { success: false, error: 'Cannot requeue an in-progress pairing without durable lease fencing' };
+      }
+      // Preserve BO2/BO3 checkpoints, match artifacts and the old attempt.
+      // The next execution resumes from the authoritative series progress.
+      fresh.status = 'scheduled';
+      fresh.failureReason = null;
+      fresh.failureCode = null;
+      await this.saveTournament(tournament);
+      return { success: true, data: null };
+    });
+  }
+
+  /**
+   * A completed pairing cannot currently be rematched safely. The engine has
+   * no immutable attempt history plus dependency-aware aggregate replacement,
+   * so refusing is safer than overwriting standings or downstream slots.
+   */
+  async rematchPairing(tournamentId: string, pairingId: string): Promise<TournamentOperationResult<null>> {
+    const current = await this.loadTournament(tournamentId);
+    if (!current.success || !current.data) return { success: false, error: current.error };
+    const pairing = this.findTournamentPairing(current.data, pairingId);
+    if (!pairing) return { success: false, error: `Pairing ${pairingId} not found` };
+    if (pairing.status !== 'completed') return { success: false, error: `Rematch requires a completed pairing (current: ${pairing.status})` };
+    return {
+      success: false,
+      error: 'Rematch is blocked: completed results feed standings or downstream rounds, and this engine has no safe immutable-attempt replacement policy yet',
+    };
   }
 
   /** Retry one failed pairing without changing the rest of the schedule. */
@@ -1790,6 +1871,7 @@ export class TournamentManager {
         writes.delete(resultWrite);
         if (writes.size === 0) {
           this.pendingResultWrites.delete(tournament.tournamentId);
+          this.notifyCloseWaiters();
         }
       }
 
@@ -1836,6 +1918,7 @@ export class TournamentManager {
       };
     } finally {
       this.activePairingExecutions.delete(executionKey);
+      this.notifyCloseWaiters();
     }
   }
 

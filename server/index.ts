@@ -43,7 +43,7 @@ import {
   getQaFixture,
   getOwnedQaFixture,
   resolveQaFixtureTiebreaker,
-  retryQaFixturePairing,
+  requeueQaFixturePairing,
 } from './qa-fixtures.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -142,6 +142,8 @@ let fairMatchDispatcher = new FairMatchDispatcher<ExecutedMatchResult>(2);
 let hostCapacityController = new HostCapacityController(hostCapacityThresholdsFromEnv());
 let httpServer: Server | undefined;
 let shutdownPromise: Promise<ShutdownResult> | undefined;
+let shutdownFinalizationPromise: Promise<ShutdownResult> | undefined;
+let shutdownFinalized = false;
 let shuttingDown = false;
 const activeSseResponses = new Set<express.Response>();
 const DEFAULT_SHUTDOWN_TIMEOUT_MS = 30_000;
@@ -157,6 +159,8 @@ const projectionCache = new ProjectionCache({
   maxBytes: Number(process.env.OTT_PROJECTION_CACHE_MAX_BYTES ?? 8 * 1024 * 1024),
 });
 const activePracticeExecutions = new Set<string>();
+const activePracticeCompletions = new Map<string, Promise<void>>();
+const activePracticeResolvers = new Map<string, () => void>();
 const activePracticeByUser = new Map<string, number>();
 const practiceAttempts = new Map<string, number[]>();
 const SESSION_COOKIE = 'ott_session';
@@ -190,6 +194,19 @@ export function resolveExecutionPolicy(env: NodeJS.ProcessEnv = process.env): Ex
     : 'development';
 }
 
+export function resolveCompiledArtifactCacheConfig(env: NodeJS.ProcessEnv = process.env) {
+  const positiveNumber = (name: string, fallback: number): number => {
+    const value = Number(env[name]);
+    return Number.isFinite(value) && value > 0 ? value : fallback;
+  };
+  return {
+    cppEphemeralArtifactCache: env.BOT_CPP_EPHEMERAL_ARTIFACT_CACHE?.trim().toLowerCase() === 'true',
+    compiledArtifactCacheDir: env.BOT_COMPILED_ARTIFACT_CACHE_DIR?.trim() || undefined,
+    compiledArtifactCacheMaxBytes: positiveNumber('BOT_COMPILED_ARTIFACT_CACHE_MAX_BYTES', 512 * 1024 * 1024),
+    compiledArtifactCacheMaxEntries: Math.floor(positiveNumber('BOT_COMPILED_ARTIFACT_CACHE_MAX_ENTRIES', 128)),
+  };
+}
+
 export async function initServer(storageDir?: string) {
   if (manager || httpServer) {
     const previousShutdown = await shutdownServer();
@@ -197,6 +214,8 @@ export async function initServer(storageDir?: string) {
   }
   shuttingDown = false;
   shutdownPromise = undefined;
+  shutdownFinalizationPromise = undefined;
+  shutdownFinalized = false;
   const executionPolicy = resolveExecutionPolicy();
   const seriesSchedulerConfig = resolveSeriesSchedulerRuntimeConfig();
   // Fail configuration before opening persistence or accepting a listener.
@@ -222,6 +241,7 @@ export async function initServer(storageDir?: string) {
     }
     const runtimeImages = configuredRuntimeImageRegistry(executionPolicy);
     const cppCompilationBackend = resolveCppCompilationBackend(process.env.BOT_CPP_COMPILATION_BACKEND);
+    const compiledArtifactCacheConfig = resolveCompiledArtifactCacheConfig();
     candidate = createRevisionDockerExecutor({
       imageRegistry: runtimeImages,
       executionPolicy,
@@ -234,6 +254,7 @@ export async function initServer(storageDir?: string) {
       defaultCompileTimeoutMs: Math.max(30_000, Number(process.env.BOT_CPP_COMPILE_TIMEOUT_MS ?? 120_000)),
       defaultPreparationTimeoutMs: 10000,
       cppCompilationBackend,
+      ...compiledArtifactCacheConfig,
     });
   }
   manager = undefined as any;
@@ -388,43 +409,97 @@ async function performShutdown(timeoutMs: number): Promise<ShutdownResult> {
   manager?.beginShutdown();
   fairMatchDispatcher.stopDispatching();
 
+  const deadline = Date.now() + Math.max(1, timeoutMs);
   const httpClosed = closeHttpServer();
-  const drained = await executionQueue.drain(timeoutMs);
-  const httpReady = await Promise.race([
-    httpClosed,
-    new Promise<boolean>(resolve => {
-      const timer = setTimeout(() => resolve(false), Math.max(1, timeoutMs));
-      timer.unref?.();
-    }),
+  const queueDrain = executionQueue.drain(Math.max(1, deadline - Date.now()));
+  const practiceDrain = waitForActivePracticeExecutions();
+  const withinDeadline = <T>(operation: Promise<T>, accepted: (value: T) => boolean = () => true): Promise<boolean> => {
+    const remaining = Math.max(1, deadline - Date.now());
+    return Promise.race([
+      operation.then(accepted),
+      new Promise<boolean>(resolve => {
+        const timer = setTimeout(() => resolve(false), remaining);
+        timer.unref?.();
+      }),
+    ]);
+  };
+  const [drained, httpReady, practiceReady] = await Promise.all([
+    withinDeadline(queueDrain, value => value),
+    withinDeadline(httpClosed, value => value),
+    withinDeadline(practiceDrain),
   ]);
-  if (!drained || !httpReady || activePracticeExecutions.size > 0) {
+  if (!drained || !httpReady || !practiceReady) {
     // Do not close the manager/database after a bounded wait. Active workers
     // retain their leases and heartbeat against the still-open store so a
-    // later operator decision cannot create a duplicate commit.
+    // later finalization cannot create a duplicate commit. Continue waiting
+    // without a second deadline and finalize exactly once when all work settles.
+    scheduleShutdownFinalization(queueDrain, httpClosed, practiceDrain);
     return { closed: false, timedOut: true };
   }
+
+  return finalizeShutdown();
+}
+
+function scheduleShutdownFinalization(
+  queueDrain: Promise<boolean>,
+  httpClosed: Promise<boolean>,
+  practiceDrain: Promise<void>,
+): void {
+  if (shutdownFinalizationPromise) return;
+  // The bounded queue drain may resolve false at the deadline. Register a new
+  // unbounded waiter for the safe post-timeout phase; it never closes storage
+  // until the active queue actually settles.
+  const eventualQueueDrain = executionQueue.drain(2_147_000_000);
+  shutdownFinalizationPromise = Promise.all([
+    eventualQueueDrain,
+    httpClosed,
+    practiceDrain,
+  ]).then(() => finalizeShutdown()).catch(error => {
+    shutdownFinalizationPromise = undefined;
+    shutdownPromise = undefined;
+    throw error;
+  });
+}
+
+async function finalizeShutdown(): Promise<ShutdownResult> {
+  if (shutdownFinalized) return { closed: true, timedOut: false };
 
   activeTournamentRuns.clear();
   tournamentRunOwners.clear();
   activePracticeExecutions.clear();
   activePracticeByUser.clear();
+  activePracticeCompletions.clear();
+  activePracticeResolvers.clear();
   sourceRevisionExecutor?.close?.();
   sourceRevisionExecutor = undefined;
   botPreflightService?.close();
   botPreflightService = undefined;
-  manager?.close();
+  await manager?.close();
   manager = undefined as any;
   closeSharedDatabase();
   applicationMetrics.stop();
   hostCapacityController.stop();
   projectionCache.clear();
   httpServer = undefined;
+  // Publish the closed state only after every mandatory cleanup operation has
+  // completed successfully. A thrown cleanup leaves the lifecycle retryable
+  // but never falsely reports a closed database/storage owner.
+  shutdownFinalized = true;
   return { closed: true, timedOut: false };
 }
 
 export function shutdownServer(timeoutMs = Number(process.env.OTT_SHUTDOWN_TIMEOUT_MS ?? DEFAULT_SHUTDOWN_TIMEOUT_MS)): Promise<ShutdownResult> {
+  if (shutdownFinalized) return Promise.resolve({ closed: true, timedOut: false });
+  if (shutdownFinalizationPromise) return shutdownFinalizationPromise;
   if (!shutdownPromise) {
-    shutdownPromise = performShutdown(Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : DEFAULT_SHUTDOWN_TIMEOUT_MS);
+    shutdownPromise = performShutdown(Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : DEFAULT_SHUTDOWN_TIMEOUT_MS)
+      .catch(error => {
+        // Keep single-flight behavior for the in-flight call, then allow a
+        // later explicit retry without claiming cleanup succeeded.
+        shutdownPromise = undefined;
+        shutdownFinalizationPromise = undefined;
+        throw error;
+      });
   }
   return shutdownPromise;
 }
@@ -508,6 +583,25 @@ function releasePracticeSlot(userId: string): void {
   const remaining = (activePracticeByUser.get(userId) ?? 1) - 1;
   if (remaining > 0) activePracticeByUser.set(userId, remaining);
   else activePracticeByUser.delete(userId);
+}
+
+function trackPracticeExecution(key: string): void {
+  let resolve!: () => void;
+  const completion = new Promise<void>(done => { resolve = done; });
+  activePracticeCompletions.set(key, completion);
+  activePracticeResolvers.set(key, resolve);
+  activePracticeExecutions.add(key);
+}
+
+function settlePracticeExecution(key: string): void {
+  activePracticeExecutions.delete(key);
+  activePracticeResolvers.get(key)?.();
+  activePracticeResolvers.delete(key);
+  activePracticeCompletions.delete(key);
+}
+
+function waitForActivePracticeExecutions(): Promise<void> {
+  return Promise.all([...activePracticeCompletions.values()]).then(() => undefined);
 }
 
 function localizePracticeError(code: string, compilerDiagnostic: string, runtimeDiagnostic: string, exitCode: number | null): string {
@@ -709,6 +803,7 @@ app.delete('/api/bots/:id/revisions/:revisionId', requireAuth, requireRole('comp
 // sandbox. This does not create a match or mutate tournament state.
 app.post('/api/bots/:id/revisions/:revisionId/test', requireAuth, requireRole('competitor'), requireCsrf, async (req, res) => {
   const practiceStarted = performance.now();
+  if (shuttingDown) return res.status(503).json({ error: 'Server is shutting down' });
   if (!sourceRevisionExecutor) return res.status(503).json({ error: 'Source revision testing requires sandbox execution to be enabled' });
   const revision = botRevisionRepository.findOwned(routeParam(req, 'id'), routeParam(req, 'revisionId'), req.auth!.id);
   if (!revision) return res.status(404).json({ error: 'Source revision not found' });
@@ -720,7 +815,7 @@ app.post('/api/bots/:id/revisions/:revisionId/test', requireAuth, requireRole('c
   const practiceKey = `${req.auth!.id}:${revision.revision_id}`;
   if (activePracticeExecutions.has(practiceKey)) return res.status(409).json({ error: 'This revision is already being tested' });
   if (!acquirePracticeSlot(req.auth!.id)) return res.status(429).json({ error: 'Practice execution capacity is busy' });
-  activePracticeExecutions.add(practiceKey);
+  trackPracticeExecution(practiceKey);
   try {
     const source = Buffer.from(await botRevisionRepository.readSource(revision), 'utf8');
     const executionId = `revision-practice-${randomUUID()}`;
@@ -836,7 +931,7 @@ app.post('/api/bots/:id/revisions/:revisionId/test', requireAuth, requireRole('c
     const message = error instanceof Error ? error.message : 'Source revision test failed';
     return res.status(503).json({ error: message.includes('Docker') || message.includes('sandbox') ? message : 'Không thể chạy thử revision.' });
   } finally {
-    activePracticeExecutions.delete(practiceKey);
+    settlePracticeExecution(practiceKey);
     releasePracticeSlot(req.auth!.id);
   }
 });
@@ -845,6 +940,7 @@ app.post('/api/bots/:id/revisions/:revisionId/test', requireAuth, requireRole('c
 // the deterministic built-in system opponent as B. Nothing is persisted.
 const fixedPracticeMatchHandler = async (req: express.Request, res: express.Response, draft: { revision: any; source: Buffer } | null = null) => {
   const started = performance.now();
+  if (shuttingDown) return res.status(503).json({ error: 'Server is shutting down' });
   if (!sourceRevisionExecutor) return res.status(503).json({ error: 'Source revision testing requires sandbox execution to be enabled' });
   const revision = draft?.revision || botRevisionRepository.findOwned(routeParam(req, 'id'), routeParam(req, 'revisionId'), req.auth!.id);
   if (!revision) return res.status(404).json({ error: 'Source revision not found' });
@@ -853,7 +949,7 @@ const fixedPracticeMatchHandler = async (req: express.Request, res: express.Resp
   const practiceKey = `${req.auth!.id}:${revision.revision_id}:match`;
   if (activePracticeExecutions.has(practiceKey)) return res.status(409).json({ error: 'This revision is already being tested' });
   if (!acquirePracticeSlot(req.auth!.id)) return res.status(429).json({ error: 'Practice execution capacity is busy' });
-  activePracticeExecutions.add(practiceKey);
+  trackPracticeExecution(practiceKey);
   const revisionScopeId = `practice-match-${randomUUID()}`;
   const controller = new AbortController();
   const abortOnDisconnect = () => { if (!res.writableEnded) controller.abort(); };
@@ -904,7 +1000,7 @@ const fixedPracticeMatchHandler = async (req: express.Request, res: express.Resp
     req.off('aborted', abortOnDisconnect);
     res.off('close', abortOnDisconnect);
     await sourceRevisionExecutor.releaseRevisionScope?.(revisionScopeId).catch(() => false);
-    activePracticeExecutions.delete(practiceKey);
+    settlePracticeExecution(practiceKey);
     releasePracticeSlot(req.auth!.id);
   }
 };
@@ -2226,16 +2322,18 @@ app.post('/api/tournaments/:id/action', requireAuth, requireRole('organizer'), r
         {
           const requestedPairing = getAllTournamentPairings(tournament).find(pairing => pairing.pairingId === pairingId.trim());
           if (!requestedPairing) return res.status(404).json({ error: 'Pairing not found' });
-          if (requestedPairing.status !== 'failed') return res.status(409).json({ error: `Pairing cannot be retried (current: ${requestedPairing.status})` });
+          if (requestedPairing.status !== 'failed' && requestedPairing.status !== 'in_progress') return res.status(409).json({ error: `Pairing cannot be requeued (current: ${requestedPairing.status})` });
         }
         if (activeTournamentRuns.has(tournamentId)) return res.status(409).json({ error: 'Tournament is already running' });
+        const requeued = await manager.requeuePairing(tournamentId, pairingId.trim());
+        if (!requeued.success) return res.status(409).json({ error: requeued.error ?? 'Pairing cannot be requeued' });
         activeTournamentRuns.add(tournamentId);
         const pairingTaskId = `run_pairing_${tournamentId}_${pairingId}`;
         tournamentRunOwners.set(pairingTaskId, req.auth!.id);
         executionQueue.submit(pairingTaskId, async () => {
           try {
-            const executionResult = await manager.retryPairingById(tournamentId, pairingId.trim());
-            if (!executionResult.success) throw new Error(executionResult.error ?? 'Pairing retry failed');
+            const executionResult = await manager.runPairingById(tournamentId, pairingId.trim());
+            if (!executionResult.success) throw new Error(executionResult.error ?? 'Pairing requeue execution failed');
           } finally {
             activeTournamentRuns.delete(tournamentId);
             tournamentRunOwners.delete(pairingTaskId);
@@ -2263,37 +2361,34 @@ app.post('/api/tournaments/:id/action', requireAuth, requireRole('organizer'), r
   }
 });
 
-// Dedicated retry endpoint. This keeps match retry independent from the
-// tournament lifecycle action dispatcher and avoids stale clients sending an
-// unsupported action name.
-app.post('/api/tournaments/:id/pairings/:pairingId/retry', requireAuth, requireRole('organizer'), requireCsrf, async (req, res) => {
+async function handlePairingRequeue(req: express.Request, res: express.Response): Promise<express.Response | void> {
   try {
     const tournamentId = routeParam(req, 'id');
     const pairingId = routeParam(req, 'pairingId');
     if (isQaFixturesEnabled() && getOwnedQaFixture(tournamentId, req.auth!.id)) {
-      const retried = retryQaFixturePairing(tournamentId, pairingId);
+      const retried = requeueQaFixturePairing(tournamentId, pairingId);
       if (!retried.success) return res.status(409).json({ error: retried.error });
-      return res.json({ message: 'Match retried successfully in QA fixture' });
+      return res.json({ message: 'Pairing requeued successfully in QA fixture' });
     }
     const tournament = await ownedTournament(tournamentId, req.auth!.id);
     if (!tournament) return res.status(404).json({ error: 'Tournament not found' });
     const pairing = getAllTournamentPairings(tournament).find(item => item.pairingId === pairingId);
     if (!pairing) return res.status(404).json({ error: 'Pairing not found' });
-    if (pairing.status !== 'failed') return res.status(409).json({ error: `Pairing cannot be retried (current: ${pairing.status})` });
-    const taskId = `retry_pairing_${tournamentId}_${pairingId}`;
+    if (pairing.status !== 'failed' && pairing.status !== 'in_progress') return res.status(409).json({ error: `Pairing cannot be requeued (current: ${pairing.status})` });
+    const taskId = `requeue_pairing_${tournamentId}_${pairingId}`;
     const existingTask = executionQueue.getStatus(taskId);
     if (existingTask === 'queued' || existingTask === 'active') {
       return res.json({ message: 'Match retry is already queued' });
     }
     if (activeTournamentRuns.has(tournamentId)) return res.status(409).json({ error: 'Tournament is already running' });
-    const prepared = await manager.preparePairingRetry(tournamentId, pairingId);
-    if (!prepared.success) return res.status(409).json({ error: prepared.error ?? 'Pairing cannot be retried' });
+    const prepared = await manager.requeuePairing(tournamentId, pairingId);
+    if (!prepared.success) return res.status(409).json({ error: prepared.error ?? 'Pairing cannot be requeued' });
     activeTournamentRuns.add(tournamentId);
     tournamentRunOwners.set(taskId, req.auth!.id);
     executionQueue.submit(taskId, async () => {
       try {
         const result = await manager.runPairingById(tournamentId, pairingId);
-        if (!result.success) throw new Error(result.error ?? 'Pairing retry failed');
+        if (!result.success) throw new Error(result.error ?? 'Pairing requeue execution failed');
       } finally {
         activeTournamentRuns.delete(tournamentId);
         tournamentRunOwners.delete(taskId);
@@ -2301,12 +2396,35 @@ app.post('/api/tournaments/:id/pairings/:pairingId/retry', requireAuth, requireR
     }).catch(error => {
       activeTournamentRuns.delete(tournamentId);
       tournamentRunOwners.delete(taskId);
-      console.error(`Dedicated pairing retry failed for ${tournamentId}/${pairingId}:`, error);
+      console.error(`Dedicated pairing requeue failed for ${tournamentId}/${pairingId}:`, error);
     });
-    return res.json({ message: 'Match retry started in background' });
+    return res.json({ message: 'Pairing requeued and execution started in background' });
   } catch (error) {
-    console.error('Dedicated pairing retry request failed:', error);
-    return res.status(500).json({ error: 'Unable to retry match' });
+    console.error('Dedicated pairing requeue request failed:', error);
+    return res.status(500).json({ error: 'Unable to requeue pairing' });
+  }
+}
+
+// Legacy retry URL remains supported, but now uses the non-destructive,
+// lease-fenced requeue path.
+app.post('/api/tournaments/:id/pairings/:pairingId/retry', requireAuth, requireRole('organizer'), requireCsrf, handlePairingRequeue);
+app.post('/api/tournaments/:id/pairings/:pairingId/requeue', requireAuth, requireRole('organizer'), requireCsrf, handlePairingRequeue);
+
+app.post('/api/tournaments/:id/pairings/:pairingId/rematch', requireAuth, requireRole('organizer'), requireCsrf, async (req, res) => {
+  try {
+    const tournamentId = routeParam(req, 'id');
+    const pairingId = routeParam(req, 'pairingId');
+    if (isQaFixturesEnabled() && getOwnedQaFixture(tournamentId, req.auth!.id)) {
+      return res.status(409).json({ error: 'Rematch is blocked: completed results and downstream dependencies are authoritative' });
+    }
+    const tournament = await ownedTournament(tournamentId, req.auth!.id);
+    if (!tournament) return res.status(404).json({ error: 'Tournament not found' });
+    const result = await manager.rematchPairing(tournamentId, pairingId);
+    if (!result.success) return res.status(409).json({ error: result.error ?? 'Rematch is not safe' });
+    return res.json(result.data);
+  } catch (error) {
+    console.error('Pairing rematch request failed:', error);
+    return res.status(500).json({ error: 'Unable to rematch pairing' });
   }
 });
 
@@ -2435,7 +2553,11 @@ app.get('/api/tournaments/:id/matches/:matchId/live', requireAuth, requireRole('
     const seriesComplete = Boolean(progress && (
       progress.games.length >= progress.bestOf || progress.winsA >= 2 || progress.winsB >= 2
     ));
-    const completedWinner = pairing.matchResult?.winner;
+    const completedWinner = pairing.matchResult?.winner ?? (
+      seriesComplete && progress
+        ? (progress.winsA === progress.winsB ? 'draw' : progress.winsA > progress.winsB ? 'A' : 'B')
+        : undefined
+    );
     const currentGame = progress
       ? (snapshot.gameNumber ?? (pairing.status === 'in_progress'
         ? Math.min(progress.games.length + 1, progress.bestOf)

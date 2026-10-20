@@ -139,6 +139,66 @@ describe('Match Runner', () => {
       expect(MatchRunner.createReplay(result).metadata?.sourceRevisions).toEqual(result.metadata?.sourceRevisions);
     });
 
+    it('persists bounded executor timings in match and replay diagnostics', async () => {
+      const execution = {
+        kind: 'source-revision' as const,
+        competitorId: 'competitor-a',
+        botId: 'bot-a',
+        revisionId: 'revision-a',
+        runtimeId: 'cpp' as const,
+        sourceDigest: 'a'.repeat(64),
+      };
+      const sourceBot: BotDefinition = { botId: 'bot-a', player: 'A', command: '', args: [], execution };
+      const timings = {
+        imageReadinessMs: 11,
+        workspacePreparationMs: 12,
+        compilationContainerMs: 13,
+        artifactValidationMs: 14,
+        runtimeContainerMs: 15,
+        runtimeStartupMs: null,
+        botExecutionMs: null,
+        cleanupMs: 16,
+        cleanupSucceeded: true,
+        totalMs: 17,
+        preparationBudgetMs: 10_000,
+        compileBudgetMs: 30_000,
+        runtimeBudgetMs: 2_000,
+        timeoutPhase: null,
+      };
+      const revisionExecutor: SourceRevisionExecutor = {
+        async executeRevision() {
+          return {
+            success: true,
+            response: { move: { piece_id: 'A-dam-1', from: 'a1', to: 'a2' } },
+            exitCode: 0,
+            timedOut: false,
+            stdout: '',
+            stderr: '',
+            durationMs: 17,
+            timings,
+            provenance: { compilationBackend: 'ephemeral-volume', sourceDigest: 'a'.repeat(64) },
+          };
+        },
+      };
+      const runner = createMatchRunner(createTestConfig({ maxTurns: 1 }), sourceBot, playerB, {}, undefined,
+        revisionExecutor, async () => Buffer.from('source'));
+
+      const result = await runner.run();
+      const expected = {
+        imageReadinessMs: 11,
+        compilationContainerMs: 13,
+        runtimeContainerMs: 15,
+        cleanupMs: 16,
+        totalMs: 17,
+      };
+      expect(result.metadata?.executionDiagnostics).toEqual(expect.arrayContaining([
+        expect.objectContaining({ player: 'A', ...expected }),
+      ]));
+      expect(MatchRunner.createReplay(result).metadata?.executionDiagnostics).toEqual(expect.arrayContaining([
+        expect.objectContaining({ player: 'A', ...expected }),
+      ]));
+    });
+
     it.each([
       ['COMPILATION_TIMEOUT', 'compilation_timeout'],
       ['RUNTIME_TIMEOUT', 'runtime_timeout'],

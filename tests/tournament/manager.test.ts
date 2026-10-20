@@ -989,6 +989,39 @@ describe('Tournament Manager', () => {
   });
 
   describe('Persistence', () => {
+    it('waits for an active pairing before closing repository ownership', async () => {
+      let signalStarted!: () => void;
+      let releaseExecution!: () => void;
+      const started = new Promise<void>(resolve => { signalStarted = resolve; });
+      const release = new Promise<void>(resolve => { releaseExecution = resolve; });
+      const blockingExecutor: MatchExecutor = {
+        async executeMatch(matchId) {
+          signalStarted();
+          await release;
+          return createMockMatchResult(matchId, 'A');
+        },
+      };
+      const manager = new TournamentManager({ repository, executor: blockingExecutor });
+      await createTestTournament(manager, 'close-active', 'Close Active');
+      await registerParticipants(manager, 'close-active', 2);
+      await manager.openRegistration('close-active');
+      await manager.generateSchedule('close-active');
+      await manager.startTournament('close-active');
+
+      const execution = manager.runNextMatch('close-active');
+      await started;
+      const closing = manager.close();
+      let closed = false;
+      void closing.then(() => { closed = true; });
+      await Promise.resolve();
+      expect(closed).toBe(false);
+
+      releaseExecution();
+      await execution;
+      await closing;
+      expect(manager.isShuttingDown).toBe(true);
+    });
+
     it('should persist tournament across manager instances', async () => {
       const manager1 = new TournamentManager({
         repository,

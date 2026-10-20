@@ -9,6 +9,7 @@
     "build": "node scripts/build-html.js && node scripts/build-frontend.js && tsc && tsc-alias --resolve-full-paths",
     "build:html": "node scripts/build-html.js",
     "build:frontend": "node scripts/build-frontend.js",
+    "build:public": "node scripts/build-html.js && node scripts/build-frontend.js && node scripts/build-public.js",
     "start": "node dist/server/index.js",
     "test": "vitest run",
     "test:watch": "vitest",

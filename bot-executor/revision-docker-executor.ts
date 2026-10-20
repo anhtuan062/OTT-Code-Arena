@@ -2,6 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import type { ChildProcess, SpawnOptionsWithoutStdio } from 'node:child_process';
 import * as fs from 'node:fs/promises';
+import { createReadStream, createWriteStream } from 'node:fs';
 import * as path from 'node:path';
 import type { SourceRevisionExecution, SourceRuntimeId } from '@match-runner/types.js';
 import type {
@@ -20,8 +21,14 @@ import { validateDockerImage } from './image-config.js';
 import type { ExecutionPolicy } from './types.js';
 import type { RuntimeImageRegistry } from './runtime-image-registry.js';
 import { createRuntimeImageRegistry } from './runtime-image-registry.js';
-import { getStrategySdkIdentity, materializeStrategySdk, wrapCppStrategySource } from './strategy-sdk.js';
+import { CPP_STRATEGY_WRAPPER_DIGEST, getStrategySdkIdentity, materializeStrategySdk, wrapCppStrategySource } from './strategy-sdk.js';
 import { DockerExecutionLimiter, globalDockerExecutionLimiter } from './docker-execution-limiter.js';
+import {
+  CompiledArtifactCache,
+  type CompiledArtifactBuildHandle,
+  type CompiledArtifactIdentity,
+  type CompiledArtifactHit,
+} from './compiled-artifact-cache.js';
 
 export interface RevisionSource {
   execution: SourceRevisionExecution;
@@ -50,9 +57,15 @@ export interface RevisionDockerExecutorConfig {
   ownerLeaseTtlMs?: number;
   /** Shared admission control for active Docker execution processes. */
   dockerExecutionLimiter?: DockerExecutionLimiter;
+  /** Optional immutable cross-match C++ artifact cache. */
+  compiledArtifactCacheDir?: string;
+  compiledArtifactCacheMaxBytes?: number;
+  compiledArtifactCacheMaxEntries?: number;
+  /** Opt-in bridge for C++ artifacts compiled in ephemeral Docker volumes. */
+  cppEphemeralArtifactCache?: boolean;
 }
 
-export type DockerResourceKind = 'compile' | 'runtime' | 'warm' | 'volume' | 'workspace';
+export type DockerResourceKind = 'compile' | 'runtime' | 'warm' | 'volume' | 'workspace' | 'artifact-import' | 'artifact-export';
 
 export interface DockerResourceOwnership {
   environment: string;
@@ -89,6 +102,18 @@ interface RunningProcess {
   killed: boolean;
   resolved: boolean;
   termination: Promise<void> | null;
+}
+
+export class ArtifactTransferError extends Error {
+  constructor(message: string, readonly timedOut = false, readonly cancelled = false) {
+    super(message);
+    this.name = 'ArtifactTransferError';
+  }
+}
+
+function isExecutionCancellation(error: unknown): error is ExecutionCancelledError {
+  return error instanceof ExecutionCancelledError
+    || (error instanceof Error && error.name === 'ExecutionCancelledError');
 }
 
 interface PreparedRevisionArtifact {
@@ -277,6 +302,44 @@ export function buildCppVolumeRuntimeDockerArgs(
   ];
 }
 
+const ARTIFACT_IMPORT_SCRIPT = 'set -eu; umask 022; cat > /app/bin/.ott-artifact.tmp; chmod 0755 /app/bin/.ott-artifact.tmp; mv -f /app/bin/.ott-artifact.tmp /app/bin/bot';
+
+export function buildCppArtifactImportDockerArgs(
+  config: RevisionDockerExecutorConfig,
+  executionId: string,
+  outputVolume: string,
+  workspaceMarker: string,
+  ownership?: DockerResourceOwnership,
+): string[] {
+  assertSafeId(executionId);
+  return [
+    ...securityArgs(config, `${executionId}-import`, ownership),
+    '--label', `${WORKSPACE_LABEL}=${workspaceMarker}`,
+    '--platform', 'linux/amd64',
+    '-v', volumeMount(outputVolume, '/app/bin', 'rw'),
+    config.imageRegistry.cppCompilerImage,
+    '/bin/sh', '-c', ARTIFACT_IMPORT_SCRIPT,
+  ];
+}
+
+export function buildCppArtifactExportDockerArgs(
+  config: RevisionDockerExecutorConfig,
+  executionId: string,
+  outputVolume: string,
+  workspaceMarker: string,
+  ownership?: DockerResourceOwnership,
+): string[] {
+  assertSafeId(executionId);
+  return [
+    ...securityArgs(config, `${executionId}-export`, ownership),
+    '--label', `${WORKSPACE_LABEL}=${workspaceMarker}`,
+    '--platform', 'linux/amd64',
+    '-v', volumeMount(outputVolume, '/app/bin', 'ro'),
+    config.imageRegistry.cppCompilerImage,
+    '/bin/cat', '/app/bin/bot',
+  ];
+}
+
 export function buildStrategyPythonRuntimeDockerArgs(
   config: RevisionDockerExecutorConfig,
   executionId: string,
@@ -329,8 +392,11 @@ export class RevisionDockerExecutor {
   private ownershipReady: Promise<void> | null = null;
   private ownerHeartbeat: NodeJS.Timeout | null = null;
   private lastRecoveryReport: ResourceRecoveryReport = { reclaimed: [], preserved: [] };
-  private available = false;
+  private readonly availableRuntimes = new Set<SourceRuntimeId>();
+  private allRuntimesAvailable = false;
+  private readonly availabilityChecks = new Map<'all' | SourceRuntimeId, Promise<boolean>>();
   private readonly dockerExecutionLimiter: DockerExecutionLimiter;
+  private readonly compiledArtifactCache: CompiledArtifactCache;
 
   constructor(config: RevisionDockerExecutorConfig) {
     this.config = {
@@ -339,6 +405,7 @@ export class RevisionDockerExecutor {
       executionPolicy: 'sandbox-required',
       defaultPreparationTimeoutMs: 10_000,
       cppCompilationBackend: 'bind',
+      cppEphemeralArtifactCache: false,
       ...config,
     };
     this.config.cppCompilationBackend = resolveCppCompilationBackend(config.cppCompilationBackend);
@@ -356,6 +423,14 @@ export class RevisionDockerExecutor {
       leaseDir: path.join(workingDirBase, '.revision-owners'),
       leaseTtlMs: Math.max(1_000, Math.min(config.ownerLeaseTtlMs ?? 15_000, 120_000)),
     };
+    this.compiledArtifactCache = new CompiledArtifactCache({
+      rootDir: config.compiledArtifactCacheDir ?? path.join(workingDirBase, '.compiled-artifacts', environment, storageNamespace),
+      environment, storageNamespace, serverInstanceId,
+      ownerLeaseDir: this.ownershipConfig.leaseDir,
+      ownerLeaseTtlMs: this.ownershipConfig.leaseTtlMs,
+      maxBytes: config.compiledArtifactCacheMaxBytes ?? 512 * 1024 * 1024,
+      maxEntries: config.compiledArtifactCacheMaxEntries ?? 128,
+    });
     // Validate the registry allowlist even when callers construct the class
     // directly; the exported factory is not the only possible entry point.
     this.config.imageRegistry = createRuntimeImageRegistry(this.config.imageRegistry, this.config.executionPolicy);
@@ -388,7 +463,26 @@ export class RevisionDockerExecutor {
   }
 
   async isAvailable(runtimeId?: SourceRuntimeId): Promise<boolean> {
-    if (this.available) return true;
+    const key: 'all' | SourceRuntimeId = runtimeId ?? 'all';
+    if (this.hasCachedAvailability(runtimeId)) return true;
+    const existing = this.availabilityChecks.get(key);
+    if (existing) return existing;
+
+    const check = this.performAvailabilityCheck(runtimeId).finally(() => {
+      if (this.availabilityChecks.get(key) === check) this.availabilityChecks.delete(key);
+    });
+    this.availabilityChecks.set(key, check);
+    return check;
+  }
+
+  private hasCachedAvailability(runtimeId?: SourceRuntimeId): boolean {
+    if (runtimeId) return this.availableRuntimes.has(runtimeId);
+    return this.allRuntimesAvailable || (
+      this.availableRuntimes.has('cpp') && this.availableRuntimes.has('python3')
+    );
+  }
+
+  private async performAvailabilityCheck(runtimeId?: SourceRuntimeId): Promise<boolean> {
     try {
       await this.ensureOwnershipReady();
       await this.dockerCommand(['version', '--format', '{{.Server.Version}}']);
@@ -401,12 +495,25 @@ export class RevisionDockerExecutor {
       for (const image of images) {
         await this.dockerCommand(['image', 'inspect', image]);
       }
-      if (!runtimeId) this.available = true;
+      if (runtimeId) this.availableRuntimes.add(runtimeId);
+      else {
+        this.allRuntimesAvailable = true;
+        this.availableRuntimes.add('cpp');
+        this.availableRuntimes.add('python3');
+      }
       return true;
     } catch {
-      this.available = false;
+      // A failed probe must never leave any earlier success cached: the
+      // daemon, ownership state, or image set may have changed together.
+      this.invalidateAvailability();
       return false;
     }
+  }
+
+  private invalidateAvailability(runtimeId?: SourceRuntimeId): void {
+    this.allRuntimesAvailable = false;
+    if (runtimeId) this.availableRuntimes.delete(runtimeId);
+    else this.availableRuntimes.clear();
   }
 
   getResourceOwnership(): Readonly<Pick<typeof this.ownershipConfig, 'environment' | 'storageNamespace' | 'serverInstanceId'>> {
@@ -488,7 +595,7 @@ export class RevisionDockerExecutor {
       if (Object.values(value).some(item => typeof item !== 'string' || item.length === 0)) return null;
       if (value.environment !== this.ownershipConfig.environment || value.storageNamespace !== this.ownershipConfig.storageNamespace) return null;
       const kind = value.kind as string;
-      if (!['compile', 'runtime', 'warm', 'volume', 'workspace'].includes(kind)) return null;
+      if (!['compile', 'runtime', 'warm', 'volume', 'workspace', 'artifact-import', 'artifact-export'].includes(kind)) return null;
       return value as DockerResourceOwnership;
     } catch { return null; }
   }
@@ -594,6 +701,9 @@ export class RevisionDockerExecutor {
       } : {}),
     };
     const result = await this.executeMeasuredRevision(context, revision, request, timings, provenance);
+    if (!result.success && result.error?.stage === 'docker_infrastructure') {
+      this.invalidateAvailability(revision.execution.runtimeId);
+    }
     timings.totalMs = Math.round(performance.now() - started);
     return { ...result, durationMs: timings.totalMs, timings, provenance };
   }
@@ -645,6 +755,8 @@ export class RevisionDockerExecutor {
     const sourceName = revision.execution.runtimeId === 'cpp' ? 'main.cpp' : 'main.py';
     let volumeWorkspace: EphemeralVolumeWorkspace | undefined;
     let retainArtifact = false;
+    let cacheIdentity: CompiledArtifactIdentity | null = null;
+    let cacheBuildHandle: CompiledArtifactBuildHandle | null = null;
     try {
       // A previous attempt can be interrupted after the warm container is
       // created but before the artifact is registered in this process. Stop
@@ -675,6 +787,7 @@ export class RevisionDockerExecutor {
         await fs.writeFile(path.join(sourceDir, sourceName), revision.source, { mode: 0o644 });
       }
       const useVolume = strategy && this.config.cppCompilationBackend === 'ephemeral-volume';
+      const volumeCacheEnabled = useVolume && this.config.cppEphemeralArtifactCache === true;
       if (strategy && (revision.execution.runtimeId === 'cpp' || revision.execution.runtimeId === 'python3')) {
         const useVolumeWorkspace = revision.execution.runtimeId === 'python3' || useVolume;
         if (useVolumeWorkspace) {
@@ -712,6 +825,69 @@ export class RevisionDockerExecutor {
           return this.executePreparedRuntime(context, revision, request, artifact, timings);
         }
       }
+      if (revision.execution.runtimeId === 'cpp' && (!useVolume || volumeCacheEnabled)) {
+        cacheIdentity = this.compiledArtifactIdentity(revision.execution);
+        const cacheStarted = performance.now();
+        try {
+          cacheBuildHandle = await this.compiledArtifactCache.acquire(
+            cacheIdentity,
+            this.config.defaultCompileTimeoutMs ?? 30_000,
+            context.signal,
+          );
+          if (cacheBuildHandle.hit) {
+            if (useVolume && volumeWorkspace) {
+              try {
+                await this.importArtifactToVolume(
+                  context.executionId,
+                  cacheBuildHandle.hit,
+                  volumeWorkspace,
+                  context.signal,
+                );
+                provenance.artifactDigest = await this.validateVolumeArtifact(volumeWorkspace, context.signal);
+              } catch (error) {
+                if (isExecutionCancellation(error)) throw error;
+                await cacheBuildHandle.release().catch(() => {});
+                cacheBuildHandle = null;
+                // A transport/cache miss is recoverable. The subsequent
+                // compile still uses the fresh, match-scoped volume.
+                if (this.isRecoverableArtifactTransferError(error)) {
+                  // fall through to the pinned compiler path
+                } else {
+                  return this.error('EXECUTOR_ERROR', 'Compiled artifact integrity validation failed', null, '', '', false, 'artifact_validation');
+                }
+              }
+            } else {
+              await this.compiledArtifactCache.materialize(cacheBuildHandle.hit, outputDir);
+              provenance.artifactDigest = cacheBuildHandle.hit.manifest.artifactDigest;
+            }
+            if (cacheBuildHandle) {
+            timings.artifactValidationMs = Math.round(performance.now() - cacheStarted);
+            const artifact: PreparedRevisionArtifact = {
+              key: artifactKey ?? '',
+              scopeId: context.revisionScopeId ?? '',
+              sourceDigest: revision.execution.sourceDigest,
+              runtimeId: revision.execution.runtimeId,
+              executionMode: revision.execution.executionMode ?? 'raw',
+              sdkVersion: revision.execution.sdkVersion,
+              sdkDigest: revision.execution.sdkDigest,
+              root, sourceDir, sdkDir, outputDir, volumeWorkspace,
+              artifactDigest: provenance.artifactDigest,
+            };
+            if (artifactKey && context.revisionScopeId) this.preparedArtifacts.set(artifactKey, artifact);
+            await cacheBuildHandle.release();
+            cacheBuildHandle = null;
+            retainArtifact = Boolean(artifactKey && context.revisionScopeId);
+            return this.executePreparedRuntime(context, revision, request, artifact, timings);
+            }
+          }
+        } catch (error) {
+          if (cacheBuildHandle) await cacheBuildHandle.release().catch(() => {});
+          cacheBuildHandle = null;
+          if (isExecutionCancellation(error) || context.signal?.aborted) throw error;
+          // Cache failures are isolated from execution; compile the pinned
+          // source normally when the optimization storage is unavailable.
+        }
+      }
       if (revision.execution.runtimeId === 'cpp') {
         const compileStarted = performance.now();
         const compile = await this.runContainer(
@@ -745,6 +921,25 @@ export class RevisionDockerExecutor {
           }
           timings.artifactValidationMs = Math.round(performance.now() - validationStarted);
         }
+        if (cacheIdentity && cacheBuildHandle) {
+          const exported = useVolume && volumeWorkspace
+            ? await this.exportArtifactFromVolume(context.executionId, volumeWorkspace, context.signal).catch(error => {
+              if (isExecutionCancellation(error)) throw error;
+              return null;
+            })
+            : { path: path.join(outputDir, 'bot'), digest: undefined };
+          const published = exported
+            ? await this.compiledArtifactCache.publish(cacheIdentity, exported.path).catch(() => null)
+            : null;
+          if (exported && exported.digest && published && published.manifest.artifactDigest !== exported.digest) {
+            await fs.rm(exported.path, { force: true }).catch(() => {});
+            throw new Error('Compiled artifact export digest mismatch');
+          }
+          if (exported && useVolume && volumeWorkspace) await fs.rm(exported.path, { force: true }).catch(() => {});
+          if (published) provenance.artifactDigest = published.manifest.artifactDigest;
+          await cacheBuildHandle.release().catch(() => {});
+          cacheBuildHandle = null;
+        }
       }
       const artifact: PreparedRevisionArtifact = {
         key: artifactKey ?? '',
@@ -763,6 +958,7 @@ export class RevisionDockerExecutor {
       }
       return this.executePreparedRuntime(context, revision, request, artifact, timings);
     } finally {
+      if (cacheBuildHandle) await cacheBuildHandle.release().catch(() => {});
       // A match-scoped artifact is released by releaseRevisionScope once the
       // match finishes; one-off executions retain the original eager cleanup.
       if (!retainArtifact) {
@@ -819,6 +1015,19 @@ export class RevisionDockerExecutor {
     return execution.runtimeId === 'cpp' && execution.executionMode === 'strategy'
       ? this.config.cppCompilationBackend ?? 'bind'
       : 'bind';
+  }
+
+  private compiledArtifactIdentity(execution: SourceRevisionExecution): CompiledArtifactIdentity {
+    return {
+      sourceDigest: execution.sourceDigest,
+      compilerImageDigest: this.imageDigest(this.config.imageRegistry.cppCompilerImage),
+      compilerConfigDigest: this.compilerConfigDigest(),
+      runtimeImageDigest: this.imageDigest(this.config.imageRegistry.cppRuntimeImage),
+      ...(execution.executionMode === 'strategy' ? { strategyWrapperDigest: CPP_STRATEGY_WRAPPER_DIGEST } : {}),
+      ...(execution.sdkDigest ? { sdkDigest: execution.sdkDigest } : {}),
+      compilationBackend: this.activeBackend(execution),
+      executionMode: execution.executionMode ?? 'raw',
+    };
   }
 
   private imageDigest(image: string): string {
@@ -1004,7 +1213,17 @@ export class RevisionDockerExecutor {
         const raw = await this.dockerCommandBounded(['volume', 'inspect', '--format', '{{json .Labels}}', volume], 5_000);
         const labels = this.parseOwnershipLabels(raw);
         if (!labels || labels.serverInstanceId !== workspace.ownership.serverInstanceId || labels.revisionScopeId !== workspace.ownership.revisionScopeId || !raw.includes(`\"${WORKSPACE_LABEL}\":\"${workspace.marker}\"`)) { success = false; continue; }
-        await this.dockerCommandBounded(['volume', 'rm', '--force', volume], 10_000);
+        let removed = false;
+        for (let attempt = 0; attempt < 5 && !removed; attempt++) {
+          try {
+            await this.dockerCommandBounded(['volume', 'rm', '--force', volume], 10_000);
+            removed = true;
+          } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            if (!/volume(?: .*?)? is in use|volume is being used/i.test(message) || attempt === 4) throw error;
+            await new Promise(resolve => setTimeout(resolve, 100));
+          }
+        }
       } catch (error) {
         if (!(error instanceof Error && /No such volume/i.test(error.message))) success = false;
       }
@@ -1231,6 +1450,174 @@ export class RevisionDockerExecutor {
       // --rm normally removes the container before this idempotent cleanup.
       return error instanceof Error && /No such container/i.test(error.message);
     }
+  }
+
+  private isRecoverableArtifactTransferError(error: unknown): boolean {
+    return error instanceof ArtifactTransferError && !error.cancelled;
+  }
+
+  private async importArtifactToVolume(
+    executionId: string,
+    hit: CompiledArtifactHit,
+    workspace: EphemeralVolumeWorkspace,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    const stat = await fs.stat(hit.artifactPath).catch(() => null);
+    if (!stat?.isFile() || stat.size <= 0 || stat.size > ARTIFACT_MAX_BYTES) {
+      throw new ArtifactTransferError('Compiled artifact import size is invalid');
+    }
+    if (signal?.aborted) throw new ExecutionCancelledError();
+    const name = `ott-source-${executionId}-import`;
+    const args = buildCppArtifactImportDockerArgs(
+      this.config, executionId, workspace.outputVolume, workspace.marker,
+      this.ownership(workspace.ownership.revisionScopeId, 'artifact-import'),
+    );
+    await this.runArtifactTransfer(name, args, signal, async proc => {
+      const input = createReadStream(hit.artifactPath);
+      try {
+        await new Promise<void>((resolve, reject) => {
+          input.once('error', reject);
+          proc.stdin?.once('error', reject);
+          proc.stdin?.once('finish', resolve);
+          input.pipe(proc.stdin!);
+        });
+      } finally {
+        input.destroy();
+      }
+    });
+  }
+
+  private async exportArtifactFromVolume(
+    executionId: string,
+    workspace: EphemeralVolumeWorkspace,
+    signal?: AbortSignal,
+  ): Promise<{ path: string; digest: string }> {
+    const exportDir = path.join(this.config.workingDirBase!, 'source-exec', executionId);
+    await fs.mkdir(exportDir, { recursive: true, mode: 0o700 });
+    const target = path.join(exportDir, `.artifact-export.${randomUUID()}.tmp`);
+    let streamedDigest = '';
+    const name = `ott-source-${executionId}-export`;
+    const args = buildCppArtifactExportDockerArgs(
+      this.config, executionId, workspace.outputVolume, workspace.marker,
+      this.ownership(workspace.ownership.revisionScopeId, 'artifact-export'),
+    );
+    try {
+      await this.runArtifactTransfer(name, args, signal, async proc => {
+        const output = createWriteStream(target, { flags: 'wx', mode: 0o700 });
+        const hash = createHash('sha256');
+        let bytes = 0;
+        const outputError = new Promise<never>((_resolve, reject) => {
+          output.once('error', reject);
+        });
+        try {
+          for await (const chunk of proc.stdout!) {
+            const value = Buffer.from(chunk as Buffer);
+            bytes += value.length;
+            if (bytes > ARTIFACT_MAX_BYTES) throw new ArtifactTransferError('Compiled artifact export exceeded 64 MiB');
+            hash.update(value);
+            if (!output.write(value)) await Promise.race([
+              new Promise<void>(resolve => output.once('drain', resolve)),
+              outputError,
+            ]);
+          }
+          await Promise.race([
+            new Promise<void>(resolve => output.end(() => resolve())),
+            outputError,
+          ]);
+          if (bytes <= 0) throw new ArtifactTransferError('Compiled artifact export was empty');
+          await fs.chmod(target, 0o755).catch(() => {});
+          await this.validateExportedArtifactFile(target);
+          streamedDigest = hash.digest('hex');
+        } catch (error) {
+          output.destroy();
+          throw error;
+        }
+      });
+      return { path: target, digest: streamedDigest };
+    } catch (error) {
+      await fs.rm(target, { force: true }).catch(() => {});
+      throw error;
+    }
+  }
+
+  private async validateExportedArtifactFile(filePath: string): Promise<void> {
+    const stat = await fs.stat(filePath).catch(() => null);
+    if (!stat?.isFile() || stat.size <= 0 || stat.size > ARTIFACT_MAX_BYTES) {
+      throw new ArtifactTransferError('Compiled artifact export size is invalid');
+    }
+    const handle = await fs.open(filePath, 'r');
+    try {
+      const header = Buffer.alloc(20);
+      const read = await handle.read(header, 0, header.length, 0);
+      if (read.bytesRead < header.length || header[0] !== 0x7f || header[1] !== 0x45 || header[2] !== 0x4c || header[3] !== 0x46 || header[4] !== 2 || header[5] !== 1 || header.readUInt16LE(18) !== 0x3e) {
+        throw new ArtifactTransferError('Compiled artifact export is not a valid ELF amd64 binary');
+      }
+    } finally {
+      await handle.close();
+    }
+  }
+
+  private async runArtifactTransfer(
+    containerId: string,
+    args: string[],
+    signal: AbortSignal | undefined,
+    stream: (process: ReturnType<typeof spawn>) => Promise<void>,
+  ): Promise<void> {
+    let release: (() => void);
+    try {
+      release = await this.dockerExecutionLimiter.acquire(signal, `revision:${containerId}`);
+    } catch (error) {
+      if (signal?.aborted) throw new ExecutionCancelledError();
+      throw new ArtifactTransferError(`Artifact transfer admission failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    let proc: ReturnType<typeof spawn>;
+    try {
+      proc = this.spawnArtifactProcess(args);
+    } catch (error) {
+      release();
+      throw new ArtifactTransferError(`Artifact transfer spawn failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    let timedOut = false;
+    let cancelled = false;
+    let stderr = '';
+    const timeoutMs = this.config.defaultCompileTimeoutMs ?? 30_000;
+    const timer = setTimeout(() => { timedOut = true; void this.terminateArtifactTransfer(proc, containerId); }, timeoutMs);
+    const onAbort = () => { cancelled = true; void this.terminateArtifactTransfer(proc, containerId); };
+    signal?.addEventListener('abort', onAbort, { once: true });
+    proc.stderr?.on('data', chunk => {
+      if (stderr.length < 64 * 1024) stderr += Buffer.from(chunk).toString('utf8').slice(0, 64 * 1024 - stderr.length);
+    });
+    const close = new Promise<number | null>(resolve => {
+      proc.once('error', error => { stderr += `Docker error: ${error.message}`; resolve(-1); });
+      proc.once('close', resolve);
+    });
+    let code: number | null = null;
+    try {
+      await stream(proc);
+      proc.stdin?.end();
+      code = await close;
+    } catch (error) {
+      await this.terminateArtifactTransfer(proc, containerId);
+      await close;
+      throw error;
+    } finally {
+      release();
+      clearTimeout(timer);
+      signal?.removeEventListener('abort', onAbort);
+      await this.removeContainer(containerId);
+    }
+    if (cancelled || signal?.aborted) throw new ExecutionCancelledError();
+    if (timedOut) throw new ArtifactTransferError('Artifact transfer timed out', true);
+    if (code !== 0) throw new ArtifactTransferError(`Artifact transfer failed: ${stderr.slice(0, 1024)}`);
+  }
+
+  private async terminateArtifactTransfer(proc: ReturnType<typeof spawn>, containerId: string): Promise<void> {
+    await this.dockerCommand(['kill', containerId]).catch(() => {});
+    if (!proc.killed) proc.kill();
+  }
+
+  private spawnArtifactProcess(args: string[]): ReturnType<typeof spawn> {
+    return spawn(this.config.dockerBinary!, args, { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true } as SpawnOptionsWithoutStdio);
   }
 
   private dockerCommand(args: string[]): Promise<string> {

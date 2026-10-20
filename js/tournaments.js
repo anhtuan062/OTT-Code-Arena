@@ -5851,9 +5851,10 @@ function renderScheduleLegacy(tournament) {
         if (pairing.matchId && pairing.status === 'in_progress' && (state.user?.role === 'organizer' || state.spectatorMode)) {
           action.appendChild(actionButton('Xem trực tiếp', () => openLiveMatch(tournament.tournamentId, pairing.matchId), `live:${pairing.matchId}`));
         } else if (pairing.status === 'failed' && state.user?.role === 'organizer') {
-          action.appendChild(actionButton('Chạy lại trận', () => retryTournamentPairing(tournament.tournamentId, pairing.pairingId), `retry:${tournament.tournamentId}:${pairing.pairingId}`, 'primary-btn tournament-retry-action'));
+          action.appendChild(actionButton('Đưa vào hàng đợi', () => requeueTournamentPairing(tournament.tournamentId, pairing.pairingId), `requeue:${tournament.tournamentId}:${pairing.pairingId}`, 'primary-btn tournament-retry-action'));
         } else if (pairing.matchId && pairing.status !== 'failed') {
           action.appendChild(actionButton('Xem lại', () => playReplay(tournament.tournamentId, pairing.matchId), `replay:${pairing.matchId}`));
+          if (pairing.status === 'completed' && state.user?.role === 'organizer') action.appendChild(rematchUnavailableButton(tournament.tournamentId, pairing.pairingId));
         }
         row.appendChild(action);
       }
@@ -5891,9 +5892,10 @@ function renderScheduleLegacy(tournament) {
       if (pairing.matchId && pairing.status === 'in_progress' && (state.user?.role === 'organizer' || state.spectatorMode)) {
         cardFooter.appendChild(actionButton('Xem trực tiếp', () => openLiveMatch(tournament.tournamentId, pairing.matchId), `live:${pairing.matchId}`));
       } else if (pairing.status === 'failed' && state.user?.role === 'organizer') {
-        cardFooter.appendChild(actionButton('Chạy lại trận', () => retryTournamentPairing(tournament.tournamentId, pairing.pairingId), `retry:${tournament.tournamentId}:${pairing.pairingId}`, 'primary-btn tournament-retry-action'));
+        cardFooter.appendChild(actionButton('Đưa vào hàng đợi', () => requeueTournamentPairing(tournament.tournamentId, pairing.pairingId), `requeue:${tournament.tournamentId}:${pairing.pairingId}`, 'primary-btn tournament-retry-action'));
       } else if (pairing.matchId && pairing.status !== 'failed') {
         cardFooter.appendChild(actionButton('Xem lại', () => playReplay(tournament.tournamentId, pairing.matchId), `replay:${pairing.matchId}`));
+        if (pairing.status === 'completed' && state.user?.role === 'organizer') cardFooter.appendChild(rematchUnavailableButton(tournament.tournamentId, pairing.pairingId));
       }
       card.append(cardHeader, players, cardFooter);
       mobileList.appendChild(card);
@@ -5965,16 +5967,18 @@ async function tournamentAction(tournamentId, authRevision, viewRevision, action
   }
 }
 
-async function retryTournamentPairing(tournamentId, pairingId) {
+async function requeueTournamentPairing(tournamentId, pairingId) {
   const retryKey = `${tournamentId}:${pairingId}`;
   if (state.retryingPairings.has(retryKey)) return;
+  if (!window.confirm('Đưa pairing lỗi vào hàng đợi lại? Các checkpoint BO2/BO3 và lịch sử đã commit sẽ được giữ nguyên.')) return;
   state.retryingPairings.add(retryKey);
   const authRevision = state.authRevision;
   const viewRevision = state.viewRevision;
   try {
-    await api(`/tournaments/${tournamentId}/pairings/${pairingId}/retry`, { method: 'POST' });
-  } catch {
+    await api(`/tournaments/${tournamentId}/pairings/${pairingId}/requeue`, { method: 'POST' });
+  } catch (error) {
     state.retryingPairings.delete(retryKey);
+    showToast(error?.message || 'Không thể đưa pairing vào hàng đợi.', 'error');
     return;
   }
   if (isCurrentView('tournament-detail', authRevision, viewRevision, tournamentId)) {
@@ -6007,6 +6011,13 @@ async function retryTournamentPairing(tournamentId, pairingId) {
   if (finalStatus === 'failed' && state.activeView === 'tournament-detail' && state.tournamentId === tournamentId) {
     await refreshTournamentDetail();
   }
+}
+
+function rematchUnavailableButton(tournamentId, pairingId) {
+  const button = actionButton('Rematch không khả dụng', () => {}, `rematch-blocked:${tournamentId}:${pairingId}`, 'secondary-btn tournament-rematch-action');
+  button.disabled = true;
+  button.title = 'Rematch bị chặn: kết quả đã ghi nhận ảnh hưởng standings hoặc vòng phụ thuộc.';
+  return button;
 }
 
 async function submitTournamentRegistration() {
@@ -6163,12 +6174,13 @@ function renderScheduleBeforeScore(tournament) {
         actionCell.appendChild(unavailableReplay);
       }
       if (pairing.status === 'failed' && state.user?.role === 'organizer') {
-        actionCell.appendChild(actionButton('Chạy lại trận', () => retryTournamentPairing(tournament.tournamentId, pairing.pairingId), `retry:${tournament.tournamentId}:${pairing.pairingId}`, 'primary-btn tournament-retry-action'));
+        actionCell.appendChild(actionButton('Đưa vào hàng đợi', () => requeueTournamentPairing(tournament.tournamentId, pairing.pairingId), `requeue:${tournament.tournamentId}:${pairing.pairingId}`, 'primary-btn tournament-retry-action'));
       }
       if (pairing.matchId && pairing.status === 'in_progress' && (state.user?.role === 'organizer' || state.spectatorMode)) {
         actionCell.appendChild(actionButton('Xem trực tiếp', () => openLiveMatch(tournament.tournamentId, pairing.matchId), `live:${pairing.matchId}`));
       } else if (pairing.matchId && pairing.status !== 'failed') {
         actionCell.appendChild(actionButton('Xem chi tiết', () => playReplay(tournament.tournamentId, pairing.matchId), `replay:${pairing.matchId}`));
+        if (pairing.status === 'completed' && state.user?.role === 'organizer') actionCell.appendChild(rematchUnavailableButton(tournament.tournamentId, pairing.pairingId));
       }
       if (!actionCell.childElementCount) actionCell.appendChild(create('span', { className: 'schedule-action-empty', text: '—' }));
       const actionContent = create('div', { className: 'action-content' });
@@ -6195,12 +6207,15 @@ function renderScheduleBeforeScore(tournament) {
         unavailableReplay.title = 'Trận lỗi không có replay hợp lệ';
         footer.appendChild(unavailableReplay);
       }
-      if (pairing.status === 'failed' && state.user?.role === 'organizer') footer.appendChild(actionButton('Chạy lại trận', () => retryTournamentPairing(tournament.tournamentId, pairing.pairingId), `retry:${tournament.tournamentId}:${pairing.pairingId}`, 'primary-btn tournament-retry-action'));
+      if (pairing.status === 'failed' && state.user?.role === 'organizer') footer.appendChild(actionButton('Đưa vào hàng đợi', () => requeueTournamentPairing(tournament.tournamentId, pairing.pairingId), `requeue:${tournament.tournamentId}:${pairing.pairingId}`, 'primary-btn tournament-retry-action'));
       footer.appendChild(create('span', { className: 'schedule-card-winner', text: isBye ? 'Miễn đấu' : `Đội thắng: ${winner}` }));
       if (pairing.matchId && pairing.status === 'in_progress' && (state.user?.role === 'organizer' || state.spectatorMode)) {
         footer.appendChild(actionButton('Xem trực tiếp', () => openLiveMatch(tournament.tournamentId, pairing.matchId), `live:${pairing.matchId}`));
       }
-      else if (pairing.matchId) footer.appendChild(actionButton('Xem chi tiết', () => playReplay(tournament.tournamentId, pairing.matchId), `replay:${pairing.matchId}`));
+      else if (pairing.matchId) {
+        footer.appendChild(actionButton('Xem chi tiết', () => playReplay(tournament.tournamentId, pairing.matchId), `replay:${pairing.matchId}`));
+        if (pairing.status === 'completed' && state.user?.role === 'organizer') footer.appendChild(rematchUnavailableButton(tournament.tournamentId, pairing.pairingId));
+      }
       card.append(cardHeader, players, footer);
       mobileList.appendChild(card);
     });

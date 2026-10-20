@@ -992,7 +992,7 @@
       box-shadow: 0 8px 22px rgba(23, 35, 29, .035);
       overflow: hidden;
     }
-    #dashboard.dashboard-page .dashboard-welcome::before { content: ''; position: absolute; inset: 0 auto 0 0; width: 4px; background: var(--dash-accent); }
+
     #dashboard.dashboard-page .dashboard-welcome h2 { max-width: 700px; color: var(--dash-ink); font-size: clamp(1.65rem, 2.5vw, 2.25rem); letter-spacing: -.055em; line-height: 1.05; }
     #dashboard.dashboard-page .welcome-copy { max-width: 660px; margin-top: 10px; color: var(--dash-muted); font-size: .86rem; line-height: 1.55; }
     #dashboard.dashboard-page .dashboard-actions { align-items: center; gap: 8px; }

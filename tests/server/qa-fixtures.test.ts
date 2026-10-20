@@ -72,6 +72,9 @@ describe('QA Deterministic Fixtures for Port 3001 UI/UX Testing', () => {
       matchResult: { matchId: 'qa-match', pairingId: 'qa-pairing', participantA: 'A', participantB: 'B', winner: 'A', terminationReason: 'goal_reached', turnCount: 1, durationMs: 1, replayRef: 'qa-match', completedAt },
     }, {
       pairingId: 'qa-tiebreaker', roundNumber: 1, participantA: 'A', participantB: 'B', status: 'pending_tiebreaker', tiebreakerStatus: 'pending', matchId: 'qa-tiebreaker-match',
+    }, {
+      pairingId: 'qa-completed', roundNumber: 1, participantA: 'A', participantB: 'B', status: 'completed', matchId: 'qa-completed-match',
+      matchResult: { matchId: 'qa-completed-match', pairingId: 'qa-completed', participantA: 'A', participantB: 'B', winner: 'A', terminationReason: 'goal_reached', turnCount: 1, durationMs: 1, replayRef: 'qa-completed-match', completedAt },
     }] }];
     registerQaFixture(fixture);
 
@@ -81,12 +84,20 @@ describe('QA Deterministic Fixtures for Port 3001 UI/UX Testing', () => {
     expect((await otherAgent.get('/api/tournaments/qa-owned-http')).status).toBe(404);
     expect((await otherAgent.post('/api/tournaments/qa-owned-http/action').set('x-csrf-token', otherCsrf).send({ action: 'invalid' })).status).toBe(404);
     expect((await otherAgent.post('/api/tournaments/qa-owned-http/pairings/qa-pairing/retry').set('x-csrf-token', otherCsrf)).status).toBe(404);
+    expect((await otherAgent.post('/api/tournaments/qa-owned-http/pairings/qa-pairing/requeue').set('x-csrf-token', otherCsrf)).status).toBe(404);
+    expect((await otherAgent.post('/api/tournaments/qa-owned-http/pairings/qa-completed/rematch').set('x-csrf-token', otherCsrf)).status).toBe(404);
     expect((await otherAgent.post('/api/tournaments/qa-owned-http/pairings/qa-pairing/resolve-tiebreaker').set('x-csrf-token', otherCsrf).send({ winner: 'A' })).status).toBe(404);
     expect((await otherAgent.get('/api/tournaments/qa-owned-http/results/qa-match')).status).toBe(404);
 
     const ownerCsrf = (await organizerAgent.get('/api/auth/me')).body.csrfToken;
     expect((await organizerAgent.post('/api/tournaments/qa-owned-http/action').set('x-csrf-token', ownerCsrf).send({ action: 'invalid' })).status).toBe(400);
+    expect((await organizerAgent.post('/api/tournaments/qa-owned-http/pairings/qa-pairing/requeue')).status).toBe(403);
+    expect((await organizerAgent.post('/api/tournaments/qa-owned-http/pairings/qa-completed/rematch')).status).toBe(403);
     expect((await organizerAgent.post('/api/tournaments/qa-owned-http/pairings/qa-pairing/retry').set('x-csrf-token', ownerCsrf)).status).toBe(200);
+    expect((await organizerAgent.post('/api/tournaments/qa-owned-http/pairings/qa-pairing/requeue').set('x-csrf-token', ownerCsrf)).status).toBe(409);
+    const blockedRematch = await organizerAgent.post('/api/tournaments/qa-owned-http/pairings/qa-completed/rematch').set('x-csrf-token', ownerCsrf);
+    expect(blockedRematch.status).toBe(409);
+    expect(blockedRematch.body.error).toContain('blocked');
     expect((await organizerAgent.post('/api/tournaments/qa-owned-http/pairings/qa-tiebreaker/resolve-tiebreaker').set('x-csrf-token', ownerCsrf).send({ winner: 'A' })).status).toBe(200);
     expect((await organizerAgent.get('/api/tournaments/qa-owned-http/results/qa-match')).status).toBe(200);
     expect(otherLogin.status).toBe(200);

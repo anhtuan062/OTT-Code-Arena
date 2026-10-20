@@ -9,7 +9,7 @@ function toggleMobileNavigation() {
   toggle.setAttribute('aria-label', open ? 'Đóng điều hướng' : 'Mở điều hướng');
 }
 
-const AUTHENTICATED_VIEWS = new Set(['dashboard', 'operations', 'bots', 'bot-workspace', 'tournaments', 'tournament-detail', 'replay-view']);
+const AUTHENTICATED_VIEWS = new Set(['dashboard', 'bots', 'bot-workspace', 'tournaments', 'tournament-detail', 'replay-view']);
 
 function closeMobileNavigation() {
   const sidebar = $('#app-nav');
@@ -33,14 +33,13 @@ function canLeaveBotWorkspace() {
 }
 
 function navigate(view, options = {}) {
-  if (!state.user && view !== 'auth-screen') return false;
+  const staticReplayOnly = typeof window !== 'undefined' && window.OTT_PUBLIC_REPLAY_STATIC_ONLY === true;
+  if (!state.user && view !== 'auth-screen' && !(staticReplayOnly && view === 'replay-view')) return false;
   if (state.user && view === 'auth-screen') view = 'dashboard';
   if (!AUTHENTICATED_VIEWS.has(view) && view !== 'auth-screen') return false;
   if (view !== 'tournament-detail' && typeof stopMultiStagePolling === 'function') stopMultiStagePolling();
   if (view !== 'tournament-detail' && typeof stopPhase2PreflightPolling === 'function') stopPhase2PreflightPolling();
-  if (view !== 'operations' && typeof stopOperationsPolling === 'function') stopOperationsPolling();
   if (view === 'bot-workspace' && state.user?.role !== 'competitor') return false;
-  if (view === 'operations' && state.user?.role !== 'organizer') return false;
   if (view !== state.activeView && !canLeaveBotWorkspace()) return false;
   if (view !== 'replay-view') {
     stopReplayPlayback();
@@ -65,7 +64,7 @@ function navigate(view, options = {}) {
     link.classList.toggle('active', active);
     link.setAttribute('aria-current', active ? 'page' : 'false');
   });
-  const pageTitles = { dashboard: state.user?.role === 'organizer' ? 'Tổng quan giải đấu' : 'Tổng quan', operations: 'Vận hành hệ thống', bots: 'Bot của tôi', 'bot-workspace': 'Tạo Bot', tournaments: state.tournamentScope === 'mine' ? 'Giải đấu của tôi' : state.user?.role === 'organizer' ? 'Quản lý giải đấu' : 'Giải đấu đang mở', 'tournament-detail': 'Chi tiết giải đấu', 'replay-view': 'Xem lại trận đấu' };
+  const pageTitles = { dashboard: state.user?.role === 'organizer' ? 'Tổng quan giải đấu' : 'Tổng quan', bots: 'Bot của tôi', 'bot-workspace': 'Tạo Bot', tournaments: state.tournamentScope === 'mine' ? 'Giải đấu của tôi' : state.user?.role === 'organizer' ? 'Quản lý giải đấu' : 'Giải đấu đang mở', 'tournament-detail': 'Chi tiết giải đấu', 'replay-view': 'Xem lại trận đấu' };
   const pageTitle = $('#page-title');
   if (pageTitle) pageTitle.textContent = pageTitles[view] || 'OTT Code Arena';
   const topbarBreadcrumb = $('#topbar-breadcrumb');
@@ -79,7 +78,6 @@ function navigate(view, options = {}) {
   closeMobileNavigation();
   target.classList.add('active');
   if (view === 'dashboard') void loadDashboard();
-  if (view === 'operations') startOperationsPolling();
   if (view === 'bots') void loadBots();
   if (view === 'tournaments') void loadTournaments();
   if (view === 'bot-workspace') {
@@ -89,7 +87,7 @@ function navigate(view, options = {}) {
   if (options.history !== false && view === 'bot-workspace' && window.location.hash !== '#bot-workspace') {
     window.history.pushState({ view }, '', '#bot-workspace');
   }
-  if (options.history !== false && ['dashboard', 'operations', 'bots', 'tournaments'].includes(view)) {
+  if (options.history !== false && ['dashboard', 'bots', 'tournaments'].includes(view)) {
     const hash = `#${view}`;
     if (window.location.hash !== hash) window.history.pushState({ view }, '', hash);
   }
@@ -112,7 +110,6 @@ function syncLocationRoute() {
 
   let targetView = AUTHENTICATED_VIEWS.has(requestedView) ? requestedView : 'dashboard';
   if (state.user.role !== 'competitor' && (targetView === 'bots' || targetView === 'bot-workspace')) targetView = 'dashboard';
-  if (state.user.role !== 'organizer' && targetView === 'operations') targetView = 'dashboard';
   if (requestedView !== targetView) window.history.replaceState({ view: targetView }, '', `#${targetView}`);
   if (state.activeView !== targetView || !document.getElementById(targetView)?.classList.contains('active')) {
     navigate(targetView, { history: false });

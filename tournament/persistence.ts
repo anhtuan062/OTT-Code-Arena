@@ -41,8 +41,16 @@ export interface TournamentRepository {
   deleteMatchResult(tournamentId: string, matchId: string): Promise<void>;
   loadMatchResult(tournamentId: string, matchId: string): Promise<TournamentMatchRecord | null>;
   loadReplay(tournamentId: string, matchId: string): Promise<MatchReplay | null>;
+  loadCommittedMatchWithHashes(tournamentId: string, matchId: string): Promise<CommittedMatch | null>;
   listMatchResults(tournamentId: string): Promise<TournamentMatchRecord[]>;
   close?(): void;
+}
+
+export interface CommittedMatch {
+  result: TournamentMatchRecord;
+  replay: MatchReplay;
+  resultHash: string;
+  replayHash: string;
 }
 
 export interface TournamentStorageConfig {
@@ -417,7 +425,7 @@ export class FileTournamentRepository implements TournamentRepository {
     this.assertSafeId(matchId, 'match');
     const startedAt = performance.now();
     try {
-      const pair = await this.loadCommittedMatch(tournamentId, matchId);
+      const pair = await this.loadCommittedMatchWithHashes(tournamentId, matchId);
       return pair?.result ?? null;
     } finally {
       applicationMetrics.observe('persistence.read_ms', performance.now() - startedAt);
@@ -432,17 +440,16 @@ export class FileTournamentRepository implements TournamentRepository {
     this.assertSafeId(matchId, 'match');
     const startedAt = performance.now();
     try {
-      const pair = await this.loadCommittedMatch(tournamentId, matchId);
+      const pair = await this.loadCommittedMatchWithHashes(tournamentId, matchId);
       return pair?.replay ?? null;
     } finally {
       applicationMetrics.observe('persistence.read_ms', performance.now() - startedAt);
     }
   }
 
-  private async loadCommittedMatch(tournamentId: string, matchId: string): Promise<{
-    result: TournamentMatchRecord;
-    replay: MatchReplay;
-  } | null> {
+  async loadCommittedMatchWithHashes(tournamentId: string, matchId: string): Promise<CommittedMatch | null> {
+    this.assertSafeId(tournamentId, 'tournament');
+    this.assertSafeId(matchId, 'match');
     const resultFile = this.getMatchResultFile(tournamentId, matchId);
     const replayFile = this.getReplayFile(tournamentId, matchId);
     const commitFile = this.getMatchCommitFile(tournamentId, matchId);
@@ -486,7 +493,7 @@ export class FileTournamentRepository implements TournamentRepository {
     ) {
       throw new Error(`Inconsistent persisted match ${matchId}: result, replay, and commit marker do not match`);
     }
-    return { result, replay };
+    return { result, replay, resultHash, replayHash };
   }
 
   /**
@@ -510,7 +517,7 @@ export class FileTournamentRepository implements TournamentRepository {
 
       const results: TournamentMatchRecord[] = [];
       const matchIdList = Array.from(matchIds);
-      const pairs = await Promise.all(matchIdList.map(mId => this.loadCommittedMatch(tournamentId, mId)));
+      const pairs = await Promise.all(matchIdList.map(mId => this.loadCommittedMatchWithHashes(tournamentId, mId)));
       for (const pair of pairs) {
         // BO3 per-game artifacts are committed independently for recovery,
         // but only the aggregate series record contributes to standings.

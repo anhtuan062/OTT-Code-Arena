@@ -14,6 +14,14 @@ qa-*/
 .revision-owners/
 tmp/
 tmp-docker-probe/
+.runtime/
+.wrangler/
+maintenance-backups/
+static-replay-preview/
+_p0-release-candidate/
+ott-recovery-build-*/
+ott-timing-diagnostics-fix/
+source-exec/
 
 # Tooling and caches
 *.log

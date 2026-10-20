@@ -1,0 +1,6 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "ott-code-arena-pages-local",
+  "pages_build_output_dir": "./dist/public",
+  "compatibility_date": "2026-10-20"
+}

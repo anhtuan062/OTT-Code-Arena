@@ -137,3 +137,22 @@ Khi server khởi động lại, pairing đang `in_progress` nhưng chưa hoàn 
 - Hàng đợi server chạy tối đa hai tác vụ đồng thời và chứa tối đa 50 tác vụ.
 - `failurePolicy` trong luồng giải hiện dùng `forfeit`; `skip_turn` và `retry_once` chưa phải luồng production.
 - Dữ liệu tournament trên filesystem và dữ liệu SQLite là hai kho riêng, không tạo thành một transaction chung.
+
+## Docker Compose cho clean checkout
+
+Sau khi cài Docker Desktop với Linux containers:
+
+```powershell
+Copy-Item .env.example .env
+docker compose up --build
+```
+
+Compose khởi tạo SQLite và thư mục tournament trong named volume `ott-data`, cùng runtime/cache trong `ott-runtime`; không cần tạo database thủ công. Mặc định chạy `development` với `ENABLE_SOURCE_REVISION_EXECUTION=false`, nên app không được cấp Docker socket và phù hợp để kiểm tra UI/API.
+
+Để bật bot execution trong môi trường local được tin cậy, dùng file override đã ghim image digest:
+
+```powershell
+docker compose -f docker-compose.yml -f docker-compose.execution.yml up --build
+```
+
+Override này mount `/var/run/docker.sock`; đây là quyền quản trị Docker host, chỉ dùng trên máy cô lập/trusted. Không dùng cấu hình này cho public hosting. P2 compiled-artifact cache mặc định tắt; có thể bật rõ ràng qua `.env` sau khi đánh giá storage và bảo mật.

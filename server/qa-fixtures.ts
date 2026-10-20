@@ -160,3 +160,31 @@ export function retryQaFixturePairing(
   }
   return { success: false, error: 'Pairing not found' };
 }
+
+export function requeueQaFixturePairing(
+  tournamentId: string,
+  pairingId: string,
+): { success: boolean; pairing?: TournamentPairing; error?: string } {
+  const tournament = getRegistry().get(tournamentId);
+  if (!tournament) return { success: false, error: 'Tournament not found' };
+  const rounds = [
+    ...(tournament.rounds ?? []),
+    ...(tournament.stages ?? []).flatMap(stage => stage.rounds ?? []),
+  ];
+  for (const round of rounds) {
+    const pairing = round.pairings.find(p => p.pairingId === pairingId);
+    if (!pairing) continue;
+    if (pairing.participantB === null) return { success: false, error: 'Cannot requeue a bye pairing' };
+    if (pairing.status === 'pending_tiebreaker' || pairing.tiebreakerStatus === 'pending') {
+      return { success: false, error: 'Pairing is waiting for organizer tiebreaker resolution' };
+    }
+    if (pairing.status !== 'failed' && pairing.status !== 'in_progress') {
+      return { success: false, error: `Pairing cannot be requeued (current: ${pairing.status})` };
+    }
+    pairing.status = 'scheduled';
+    pairing.failureReason = null;
+    pairing.failureCode = null;
+    return { success: true, pairing };
+  }
+  return { success: false, error: 'Pairing not found' };
+}

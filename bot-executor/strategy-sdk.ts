@@ -15,6 +15,11 @@ export function wrapCppStrategySource(source: string): string {
   return '#include "ott_strategy_sdk.hpp"\n' + source + '\nint main() { return ott::run(chooseMove); }\n';
 }
 
+/** Fingerprint of the generated translation-unit wrapper, not of user source. */
+export const CPP_STRATEGY_WRAPPER_DIGEST = createHash('sha256')
+  .update('#include "ott_strategy_sdk.hpp"\n<SOURCE>\nint main() { return ott::run(chooseMove); }\n')
+  .digest('hex');
+
 function sdkRoot(): string {
   const configured = process.env.BOT_STRATEGY_SDK_ROOT?.trim();
   if (configured) return path.resolve(configured);
