@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import request from 'supertest';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
@@ -30,9 +30,45 @@ describe('Bot source revisions', () => {
   });
 
   afterEach(async () => {
+    vi.unstubAllGlobals();
     closeServer();
     await fs.rm(dir, { recursive: true, force: true });
   });
+
+  function storedZip(entries: Array<{ name: string; content: string }>): Buffer {
+    const local: Buffer[] = [];
+    const central: Buffer[] = [];
+    let offset = 0;
+    for (const entry of entries) {
+      const name = Buffer.from(entry.name);
+      const content = Buffer.from(entry.content);
+      const header = Buffer.alloc(30);
+      header.writeUInt32LE(0x04034b50, 0); header.writeUInt16LE(20, 4);
+      header.writeUInt32LE(content.length, 18); header.writeUInt32LE(content.length, 22);
+      header.writeUInt16LE(name.length, 26);
+      local.push(header, name, content);
+      const directory = Buffer.alloc(46);
+      directory.writeUInt32LE(0x02014b50, 0); directory.writeUInt16LE(20, 4); directory.writeUInt16LE(20, 6);
+      directory.writeUInt32LE(content.length, 20); directory.writeUInt32LE(content.length, 24);
+      directory.writeUInt16LE(name.length, 28); directory.writeUInt32LE(offset, 42);
+      central.push(directory, name);
+      offset += header.length + name.length + content.length;
+    }
+    const centralBytes = Buffer.concat(central);
+    const end = Buffer.alloc(22);
+    end.writeUInt32LE(0x06054b50, 0); end.writeUInt16LE(entries.length, 8); end.writeUInt16LE(entries.length, 10);
+    end.writeUInt32LE(centralBytes.length, 12); end.writeUInt32LE(offset, 16);
+    return Buffer.concat([...local, centralBytes, end]);
+  }
+
+  function mockGitHub(archive: Buffer, sha = 'a'.repeat(40)) {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.includes('/repos/octo/bot/commits/')) return new Response(JSON.stringify({ sha }), { status: 200 });
+      if (url.includes('/repos/octo/bot')) return new Response(JSON.stringify({ private: false, default_branch: 'main' }), { status: 200 });
+      if (url.includes('codeload.github.com')) return new Response(archive, { status: 200, headers: { 'content-length': String(archive.length) } });
+      return new Response('', { status: 404 });
+    }));
+  }
 
   it('creates, reads, lists, and selects immutable source revisions', async () => {
     const first = await agent.post(`/api/bots/${botId}/revisions`).set('x-csrf-token', csrf)
@@ -71,6 +107,30 @@ describe('Bot source revisions', () => {
     expect((await agent.post(`/api/bots/${botId}/revisions`).set('x-csrf-token', csrf).send({ runtimeId: 'python', source: 'x' })).status).toBe(400);
     expect((await agent.post(`/api/bots/${botId}/revisions`).set('x-csrf-token', csrf).send({ runtimeId: 'cpp', source: 'x'.repeat(70 * 1024) })).status).toBe(413);
     expect((await agent.post(`/api/bots/${botId}/revisions`).set('x-csrf-token', csrf).send({ runtimeId: 'nodejs', source: 'console.log(1);' })).status).toBe(400);
+  });
+
+  it('imports a public GitHub archive into the existing immutable revision store at a pinned commit', async () => {
+    const sha = 'b'.repeat(40);
+    mockGitHub(storedZip([
+      { name: `octo-bot-${sha.slice(0, 7)}/`, content: '' },
+      { name: `octo-bot-${sha.slice(0, 7)}/main.cpp`, content: 'int main() { return 7; }\n' },
+    ]), sha);
+    const response = await agent.post(`/api/bots/${botId}/revisions/github`).set('x-csrf-token', csrf)
+      .send({ githubUrl: 'https://github.com/octo/bot', runtimeId: 'cpp' });
+    expect(response.status).toBe(201);
+    expect(response.body).toMatchObject({ botId, githubRepositoryUrl: 'https://github.com/octo/bot', githubCommitSha: sha });
+    const stored = await agent.get(`/api/bots/${botId}/revisions/${response.body.revisionId}`);
+    expect(stored.body.source).toBe('int main() { return 7; }\n');
+  });
+
+  it('rejects unsafe GitHub URLs and ZIP path traversal without executing source', async () => {
+    const invalid = await agent.post(`/api/bots/${botId}/revisions/github`).set('x-csrf-token', csrf)
+      .send({ githubUrl: 'http://github.com/octo/bot', runtimeId: 'cpp' });
+    expect(invalid.status).toBe(400);
+    mockGitHub(storedZip([{ name: 'root/../main.cpp', content: 'int main() {}' }]));
+    const unsafeArchive = await agent.post(`/api/bots/${botId}/revisions/github`).set('x-csrf-token', csrf)
+      .send({ githubUrl: 'https://github.com/octo/bot', runtimeId: 'cpp' });
+    expect(unsafeArchive.status).toBe(422);
   });
 
   it('preserves historical Node.js revisions as readable legacy records', async () => {

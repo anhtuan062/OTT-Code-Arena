@@ -1783,10 +1783,12 @@ function hasUnsavedBotWorkspaceChanges() {
   const editor = $('#bot-source-editor');
   const runtime = $('#bot-source-runtime');
   const name = $('#bot-workspace-name');
+  const githubUrl = $('#bot-github-url');
   return Boolean(editor && runtime && name && (
     editor.value !== state.sourceInitialSource
     || runtime.value !== state.sourceInitialRuntime
     || name.value.trim() !== state.sourceInitialName
+    || Boolean(githubUrl?.value.trim())
   ));
 }
 
@@ -1797,7 +1799,7 @@ function setSourceDirty(dirty) {
   if (marker) marker.hidden = !dirty;
   if (saveButton) {
     const nameChanged = ($('#bot-workspace-name')?.value.trim() || '') !== state.botWorkspaceInitialName;
-    const hasSource = Boolean($('#bot-source-editor')?.value.trim());
+    const hasSource = Boolean($('#bot-source-editor')?.value.trim() || $('#bot-github-url')?.value.trim());
     saveButton.disabled = state.botWorkspaceMode === 'create' ? !hasSource : !(dirty || nameChanged);
   }
   if (dirty) persistBotWorkspaceDraft();
@@ -2004,6 +2006,7 @@ async function openBotWorkspace(bot = null) {
   state.botWorkspaceInitialName = bot?.name || '';
   $('#save-bot-source').textContent = bot ? 'Lưu phiên bản' : 'Tạo Bot';
   $('#bot-source-runtime').value = useDraft ? savedDraft.runtimeId : 'cpp';
+  $('#bot-github-url').value = '';
   state.sourceRuntime = useDraft ? savedDraft.runtimeId : 'cpp';
   state.sourceInitialRuntime = $('#bot-source-runtime').value;
   state.sourceInitialName = bot?.name || '';
@@ -2091,7 +2094,7 @@ function showBotFormError(message, field = null) {
   const error = field === 'bot-workspace-name' ? $('#bot-name-error') : $('#bot-source-error');
   const nameError = $('#bot-name-error');
   const sourceError = $('#bot-source-error');
-  ['bot-workspace-name', 'bot-source-runtime', 'bot-source-editor'].forEach(id => document.getElementById(id)?.removeAttribute('aria-invalid'));
+  ['bot-workspace-name', 'bot-source-runtime', 'bot-source-editor', 'bot-github-url'].forEach(id => document.getElementById(id)?.removeAttribute('aria-invalid'));
   if (field) document.getElementById(field)?.setAttribute('aria-invalid', 'true');
   if (nameError && nameError !== error) { nameError.textContent = ''; nameError.hidden = true; }
   if (sourceError && sourceError !== error) { sourceError.textContent = ''; sourceError.hidden = true; }
@@ -2101,7 +2104,7 @@ function showBotFormError(message, field = null) {
 function clearBotFormError() {
   const error = $('#bot-source-error');
   const nameError = $('#bot-name-error');
-  ['bot-workspace-name', 'bot-source-runtime', 'bot-source-editor'].forEach(id => document.getElementById(id)?.removeAttribute('aria-invalid'));
+  ['bot-workspace-name', 'bot-source-runtime', 'bot-source-editor', 'bot-github-url'].forEach(id => document.getElementById(id)?.removeAttribute('aria-invalid'));
   error.textContent = '';
   error.hidden = true;
   if (nameError) { nameError.textContent = ''; nameError.hidden = true; }
@@ -2116,12 +2119,29 @@ function botNameInput() {
 function botSourceInput() {
   const runtimeId = $('#bot-source-runtime').value;
   const source = $('#bot-source-editor').value;
+  const githubUrl = $('#bot-github-url')?.value.trim();
   if (!['cpp', 'python3'].includes(runtimeId)) return { error: 'Hãy chọn C++17 hoặc Python 3.', field: 'bot-source-runtime' };
+  if (githubUrl) {
+    try {
+      const url = new URL(githubUrl);
+      if (url.protocol !== 'https:' || url.hostname.toLowerCase() !== 'github.com' || url.username || url.password || url.search || url.hash || url.pathname.split('/').filter(Boolean).length !== 2) throw new Error();
+    } catch { return { error: 'URL GitHub phải có dạng https://github.com/owner/repository.', field: 'bot-github-url' }; }
+    return { runtimeId, githubUrl };
+  }
   if (!source.trim()) return { error: 'Mã nguồn không được để trống.', field: 'bot-source-editor' };
   if (new TextEncoder().encode(source).byteLength > 64 * 1024) return { error: 'Mã nguồn không được vượt quá 64 KiB.', field: 'bot-source-editor' };
   const syntaxError = sourceSyntaxCheck(source, runtimeId);
   if (syntaxError) return { error: syntaxError, field: 'bot-source-editor' };
   return { runtimeId, source };
+}
+
+async function saveGitHubRevision(bot, sourceInput) {
+  const revision = await api(`/bots/${bot.id}/revisions/github`, {
+    method: 'POST',
+    body: JSON.stringify({ githubUrl: sourceInput.githubUrl, runtimeId: sourceInput.runtimeId, executionMode: state.sourceExecutionMode }),
+  });
+  await api(`/bots/${bot.id}/revisions/${revision.revisionId}/select`, { method: 'POST', body: JSON.stringify({}) });
+  return revision;
 }
 
 function openBotDialog(bot = null) {
@@ -2160,7 +2180,14 @@ async function submitBot() {
           method: 'PUT',
           body: JSON.stringify({ name: nameInput.name, command: editingBot.command, args: editingBot.args }),
         });
-        if (state.sourceDirty && !(await saveBotSource())) throw new Error('Không thể hoàn tất việc chọn phiên bản mã nguồn.');
+        if (sourceInput?.githubUrl) {
+          setWorkspaceStatus('Đang tải mã nguồn từ GitHub…');
+          const revision = await saveGitHubRevision(editingBot, sourceInput);
+          $('#bot-github-url').value = '';
+          setSourceDirty(false);
+          await loadBotRevisions(editingBot);
+          showToast(`Đã nhập revision ${revision.githubCommitSha?.slice(0, 8) || ''} từ GitHub.`, 'success');
+        } else if (state.sourceDirty && !(await saveBotSource())) throw new Error('Không thể hoàn tất việc chọn phiên bản mã nguồn.');
       } catch (error) {
         if (isBotView()) showBotFormError(error.message || 'Không thể lưu Bot hoặc phiên bản mã nguồn.');
         throw error;
@@ -2178,8 +2205,10 @@ async function submitBot() {
           });
         }
         createdBot = bot;
-        if (!source || !runtimeId) throw new Error('Mã nguồn ban đầu chưa sẵn sàng.');
-        revision = await saveInitialRevision(bot, source, runtimeId, revision);
+        if (!runtimeId) throw new Error('Mã nguồn ban đầu chưa sẵn sàng.');
+        revision = sourceInput?.githubUrl
+          ? await saveGitHubRevision(bot, sourceInput)
+          : await saveInitialRevision(bot, source || '', runtimeId, revision);
         state.pendingInitialRevision = null;
       } catch (error) {
         if (bot) {
@@ -10435,6 +10464,7 @@ function bindEvents() {
    on('#bot-source-runtime', 'change', event => switchSourceRuntime(event.target.value));
   on('#bot-source-runtime', 'change', event => updateSourceRuntimeMeta(event.target.value), { feature: 'bot-source-runtime-meta' });
   on('#bot-source-editor', 'input', () => setSourceDirty(true));
+  on('#bot-github-url', 'input', () => setSourceDirty(true));
   on('#bot-source-editor', 'keydown', event => {
     if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Home', 'End', 'PageUp', 'PageDown'].includes(event.key)) event.stopPropagation();
     if (event.key === 'Enter' && !event.shiftKey && !event.ctrlKey && !event.metaKey && !event.target.readOnly) {

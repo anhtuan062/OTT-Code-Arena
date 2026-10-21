@@ -26,6 +26,7 @@ import type { ExecutionPolicy } from '../bot-executor/types.js';
 import type { SourceRevisionExecutor } from '../bot-executor/types.js';
 import { ExecutionCancelledError } from '../bot-executor/types.js';
 import { getStrategySdkIdentity } from '../bot-executor/strategy-sdk.js';
+import { GitHubSourceError, importGitHubSource } from './github-source-import.js';
 import type { Tournament, TournamentBot, ParticipationRequest, SourceRevisionExecution, TournamentRound, TournamentPairing, TournamentStage } from '../tournament/types.js';
 import { isMultiStageTournament, getAllTournamentPairings, normalizeToMultiStageView } from '../tournament/multi-stage.js';
 import type { Server } from 'node:http';
@@ -736,6 +737,8 @@ function apiRevision(revision: ReturnType<SqlBotRevisionRepository['listForOwner
     executionMode: revision.execution_mode,
     sdkVersion: revision.sdk_version,
     sdkDigest: revision.sdk_digest,
+    githubRepositoryUrl: revision.github_repository_url,
+    githubCommitSha: revision.github_commit_sha,
   };
 }
 
@@ -757,6 +760,40 @@ app.post('/api/bots/:id/revisions', requireAuth, requireRole('competitor'), requ
     if (message.includes('maximum size')) return res.status(413).json({ error: message });
     if (message.includes('Unsupported') || message.includes('required') || message.includes('label') || message.includes('UTF-8') || message.includes('strategy SDK')) return res.status(400).json({ error: message });
     res.status(500).json({ error: 'Unable to save source revision' });
+  }
+});
+
+// GitHub imports resolve the default branch to an immutable commit before
+// reading an archive. They reuse the same revision store as editor submissions.
+app.post('/api/bots/:id/revisions/github', requireAuth, requireRole('competitor'), requireCsrf, async (req, res) => {
+  const body = req.body as { githubUrl?: unknown; runtimeId?: unknown; label?: unknown; executionMode?: unknown } | undefined;
+  if (!isSupportedSourceRuntime(body?.runtimeId)) return res.status(400).json({ error: `Unsupported source runtime. Use ${SUPPORTED_SOURCE_RUNTIMES.join(' or ')}` });
+  if (body?.executionMode !== undefined && body.executionMode !== 'raw' && body.executionMode !== 'strategy') return res.status(400).json({ error: 'Unsupported execution mode' });
+  if (body?.label !== undefined && typeof body.label !== 'string') return res.status(400).json({ error: 'Invalid revision label' });
+  try {
+    const imported = await importGitHubSource(body?.githubUrl, body.runtimeId);
+    if (!imported.source.trim()) return res.status(400).json({ error: 'File mã nguồn GitHub không được để trống' });
+    if (Buffer.byteLength(imported.source, 'utf8') > MAX_SOURCE_BYTES) return res.status(413).json({ error: 'Mã nguồn GitHub vượt quá giới hạn 64 KiB' });
+    const executionMode = (body?.executionMode as 'raw' | 'strategy' | undefined) ?? 'raw';
+    const sdk = executionMode === 'strategy' ? await getStrategySdkIdentity(body.runtimeId) : undefined;
+    const revision = await botRevisionRepository.create({
+      botId: routeParam(req, 'id'), ownerId: req.auth!.id, source: imported.source, runtimeId: body.runtimeId,
+      label: body?.label as string | undefined, executionMode, sdkVersion: sdk?.version, sdkDigest: sdk?.digest,
+      githubRepositoryUrl: imported.repositoryUrl, githubCommitSha: imported.commitSha,
+    });
+    res.status(201).json(apiRevision(revision));
+  } catch (error) {
+    if (error instanceof GitHubSourceError) {
+      const status = error.code === 'invalid-url' || error.code === 'missing-source' ? 400
+        : error.code === 'not-found' ? 404 : error.code === 'too-large' ? 413
+          : error.code === 'rate-limited' ? 429 : error.code === 'invalid-archive' ? 422 : 502;
+      return res.status(status).json({ error: error.message });
+    }
+    const message = error instanceof Error ? error.message : 'Unable to import GitHub source';
+    if (message === 'Bot not found') return res.status(404).json({ error: message });
+    if (message.includes('maximum size') || message.includes('64 KiB')) return res.status(413).json({ error: message });
+    if (message.includes('Invalid') || message.includes('Unsupported') || message.includes('UTF-8') || message.includes('strategy SDK')) return res.status(400).json({ error: message });
+    res.status(500).json({ error: 'Unable to save GitHub source revision' });
   }
 });
 

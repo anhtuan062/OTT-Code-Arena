@@ -22,6 +22,8 @@ export interface BotRevisionRecord {
   execution_mode: 'raw' | 'strategy';
   sdk_version: string | null;
   sdk_digest: string | null;
+  github_repository_url: string | null;
+  github_commit_sha: string | null;
 }
 
 export interface CreateRevisionInput {
@@ -33,6 +35,8 @@ export interface CreateRevisionInput {
   executionMode?: 'raw' | 'strategy';
   sdkVersion?: string;
   sdkDigest?: string;
+  githubRepositoryUrl?: string;
+  githubCommitSha?: string;
 }
 
 interface RevisionRow extends Omit<BotRevisionRecord, 'selected'> {
@@ -58,6 +62,9 @@ export class SqlBotRevisionRepository {
     }
     if (executionMode !== 'raw' && executionMode !== 'strategy') throw new Error('Unsupported execution mode');
     if (label && label.length > 100) throw new Error('Revision label is too long');
+    if ((input.githubRepositoryUrl || input.githubCommitSha) && (!input.githubRepositoryUrl || !/^[0-9a-f]{40}$/i.test(input.githubCommitSha ?? ''))) {
+      throw new Error('Invalid GitHub source identity');
+    }
 
     const bot = this.db.prepare('SELECT id, owner_id FROM bots WHERE id = ? AND owner_id = ?').get(input.botId, input.ownerId) as { id: string; owner_id: string } | undefined;
     if (!bot) throw new Error('Bot not found');
@@ -75,10 +82,10 @@ export class SqlBotRevisionRepository {
       await rename(temporaryPath, absolutePath);
       finalized = true;
       this.db.prepare(`INSERT INTO bot_revisions
-        (revision_id, bot_id, owner_id, source_digest, storage_ref, runtime_id, created_at, source_size, label, execution_mode, sdk_version, sdk_digest)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-        .run(revisionId, input.botId, input.ownerId, digest, storageRef, input.runtimeId, createdAt, sourceBytes.byteLength, label, executionMode, executionMode === 'strategy' ? input.sdkVersion : null, executionMode === 'strategy' ? input.sdkDigest : null);
-      return { revision_id: revisionId, bot_id: input.botId, owner_id: input.ownerId, source_digest: digest, storage_ref: storageRef, runtime_id: input.runtimeId, created_at: createdAt, source_size: sourceBytes.byteLength, label, selected: false, execution_mode: executionMode, sdk_version: executionMode === 'strategy' ? input.sdkVersion! : null, sdk_digest: executionMode === 'strategy' ? input.sdkDigest! : null };
+        (revision_id, bot_id, owner_id, source_digest, storage_ref, runtime_id, created_at, source_size, label, execution_mode, sdk_version, sdk_digest, github_repository_url, github_commit_sha)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+        .run(revisionId, input.botId, input.ownerId, digest, storageRef, input.runtimeId, createdAt, sourceBytes.byteLength, label, executionMode, executionMode === 'strategy' ? input.sdkVersion : null, executionMode === 'strategy' ? input.sdkDigest : null, input.githubRepositoryUrl ?? null, input.githubCommitSha ?? null);
+      return { revision_id: revisionId, bot_id: input.botId, owner_id: input.ownerId, source_digest: digest, storage_ref: storageRef, runtime_id: input.runtimeId, created_at: createdAt, source_size: sourceBytes.byteLength, label, selected: false, execution_mode: executionMode, sdk_version: executionMode === 'strategy' ? input.sdkVersion! : null, sdk_digest: executionMode === 'strategy' ? input.sdkDigest! : null, github_repository_url: input.githubRepositoryUrl ?? null, github_commit_sha: input.githubCommitSha ?? null };
     } catch (error) {
       await rm(temporaryPath, { force: true }).catch(() => {});
       if (finalized) await rm(absolutePath, { force: true }).catch(() => {});
@@ -89,7 +96,7 @@ export class SqlBotRevisionRepository {
   listForOwner(botId: string, ownerId: string): BotRevisionRecord[] {
     const rows = this.db.prepare(`SELECT r.revision_id, r.bot_id, r.owner_id, r.source_digest,
       r.storage_ref, r.runtime_id, r.created_at, r.source_size, r.label,
-      r.execution_mode, r.sdk_version, r.sdk_digest,
+      r.execution_mode, r.sdk_version, r.sdk_digest, r.github_repository_url, r.github_commit_sha,
       CASE WHEN b.current_revision_id = r.revision_id THEN 1 ELSE 0 END AS selected
       FROM bot_revisions r JOIN bots b ON b.id = r.bot_id
       WHERE r.bot_id = ? AND r.owner_id = ? AND b.owner_id = ?
@@ -100,7 +107,7 @@ export class SqlBotRevisionRepository {
   findOwned(botId: string, revisionId: string, ownerId: string): BotRevisionRecord | null {
     const row = this.db.prepare(`SELECT r.revision_id, r.bot_id, r.owner_id, r.source_digest,
       r.storage_ref, r.runtime_id, r.created_at, r.source_size, r.label,
-      r.execution_mode, r.sdk_version, r.sdk_digest,
+      r.execution_mode, r.sdk_version, r.sdk_digest, r.github_repository_url, r.github_commit_sha,
       CASE WHEN b.current_revision_id = r.revision_id THEN 1 ELSE 0 END AS selected
       FROM bot_revisions r JOIN bots b ON b.id = r.bot_id
       WHERE r.bot_id = ? AND r.revision_id = ? AND r.owner_id = ? AND b.owner_id = ?`)

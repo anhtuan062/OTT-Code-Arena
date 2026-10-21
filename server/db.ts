@@ -11,7 +11,7 @@ import * as path from 'path';
 import * as fs from 'fs/promises';
 import { randomUUID } from 'crypto';
 
-export const CURRENT_SCHEMA_VERSION = 8;
+export const CURRENT_SCHEMA_VERSION = 9;
 
 export interface DatabaseConfig {
   path: string;
@@ -242,7 +242,11 @@ function getMigrations(): string[] {
     CREATE INDEX IF NOT EXISTS idx_match_jobs_claimable
       ON tournament_match_jobs(status, lease_expires_at, updated_at);
     CREATE INDEX IF NOT EXISTS idx_match_jobs_tournament
-      ON tournament_match_jobs(tournament_id, status);`];
+      ON tournament_match_jobs(tournament_id, status);`, `
+    ALTER TABLE bot_revisions ADD COLUMN github_repository_url TEXT;
+    ALTER TABLE bot_revisions ADD COLUMN github_commit_sha TEXT;
+    CREATE INDEX IF NOT EXISTS idx_bot_revisions_github_commit
+      ON bot_revisions(github_commit_sha) WHERE github_commit_sha IS NOT NULL;`];
 }
 
 export async function initializeDatabase(config: DatabaseConfig): Promise<DatabaseWrapper> {

@@ -106,6 +106,7 @@ function bindEvents() {
    on('#bot-source-runtime', 'change', event => switchSourceRuntime(event.target.value));
   on('#bot-source-runtime', 'change', event => updateSourceRuntimeMeta(event.target.value), { feature: 'bot-source-runtime-meta' });
   on('#bot-source-editor', 'input', () => setSourceDirty(true));
+  on('#bot-github-url', 'input', () => setSourceDirty(true));
   on('#bot-source-editor', 'keydown', event => {
     if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Home', 'End', 'PageUp', 'PageDown'].includes(event.key)) event.stopPropagation();
     if (event.key === 'Enter' && !event.shiftKey && !event.ctrlKey && !event.metaKey && !event.target.readOnly) {
@@ -270,4 +271,3 @@ setInterval(() => {
     void refreshTournamentDetail().finally(() => { state.detailRefreshInFlight = false; });
   }
 }, 5000);
-

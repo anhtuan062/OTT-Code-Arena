@@ -27,6 +27,9 @@
             <option value="cpp">C++17</option>
             <option value="python3">Python 3</option>
           </select></label>
+        <label class="github-source-picker" for="bot-github-url"><span>GitHub repository URL <small>(tùy chọn)</small></span><input
+            id="bot-github-url" class="input-shell" type="url" inputmode="url" autocomplete="url"
+            placeholder="https://github.com/owner/repository" aria-describedby="bot-source-error"></label>
       </div>
       <div class="bot-source-grid">
           <div class="bot-editor-panel">
@@ -47,7 +50,7 @@
           <span id="bot-source-lines" hidden aria-hidden="true"></span>
           <div class="editor-footer"><span id="bot-source-help" class="field-help">C++17 · UTF-8 · Tối đa 64 KiB</span><span id="source-cursor-position" class="field-help">Dòng 1, cột 1</span><span id="source-byte-count" class="field-help">0 / 64 KiB</span><span id="source-syntax-status" class="field-help">Cú pháp hợp lệ</span><span class="editor-sandbox">Docker Sandbox</span></div>
           <p id="bot-source-error" class="form-error" role="alert" hidden></p>
-          <div class="source-editor-actions"><span class="workspace-save-hint">Mỗi lần lưu tạo một phiên bản bất biến mới.</span></div>
+          <div class="source-editor-actions"><span class="workspace-save-hint">Dán URL GitHub công khai để nhập <code>main.cpp</code> hoặc <code>main.py</code>; mỗi lần lưu tạo một phiên bản bất biến mới.</span></div>
         </div>
         <aside class="bot-revision-panel" aria-labelledby="bot-revisions-title">
           <div class="bot-revision-heading">
