@@ -13,7 +13,20 @@
       </div>
       <div id="td-actions" class="tournament-actions" aria-label="Thao tác giải đấu"></div>
     </div>
-    <ol id="td-lifecycle" class="tournament-lifecycle" aria-label="Tiến trình giải đấu"></ol><span class="lifecycle-mobile-count" id="td-lifecycle-count" aria-hidden="true"></span>
+    <details id="td-lifecycle-mobile" class="lifecycle-mobile-details">
+      <summary class="lifecycle-mobile-summary">
+        <span class="lifecycle-mobile-summary-copy">
+          <span class="panel-kicker">Tiến trình giải đấu</span>
+          <strong id="td-lifecycle-mobile-stage">Đang tải</strong>
+          <span id="td-lifecycle-count" class="lifecycle-mobile-count">Giai đoạn 1 / 7</span>
+        </span>
+        <span class="lifecycle-mobile-summary-meta">
+          <span id="td-lifecycle-mobile-progress" class="lifecycle-mobile-progress" role="progressbar" aria-label="Tiến trình giải đấu" aria-valuemin="0" aria-valuemax="7" aria-valuenow="1"><span id="td-lifecycle-mobile-progress-fill"></span></span>
+          <svg class="td-icon td-icon--sm lifecycle-mobile-chevron" aria-hidden="true"><use href="#icon-chevron-down"></use></svg>
+        </span>
+      </summary>
+      <ol id="td-lifecycle" class="tournament-lifecycle" aria-label="Tiến trình giải đấu"></ol>
+    </details>
     <section class="tournament-next-step" id="td-next-step" aria-live="polite"></section>
     <div id="td-lifecycle-body" class="tournament-lifecycle-body"></div>
     <section class="tournament-podium-panel" id="td-podium-panel" hidden aria-labelledby="td-podium-title">

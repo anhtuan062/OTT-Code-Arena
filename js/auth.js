@@ -10,11 +10,11 @@ function setAuthenticated(user, csrfToken) {
   if (roleLabel) roleLabel.textContent = user.role === 'organizer' ? 'Ng\u01b0\u1eddi t\u1ed5 ch\u1ee9c' : 'Ng\u01b0\u1eddi ch\u01a1i';
   $('#dashboard-username').textContent = user.username;
   $('#user-avatar').textContent = user.username.slice(0, 1).toUpperCase();
-  const competitor = user.role === 'competitor';
   document.body.dataset.role = user.role;
   const bottomNavigation = $('.bottom-nav');
-  if (bottomNavigation) bottomNavigation.hidden = !competitor;
+  if (bottomNavigation) bottomNavigation.hidden = false;
   document.querySelectorAll('.role-nav').forEach(link => { link.hidden = link.dataset.role !== user.role; });
+  const competitor = user.role === 'competitor';
   const botCreateButton = $('#open-bot-modal');
   if (botCreateButton) botCreateButton.hidden = !competitor;
   const savedScope = typeof window !== 'undefined' && window.sessionStorage
@@ -49,6 +49,9 @@ function showAuthScreen(message = '') {
   if (typeof stopRegistrationSubmissionPolling === 'function') stopRegistrationSubmissionPolling();
   state.registrationSubmission = null;
   state.tournamentRegistrationContext = null;
+  const bottomNavigation = $('.bottom-nav');
+  if (bottomNavigation) bottomNavigation.hidden = true;
+  document.body.removeAttribute('data-role');
   const registrationStatus = $('#registration-submission-status');
   if (registrationStatus) registrationStatus.hidden = true;
   document.querySelectorAll('.modal-overlay.open').forEach(modal => closeModal(modal.id));

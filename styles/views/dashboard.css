@@ -388,9 +388,7 @@
 
     /* Dashboard uses all available workspace width instead of a centered max-width. */
     #dashboard.dashboard-page {
-      width: calc(100% - 232px);
       max-width: none;
-      margin-left: 232px;
       margin-right: 0;
     }
 
@@ -1837,3 +1835,6 @@
         transform: none;
       }
     }
+
+/* Shared caption scale for dashboard section links. */
+#dashboard.dashboard-page .dashboard-section-link { font-size: var(--font-size-caption); line-height: 1.3; }

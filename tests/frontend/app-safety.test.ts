@@ -39,7 +39,7 @@ describe('SPA rendering and request foundations', () => {
     expect(app).toContain('viewRevision');
     expect(app).toContain('isCurrentView');
     expect(app).toContain('function toggleMobileNavigation');
-    expect(app).toContain("state.tournamentScope = button.dataset.target === 'my-tournaments' ? 'mine' : 'discoverable'");
+    expect(app).toContain("state.user?.role === 'organizer' ? 'managed' : 'discoverable'");
     expect(page).toContain('id="sidebar-backdrop"');
     expect(page).not.toContain('tournament-scope-tab');
   });

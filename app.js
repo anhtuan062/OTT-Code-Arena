@@ -636,9 +636,9 @@ function navigate(view, options = {}) {
     link.setAttribute('aria-current', active ? 'page' : 'false');
   });
   document.querySelectorAll('.bottom-nav [data-target]').forEach(link => {
-    const active = view === 'tournaments'
-      ? (state.tournamentScope === 'mine' ? link.dataset.target === 'my-tournaments' : link.dataset.target === 'tournaments')
-      : link.dataset.target === view;
+    const target = link.dataset.target === 'my-tournaments' ? 'tournaments' : link.dataset.target;
+    const active = target === view
+      && (!link.dataset.scope || link.dataset.scope === state.tournamentScope);
     link.classList.toggle('active', active);
     link.setAttribute('aria-current', active ? 'page' : 'false');
   });
@@ -711,11 +711,11 @@ function setAuthenticated(user, csrfToken) {
   if (roleLabel) roleLabel.textContent = user.role === 'organizer' ? 'Ng\u01b0\u1eddi t\u1ed5 ch\u1ee9c' : 'Ng\u01b0\u1eddi ch\u01a1i';
   $('#dashboard-username').textContent = user.username;
   $('#user-avatar').textContent = user.username.slice(0, 1).toUpperCase();
-  const competitor = user.role === 'competitor';
   document.body.dataset.role = user.role;
   const bottomNavigation = $('.bottom-nav');
-  if (bottomNavigation) bottomNavigation.hidden = !competitor;
+  if (bottomNavigation) bottomNavigation.hidden = false;
   document.querySelectorAll('.role-nav').forEach(link => { link.hidden = link.dataset.role !== user.role; });
+  const competitor = user.role === 'competitor';
   const botCreateButton = $('#open-bot-modal');
   if (botCreateButton) botCreateButton.hidden = !competitor;
   const savedScope = typeof window !== 'undefined' && window.sessionStorage
@@ -750,6 +750,9 @@ function showAuthScreen(message = '') {
   if (typeof stopRegistrationSubmissionPolling === 'function') stopRegistrationSubmissionPolling();
   state.registrationSubmission = null;
   state.tournamentRegistrationContext = null;
+  const bottomNavigation = $('.bottom-nav');
+  if (bottomNavigation) bottomNavigation.hidden = true;
+  document.body.removeAttribute('data-role');
   const registrationStatus = $('#registration-submission-status');
   if (registrationStatus) registrationStatus.hidden = true;
   document.querySelectorAll('.modal-overlay.open').forEach(modal => closeModal(modal.id));
@@ -3776,6 +3779,20 @@ function isRosterFinalPhase(tournament) {
     && !(tournament.stages || []).length;
 }
 
+function updateTournamentLifecycleMobileSummary(label, count, progress, cancelled = false) {
+  const stage = $('#td-lifecycle-mobile-stage');
+  const counter = $('#td-lifecycle-count');
+  const track = $('#td-lifecycle-mobile-progress');
+  const fill = $('#td-lifecycle-mobile-progress-fill');
+  if (stage) stage.textContent = label;
+  if (counter) counter.textContent = count;
+  if (track) {
+    track.setAttribute('aria-valuenow', cancelled ? '0' : String(progress));
+    track.setAttribute('aria-valuetext', cancelled ? 'Đã hủy' : `${count}: ${label}`);
+  }
+  if (fill) fill.style.width = cancelled ? '0%' : `${Math.max(0, Math.min(100, (progress / 7) * 100))}%`;
+}
+
 function renderTournamentLifecycle(tournament) {
   const list = $('#td-lifecycle');
   if (!list) return;
@@ -3786,6 +3803,7 @@ function renderTournamentLifecycle(tournament) {
     list.dataset.current = '—';
     list.dataset.cancelled = 'true';
     const count = $('#td-lifecycle-count'); if (count) count.textContent = 'Đã hủy';
+    updateTournamentLifecycleMobileSummary('Đã hủy', 'Đã hủy', 0, true);
     const item = create('li', { className: 'is-cancelled' });
     const marker = create('span', { className: 'lifecycle-marker', attrs: { 'aria-hidden': 'true' } });
     marker.appendChild(icon('td-icon-circle-x')); marker.firstChild.classList.add('td-icon', 'td-icon--sm');
@@ -3805,7 +3823,8 @@ function renderTournamentLifecycle(tournament) {
   list.dataset.current = String(currentIndex + 1);
   list.dataset.cancelled = 'false';
   list.style.setProperty('--progress', String((currentIndex / (steps.length - 1)) * 100));
-  const count = $('#td-lifecycle-count'); if (count) count.textContent = `Bước ${currentIndex + 1} / ${steps.length}`;
+  const count = $('#td-lifecycle-count'); if (count) count.textContent = `Giai đoạn ${currentIndex + 1} / ${steps.length}`;
+  updateTournamentLifecycleMobileSummary(steps[currentIndex], `Giai đoạn ${currentIndex + 1} / ${steps.length}`, currentIndex + 1);
   list.replaceChildren(...steps.map((label, index) => {
     const item = create('li', { className: index < currentIndex ? 'is-complete' : index === currentIndex ? 'is-current' : 'is-upcoming' });
     const marker = create('span', { className: 'lifecycle-marker', attrs: { 'aria-hidden': 'true' } });
@@ -10741,7 +10760,9 @@ function bindEvents() {
 
 bindEvents();
 document.querySelectorAll('.bottom-nav [data-target]').forEach(button => bindEvent(button, 'click', () => {
-  state.tournamentScope = button.dataset.target === 'my-tournaments' ? 'mine' : 'discoverable';
+  state.tournamentScope = button.dataset.target === 'my-tournaments'
+    ? 'mine'
+    : button.dataset.scope || (state.user?.role === 'organizer' ? 'managed' : 'discoverable');
   navigate(button.dataset.target === 'my-tournaments' ? 'tournaments' : button.dataset.target);
 }));
 if (window.ResizeObserver) {

@@ -719,9 +719,7 @@
     /* Replay refinement: keep the board dominant and the move history usable. */
     #replay-view {
       max-width: none;
-      margin-left: 232px;
       margin-right: 0;
-      width: calc(100% - 232px);
       box-sizing: border-box;
     }
     #replay-view .replay-header {

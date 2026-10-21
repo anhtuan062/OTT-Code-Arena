@@ -63,6 +63,13 @@
   --radius-md: 14px;
   --radius-lg: 22px;
 
+  /* Shared typography scale for readable metadata without changing density. */
+  --font-size-overline: .6875rem;
+  --font-size-caption: .75rem;
+  --font-size-label: .8125rem;
+  --font-size-body: .9375rem;
+  --font-size-title: 1.125rem;
+
   /* Auth-specific aliases share the authoritative application token block. */
   --auth-bg: var(--color-surface);
   --auth-bg-darker: #f8faf9;

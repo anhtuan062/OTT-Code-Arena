@@ -5061,19 +5061,19 @@
     }
 
     @media (max-width: 900px) {
-      body[data-role="competitor"] .bottom-nav {
+      body[data-role] .bottom-nav {
         position: fixed;
         inset: auto 0 0;
         z-index: 1200;
         display: grid;
-        grid-template-columns: repeat(4, 1fr);
+        grid-template-columns: repeat(auto-fit, minmax(0, 1fr));
         padding: 7px max(10px, env(safe-area-inset-right)) max(7px, env(safe-area-inset-bottom)) max(10px, env(safe-area-inset-left));
         border-top: 1px solid var(--border-light);
         background: rgba(255, 255, 255, .97);
         box-shadow: 0 -8px 24px rgba(23, 35, 29, .07);
       }
 
-      body[data-role="competitor"] .bottom-nav button {
+      body[data-role] .bottom-nav button {
         min-height: 44px;
         border: 0;
         border-radius: 8px;
@@ -5082,12 +5082,12 @@
         font: 600 .72rem 'Be Vietnam Pro', system-ui, sans-serif;
       }
 
-      body[data-role="competitor"] .bottom-nav button.active {
+      body[data-role] .bottom-nav button.active {
         background: #edf7f0;
         color: var(--color-brand);
       }
 
-      body[data-role="competitor"] .page {
+      body[data-role] .page {
         padding-bottom: 88px;
       }
 
@@ -7837,11 +7837,12 @@ return legal_moves[0]</pre>
   <!-- TOASTS -->
   <div id="toast-container" aria-live="polite"></div>
 
-  <nav class="bottom-nav" aria-label="Điều hướng chính cho người chơi" hidden>
+  <nav class="bottom-nav" aria-label="Điều hướng chính" hidden>
     <button type="button" data-target="dashboard">Tổng quan</button>
-    <button type="button" data-target="bots">Bot</button>
-    <button type="button" data-target="tournaments">Đang mở</button>
-    <button type="button" id="my-tournaments" data-target="my-tournaments">Của tôi</button>
+    <button type="button" class="role-nav" data-role="competitor" data-target="bots">Bot</button>
+    <button type="button" class="role-nav" data-role="competitor" data-target="tournaments" data-scope="discoverable">Đang mở</button>
+    <button type="button" class="role-nav" data-role="competitor" data-target="my-tournaments" data-scope="mine">Của tôi</button>
+    <button type="button" class="role-nav" data-role="organizer" data-target="tournaments" data-scope="managed">Quản lý giải đấu</button>
   </nav>
 
   <!-- ICONS -->

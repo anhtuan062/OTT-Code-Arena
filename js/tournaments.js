@@ -952,6 +952,20 @@ function isRosterFinalPhase(tournament) {
     && !(tournament.stages || []).length;
 }
 
+function updateTournamentLifecycleMobileSummary(label, count, progress, cancelled = false) {
+  const stage = $('#td-lifecycle-mobile-stage');
+  const counter = $('#td-lifecycle-count');
+  const track = $('#td-lifecycle-mobile-progress');
+  const fill = $('#td-lifecycle-mobile-progress-fill');
+  if (stage) stage.textContent = label;
+  if (counter) counter.textContent = count;
+  if (track) {
+    track.setAttribute('aria-valuenow', cancelled ? '0' : String(progress));
+    track.setAttribute('aria-valuetext', cancelled ? 'Đã hủy' : `${count}: ${label}`);
+  }
+  if (fill) fill.style.width = cancelled ? '0%' : `${Math.max(0, Math.min(100, (progress / 7) * 100))}%`;
+}
+
 function renderTournamentLifecycle(tournament) {
   const list = $('#td-lifecycle');
   if (!list) return;
@@ -962,6 +976,7 @@ function renderTournamentLifecycle(tournament) {
     list.dataset.current = '—';
     list.dataset.cancelled = 'true';
     const count = $('#td-lifecycle-count'); if (count) count.textContent = 'Đã hủy';
+    updateTournamentLifecycleMobileSummary('Đã hủy', 'Đã hủy', 0, true);
     const item = create('li', { className: 'is-cancelled' });
     const marker = create('span', { className: 'lifecycle-marker', attrs: { 'aria-hidden': 'true' } });
     marker.appendChild(icon('td-icon-circle-x')); marker.firstChild.classList.add('td-icon', 'td-icon--sm');
@@ -981,7 +996,8 @@ function renderTournamentLifecycle(tournament) {
   list.dataset.current = String(currentIndex + 1);
   list.dataset.cancelled = 'false';
   list.style.setProperty('--progress', String((currentIndex / (steps.length - 1)) * 100));
-  const count = $('#td-lifecycle-count'); if (count) count.textContent = `Bước ${currentIndex + 1} / ${steps.length}`;
+  const count = $('#td-lifecycle-count'); if (count) count.textContent = `Giai đoạn ${currentIndex + 1} / ${steps.length}`;
+  updateTournamentLifecycleMobileSummary(steps[currentIndex], `Giai đoạn ${currentIndex + 1} / ${steps.length}`, currentIndex + 1);
   list.replaceChildren(...steps.map((label, index) => {
     const item = create('li', { className: index < currentIndex ? 'is-complete' : index === currentIndex ? 'is-current' : 'is-upcoming' });
     const marker = create('span', { className: 'lifecycle-marker', attrs: { 'aria-hidden': 'true' } });

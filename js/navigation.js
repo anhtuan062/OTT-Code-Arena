@@ -124,9 +124,9 @@ function navigate(view, options = {}) {
     link.setAttribute('aria-current', active ? 'page' : 'false');
   });
   document.querySelectorAll('.bottom-nav [data-target]').forEach(link => {
-    const active = view === 'tournaments'
-      ? (state.tournamentScope === 'mine' ? link.dataset.target === 'my-tournaments' : link.dataset.target === 'tournaments')
-      : link.dataset.target === view;
+    const target = link.dataset.target === 'my-tournaments' ? 'tournaments' : link.dataset.target;
+    const active = target === view
+      && (!link.dataset.scope || link.dataset.scope === state.tournamentScope);
     link.classList.toggle('active', active);
     link.setAttribute('aria-current', active ? 'page' : 'false');
   });

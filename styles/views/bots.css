@@ -5,9 +5,7 @@
   --bots-line: #dfe9e2;
   --bots-accent: #176b4d;
   --bots-soft: #edf8f1;
-  width: calc(100% - 232px);
   max-width: none;
-  margin-left: 232px;
   padding: 28px 32px 64px;
   background: #f7faf8;
 }
@@ -86,7 +84,7 @@
 
 #bots.bots-page .bot-grid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr));
   gap: 16px;
   align-items: stretch;
   min-height: 180px;
@@ -115,11 +113,13 @@
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
+  flex-wrap: wrap;
   gap: 12px;
 }
 
 #bots.bots-page .bot-card-identity {
   display: flex;
+  flex: 1 1 180px;
   min-width: 0;
   align-items: flex-start;
   gap: 11px;
@@ -342,10 +342,6 @@
 #bots.bots-page.active .bot-grid > *:nth-child(2) { animation-delay: 55ms; }
 #bots.bots-page.active .bot-grid > *:nth-child(3) { animation-delay: 110ms; }
 #bots.bots-page.active .bot-grid > *:nth-child(4) { animation-delay: 165ms; }
-
-@media (max-width: 1080px) {
-  #bots.bots-page .bot-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-}
 
 @media (max-width: 900px) {
   #bots.bots-page {

@@ -252,7 +252,9 @@ function bindEvents() {
 
 bindEvents();
 document.querySelectorAll('.bottom-nav [data-target]').forEach(button => bindEvent(button, 'click', () => {
-  state.tournamentScope = button.dataset.target === 'my-tournaments' ? 'mine' : 'discoverable';
+  state.tournamentScope = button.dataset.target === 'my-tournaments'
+    ? 'mine'
+    : button.dataset.scope || (state.user?.role === 'organizer' ? 'managed' : 'discoverable');
   navigate(button.dataset.target === 'my-tournaments' ? 'tournaments' : button.dataset.target);
 }));
 if (window.ResizeObserver) {
