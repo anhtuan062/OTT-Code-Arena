@@ -21,7 +21,6 @@ const timeout = (): BotExecutionResult => ({
   success: false, error: { code: 'TIMEOUT', message: 'Bot timed out after 2000ms', stage: 'timeout' },
   exitCode: null, timedOut: true, stdout: '', stderr: '', durationMs: 2000,
 });
-
 describe('Practice HTTP contract (controlled executor; no Docker)', () => {
   let root: string;
   let dir: string;
@@ -366,5 +365,46 @@ describe('Practice HTTP contract (controlled executor; no Docker)', () => {
     expect((await user.agent.get(`/api/tournaments/${tournamentId}/participation-requests/mine`)).body[0]).toMatchObject({
       revisionId: user.revision.revisionId, status: 'approved',
     });
+  });
+
+  it('accepts custom board pieces in single-turn revision test', async () => {
+    const user = await competitor('cpp');
+    const response = await user.agent.post(user.url).set('x-csrf-token', user.csrf).send({
+      customPieces: [
+        { player: 'A', type: 'dam', row: 4, col: 4 },
+        { player: 'B', type: 'keo', row: 4, col: 5 },
+      ],
+    });
+    expect(response.status).toBe(200);
+    expect(response.body).toMatchObject({ valid: true, accepted: true, scenarioId: 'custom' });
+    expect(response.body.state.pieces).toHaveLength(2);
+  });
+
+  it('supports testing draft code on custom board pieces without saving revision', async () => {
+    const user = await competitor('cpp');
+    const source = await fs.readFile(path.join(process.cwd(), 'bot-sdk/templates/cpp17.cpp'), 'utf8');
+    const response = await user.agent.post('/api/bots/draft/test').set('x-csrf-token', user.csrf).send({
+      source,
+      runtimeId: 'cpp',
+      executionMode: 'strategy',
+      customPieces: [
+        { player: 'A', type: 'dam', row: 3, col: 3 },
+        { player: 'B', type: 'la', row: 5, col: 5 },
+      ],
+    });
+    expect(response.status).toBe(200);
+    expect(response.body).toMatchObject({ valid: true, accepted: true, scenarioId: 'custom' });
+  });
+
+  it('rejects custom board test when Player A does not have exactly 1 piece', async () => {
+    const user = await competitor('cpp');
+    const response = await user.agent.post(user.url).set('x-csrf-token', user.csrf).send({
+      customPieces: [
+        { player: 'A', type: 'dam', row: 4, col: 4 },
+        { player: 'A', type: 'la', row: 2, col: 2 },
+      ],
+    });
+    expect(response.status).toBe(400);
+    expect(response.body.error).toContain('đúng 1 quân của Bot A');
   });
 });

@@ -14,6 +14,7 @@
   <link rel="stylesheet" href="style.css">
   <link rel="stylesheet" href="styles/views/replay.css">
   <link rel="stylesheet" href="styles/views/live.css">
+  <link rel="stylesheet" href="styles/views/playground.css">
   <style>
     /* Additions to existing style.css for Dashboard/Tournaments */
     .nav-bar {
@@ -7492,6 +7493,7 @@
     <nav class="nav-links" aria-label="Không gian làm việc">
       <button class="nav-link active" type="button" data-target="dashboard" aria-current="page"><svg class="ui-icon" aria-hidden="true"><use href="#icon-dashboard"></use></svg>Tổng quan</button>
       <button class="nav-link role-nav competitor-nav" type="button" data-role="competitor" data-target="bots"><svg class="ui-icon" aria-hidden="true"><use href="#icon-users"></use></svg><span>Bot của tôi</span><span class="nav-badge" id="nav-badge-bots" hidden></span></button>
+      <button class="nav-link role-nav competitor-nav" type="button" data-role="competitor" data-target="bot-playground"><svg class="ui-icon" aria-hidden="true"><use href="#icon-activity"></use></svg><span>Test thế cờ</span></button>
       <button class="nav-link role-nav competitor-nav" type="button" data-role="competitor" data-target="tournaments"><svg class="ui-icon" aria-hidden="true"><use href="#icon-trophy"></use></svg><span>Giải đấu</span><span class="nav-badge" id="nav-badge-tourneys" hidden></span></button>
       <button class="nav-link role-nav organizer-nav" type="button" data-role="organizer" data-target="tournaments"
         data-scope="managed" hidden><svg class="ui-icon" aria-hidden="true"><use href="#icon-users"></use></svg>Quản lý giải đấu</button>
@@ -7531,6 +7533,9 @@
 
   <!-- REPLAY VIEWER -->
   <div class="page-fragment" data-page-fragment="/views/pages/replay.html" data-page-root="replay-view"></div>
+
+  <!-- BOT PLAYGROUND -->
+  <div class="page-fragment" data-page-fragment="/views/pages/bot-playground.html" data-page-root="bot-playground"></div>
 
 
   <!-- MODALS -->
@@ -7840,6 +7845,7 @@ return legal_moves[0]</pre>
   <nav class="bottom-nav" aria-label="Điều hướng chính" hidden>
     <button type="button" data-target="dashboard">Tổng quan</button>
     <button type="button" class="role-nav" data-role="competitor" data-target="bots">Bot</button>
+    <button type="button" class="role-nav" data-role="competitor" data-target="bot-playground">Test thế cờ</button>
     <button type="button" class="role-nav" data-role="competitor" data-target="tournaments" data-scope="discoverable">Đang mở</button>
     <button type="button" class="role-nav" data-role="competitor" data-target="my-tournaments" data-scope="mine">Của tôi</button>
     <button type="button" class="role-nav" data-role="organizer" data-target="tournaments" data-scope="managed">Quản lý giải đấu</button>

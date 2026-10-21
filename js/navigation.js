@@ -9,7 +9,7 @@ function toggleMobileNavigation() {
   toggle.setAttribute('aria-label', open ? 'Đóng điều hướng' : 'Mở điều hướng');
 }
 
-const AUTHENTICATED_VIEWS = new Set(['dashboard', 'bots', 'bot-workspace', 'tournaments', 'tournament-detail', 'replay-view']);
+const AUTHENTICATED_VIEWS = new Set(['dashboard', 'bots', 'bot-workspace', 'tournaments', 'tournament-detail', 'replay-view', 'bot-playground']);
 
 function closeMobileNavigation() {
   const sidebar = $('#app-nav');
@@ -131,7 +131,7 @@ function navigate(view, options = {}) {
     link.setAttribute('aria-current', active ? 'page' : 'false');
   });
   const tournamentCache = Array.isArray(state.tournaments) ? state.tournaments : [];
-  const pageTitles = { dashboard: state.user?.role === 'organizer' ? 'Tổng quan giải đấu' : 'Tổng quan', bots: 'Bot của tôi', 'bot-workspace': 'Tạo Bot', tournaments: state.user?.role === 'organizer' ? 'Quản lý giải đấu' : 'Giải đấu', 'tournament-detail': state.currentTournament?.name || tournamentCache.find(tournament => tournament.tournamentId === state.tournamentId)?.name || 'Chi tiết giải đấu', 'replay-view': 'Xem lại trận đấu' };
+  const pageTitles = { dashboard: state.user?.role === 'organizer' ? 'Tổng quan giải đấu' : 'Tổng quan', bots: 'Bot của tôi', 'bot-workspace': 'Tạo Bot', 'bot-playground': 'Test thế cờ', tournaments: state.user?.role === 'organizer' ? 'Quản lý giải đấu' : 'Giải đấu', 'tournament-detail': state.currentTournament?.name || tournamentCache.find(tournament => tournament.tournamentId === state.tournamentId)?.name || 'Chi tiết giải đấu', 'replay-view': 'Xem lại trận đấu' };
   const pageTitle = $('#page-title');
   if (pageTitle) pageTitle.textContent = pageTitles[view] || 'OTT Code Arena';
   const sectionTitle = state.user?.role === 'organizer' ? 'Quản lý' : 'Giải đấu';
@@ -140,16 +140,18 @@ function navigate(view, options = {}) {
     : pageTitles[view] || 'OTT Code Arena';
   const botWorkspaceParent = view === 'bot-workspace' ? getBotWorkspaceParent() : null;
   const replayParent = view === 'replay-view' ? getReplayParent(sectionTitle) : null;
+  const playgroundParent = view === 'bot-playground' ? { title: 'Bot của tôi', target: 'bots' } : null;
   const breadcrumbParent = view === 'tournament-detail'
     ? getTournamentDetailParentTitle()
-    : replayParent?.title || botWorkspaceParent?.title || sectionTitle;
-  const breadcrumbTarget = replayParent?.target || botWorkspaceParent?.target || 'tournaments';
-  renderTopbarBreadcrumb(breadcrumbParent, currentTitle, ['bot-workspace', 'tournament-detail', 'replay-view'].includes(view), breadcrumbTarget);
+    : playgroundParent?.title || replayParent?.title || botWorkspaceParent?.title || sectionTitle;
+  const breadcrumbTarget = playgroundParent?.target || replayParent?.target || botWorkspaceParent?.target || 'tournaments';
+  renderTopbarBreadcrumb(breadcrumbParent, currentTitle, ['bot-workspace', 'tournament-detail', 'replay-view', 'bot-playground'].includes(view), breadcrumbTarget);
   closeMobileNavigation();
   target.classList.add('active');
   if (view === 'dashboard') void loadDashboard();
   if (view === 'bots') void loadBots();
   if (view === 'tournaments') void loadTournaments();
+  if (view === 'bot-playground' && typeof initBotPlayground === 'function') void initBotPlayground();
   if (view === 'bot-workspace') {
     const workspace = $('#bot-source-workspace');
     if (workspace) workspace.hidden = false;
@@ -157,7 +159,7 @@ function navigate(view, options = {}) {
   if (options.history !== false && view === 'bot-workspace' && window.location.hash !== '#bot-workspace') {
     window.history.pushState({ view }, '', '#bot-workspace');
   }
-  if (options.history !== false && ['dashboard', 'bots', 'tournaments'].includes(view)) {
+  if (options.history !== false && ['dashboard', 'bots', 'tournaments', 'bot-playground'].includes(view)) {
     const hash = `#${view}`;
     if (window.location.hash !== hash) window.history.pushState({ view }, '', hash);
   }

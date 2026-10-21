@@ -1,9 +1,9 @@
 import { createEngine, posToAlgebraic, type GameEngine } from '@engine/index.js';
-import type { GameState, InitialPieceConfig, MoveOption, Player } from '@engine/types.js';
+import type { GameState, InitialPieceConfig, MoveOption, PieceType, Player } from '@engine/types.js';
 import { validateState } from '@engine/state.js';
 
 export const PRACTICE_SCENARIO_IDS = ['initial', 'capture', 'near-goal'] as const;
-export type PracticeScenarioId = typeof PRACTICE_SCENARIO_IDS[number];
+export type PracticeScenarioId = typeof PRACTICE_SCENARIO_IDS[number] | 'custom';
 
 export interface PracticeScenario {
   id: PracticeScenarioId;
@@ -65,6 +65,80 @@ function createScenario(id: PracticeScenarioId, label: string, initialPieces?: I
   return { id, label, expectedPlayer: state.currentPlayer, engine, state, legalMoves };
 }
 
+export interface CustomPracticePiece {
+  player: Player;
+  type: PieceType;
+  row: number;
+  col: number;
+}
+
+export function createCustomPracticeScenario(pieces: CustomPracticePiece[]): PracticeScenario {
+  if (!Array.isArray(pieces)) {
+    throw new Error('Dữ liệu quân cờ không hợp lệ.');
+  }
+
+  const playerAPieces = pieces.filter(p => p && p.player === 'A');
+  if (playerAPieces.length !== 1) {
+    throw new Error('Thế cờ thử nghiệm yêu cầu đúng 1 quân của Bot A.');
+  }
+
+  const occupied = new Set<string>();
+  const initialPieces: InitialPieceConfig[] = [];
+
+  for (const piece of pieces) {
+    if (!piece || (piece.player !== 'A' && piece.player !== 'B')) {
+      throw new Error('Người sở hữu quân phải là A hoặc B.');
+    }
+    if (!['dam', 'la', 'keo'].includes(piece.type)) {
+      throw new Error(`Loại quân không hợp lệ: ${piece.type}.`);
+    }
+    if (
+      !Number.isInteger(piece.row) ||
+      !Number.isInteger(piece.col) ||
+      piece.row < 0 ||
+      piece.row >= 9 ||
+      piece.col < 0 ||
+      piece.col >= 9
+    ) {
+      throw new Error('Vị trí quân cờ nằm ngoài bàn cờ 9x9.');
+    }
+
+    const key = `${piece.row},${piece.col}`;
+    if (occupied.has(key)) {
+      throw new Error(`Hai quân cờ không được đặt trùng ô (${posToAlgebraic({ row: piece.row, col: piece.col })}).`);
+    }
+    occupied.add(key);
+
+    initialPieces.push({
+      player: piece.player,
+      type: piece.type,
+      row: piece.row,
+      col: piece.col,
+    });
+  }
+
+  const engine = createEngine({ initialPieces });
+  const state = engine.getState();
+  const validation = validateState(state);
+  if (!validation.valid) {
+    throw new Error(`Thế cờ không hợp lệ: ${validation.reason}`);
+  }
+
+  const legalMoves = engine.getLegalMoves();
+  if (!legalMoves.length) {
+    throw new Error('Bot A không có nước đi hợp lệ nào trong thế cờ này (bị chặn hoặc không thể di chuyển).');
+  }
+
+  return {
+    id: 'custom' as PracticeScenarioId,
+    label: 'Thế cờ tự thiết lập',
+    expectedPlayer: 'A',
+    engine,
+    state,
+    legalMoves,
+  };
+}
+
 export function createPracticeScenario(id: string): PracticeScenario | null {
   switch (id) {
     case 'initial':
@@ -83,4 +157,3 @@ export function createPracticeScenario(id: string): PracticeScenario | null {
       return null;
   }
 }
-

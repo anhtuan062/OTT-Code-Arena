@@ -183,6 +183,21 @@ function bindEvents() {
   });
   on('#save-bot-source', 'click', () => void submitBot());
   on('#run-bot-practice', 'click', openCurrentPracticeRunner);
+  on('#open-bot-playground-from-ws', 'click', () => {
+    const editor = $('#bot-source-editor');
+    const runtime = $('#bot-source-runtime');
+    if (editor && editor.value) {
+      state.practiceDraft = {
+        source: editor.value,
+        runtimeId: runtime ? runtime.value : 'cpp'
+      };
+      const playgroundCode = $('#playground-code');
+      const playgroundRuntime = $('#playground-runtime-selector');
+      if (playgroundCode) playgroundCode.value = editor.value;
+      if (playgroundRuntime && runtime) playgroundRuntime.value = runtime.value;
+    }
+    navigate('bot-playground');
+  });
   on('#practice-run', 'click', () => void testBotMatch());
   on('#practice-replay-start', 'click', () => { stopPracticeReplay(); goToPracticeTurn(-1); });
   on('#practice-replay-prev', 'click', () => { stopPracticeReplay(); goToPracticeTurn(state.practiceReplayMoveIndex - 1); });

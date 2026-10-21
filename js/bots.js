@@ -197,8 +197,12 @@ function renderBotList() {
     const footer = create('div', { className: 'bot-card-footer' });
     const date = new Date(bot.registeredAt); footer.appendChild(create('small', { text: Number.isNaN(date.getTime()) ? 'Không có ngày đăng ký' : `Đăng ký ngày ${date.toLocaleDateString('vi-VN')}` }));
     const actions = create('div', { className: 'bot-actions' });
-    const actionIcons = ['icon-code-2', 'icon-trash-2'];
-    actions.append(actionButton('Mã nguồn', () => openSourceWorkspace(bot), `source-bot:${bot.id}`, 'primary-btn bot-action'), actionButton('Xóa', () => openDeleteBotDialog(bot), `delete-bot:${bot.id}`, 'secondary-btn bot-action bot-delete'));
+    const actionIcons = ['icon-code-2', 'icon-activity', 'icon-trash-2'];
+    actions.append(
+      actionButton('Mã nguồn', () => openSourceWorkspace(bot), `source-bot:${bot.id}`, 'primary-btn bot-action'),
+      actionButton('Test thế cờ', () => typeof openPlaygroundForBot === 'function' ? openPlaygroundForBot(bot) : navigate('bot-playground'), `playground-bot:${bot.id}`, 'secondary-btn bot-action'),
+      actionButton('Xóa', () => openDeleteBotDialog(bot), `delete-bot:${bot.id}`, 'secondary-btn bot-action bot-delete')
+    );
     actionIcons.forEach((iconId, index) => {
       const action = actions.children[index];
       if (!action || action.querySelector('svg')) return;
