@@ -1619,6 +1619,25 @@ class PublicProjectionUnavailable extends Error {
   }
 }
 
+function sendVersionedJson(req: express.Request, res: express.Response, payload: unknown) {
+  const serialized = JSON.stringify(payload);
+  const etag = `"${createHash('sha256').update(serialized).digest('base64url')}"`;
+  const payloadBytes = Buffer.byteLength(serialized);
+  res.set('ETag', etag);
+  applicationMetrics.observe('api.etag.payload_bytes', payloadBytes);
+  const candidate = req.headers['if-none-match'];
+  const matches = candidate === '*' || (typeof candidate === 'string' && candidate.split(',').some(tag => {
+    const normalized = tag.trim();
+    return normalized === etag || normalized === `W/${etag}`;
+  }));
+  if (matches) {
+    applicationMetrics.increment('api.etag.not_modified');
+    applicationMetrics.increment('api.etag.bytes_saved', payloadBytes);
+    return res.status(304).end();
+  }
+  return res.json(payload);
+}
+
 async function canViewTournamentResults(req: express.Request, tournament: Tournament): Promise<boolean> {
   if (isQaFixturesEnabled() && getOwnedQaFixture(tournament.tournamentId, req.auth?.id ?? '')) return true;
   if (req.auth?.role === 'organizer') return tournament.metadata?.ownerId === req.auth.id;
@@ -2018,7 +2037,7 @@ app.get('/api/tournaments/:id', requireAuth, async (req, res) => {
           return safeSpectatorTournament(loaded.data, req.auth!.id, includeRounds);
         },
       );
-      return res.json(projection);
+      return sendVersionedJson(req, res, projection);
     }
     const tournament = isFixture
       ? getQaFixture(tournamentId)!
@@ -2034,13 +2053,13 @@ app.get('/api/tournaments/:id', requireAuth, async (req, res) => {
             ? synthesizeRoundsFromStages(tournament.stages)
             : tournament.rounds
         : [];
-      return res.json({
+      return sendVersionedJson(req, res, {
         ...tournament,
         rounds,
       });
     }
     if (tournament.status === 'draft') return res.status(403).json({ error: 'Tournament not accessible' });
-    return res.json(safeSpectatorTournament(tournament, req.auth!.id, includeRounds));
+    return sendVersionedJson(req, res, safeSpectatorTournament(tournament, req.auth!.id, includeRounds));
   } catch (error) {
     if (error instanceof PublicProjectionUnavailable) return res.status(error.statusCode).json({ error: error.message });
     console.error('Tournament lookup failed:', error);
@@ -2058,7 +2077,7 @@ app.get('/api/tournaments/:id/progress', requireAuth, async (req, res) => {
         if (loaded.data.status === 'draft') throw new PublicProjectionUnavailable(403, 'Tournament not accessible');
         return publicProgressProjection(loaded.data);
       });
-      return res.json(projection);
+      return sendVersionedJson(req, res, projection);
     }
     const ownerTournament = await ownedTournament(tournamentId, req.auth!.id);
     const tournamentResult = ownerTournament
@@ -2078,7 +2097,7 @@ app.get('/api/tournaments/:id/progress', requireAuth, async (req, res) => {
 
     const allPairings = getAllTournamentPairings(tournament);
     const view = normalizeToMultiStageView(tournament);
-    return res.json({
+    return sendVersionedJson(req, res, {
       tournamentId: tournament.tournamentId,
       format: tournament.format,
       status: tournament.status,
@@ -2174,7 +2193,7 @@ app.get('/api/tournaments/:id/stages', requireAuth, async (req, res) => {
         if (loaded.data.status === 'draft') throw new PublicProjectionUnavailable(403, 'Tournament not accessible');
         return publicStagesProjection(loaded.data, compact);
       });
-      return res.json(projection);
+      return sendVersionedJson(req, res, projection);
     }
     const tournament = isFixture
       ? getQaFixture(tournamentId)!
@@ -2207,7 +2226,7 @@ app.get('/api/tournaments/:id/stages', requireAuth, async (req, res) => {
     const completedPairings = allPairings.filter(p => p.status === 'completed').length;
     const pendingTiebreakers = allPairings.filter(p => p.status === 'pending_tiebreaker').length;
 
-    return res.json({
+    return sendVersionedJson(req, res, {
       tournamentId: tournament.tournamentId,
       format: tournament.format,
       status: tournament.status,

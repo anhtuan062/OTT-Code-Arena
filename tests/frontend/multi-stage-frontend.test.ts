@@ -6,6 +6,27 @@ async function source(file: string): Promise<string> {
 }
 
 describe('Multi-stage frontend foundation', () => {
+  it('uses authenticated conditional validators for background detail polling', async () => {
+    const [app, api, state] = await Promise.all([source('app.js'), source('js/api.js'), source('js/state.js')]);
+    expect(app).toContain("conditional: { key: `tournament:${tournamentId}:progress` }");
+    expect(app).toContain("conditional: { key: `tournament:${tournamentId}:stages:compact` }");
+    expect(app).toContain("conditional: { key: `tournament:${tournamentId}:detail` }");
+    expect(api).toContain("headers['If-None-Match'] = cached.etag");
+    expect(api).toContain('response.status === 304 && cached');
+    expect(api).toContain('state.authRevision}:${state.user?.id');
+    expect(state).toContain('conditionalResponseCache: new Map()');
+  });
+
+  it('stops hidden-tab timers, refreshes on visibility return, and slows paused polling only', async () => {
+    const tournaments = await source('js/tournaments.js');
+    expect(tournaments).toContain('MULTI_STAGE_POLL_RUNNING_INTERVAL_MS = 7000');
+    expect(tournaments).toContain('MULTI_STAGE_POLL_PAUSED_INTERVAL_MS = 15000');
+    expect(tournaments).toContain("document.addEventListener('visibilitychange'");
+    expect(tournaments).toContain('if (document.hidden) return;');
+    expect(tournaments).toContain('void refreshTournamentDetail();');
+    expect(tournaments).not.toContain('if (document.hidden) { scheduleMultiStagePolling');
+  });
+
   it('keeps legacy rendering and gates the dedicated renderer by multi_stage', async () => {
     const app = await source('app.js');
     expect(app).toContain('await loadMultiStageTournamentDetail(tournamentId, authRevision, viewRevision)');

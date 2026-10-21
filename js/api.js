@@ -1,12 +1,20 @@
 async function request(path, options = {}) {
   const method = (options.method || 'GET').toUpperCase();
-  const headers = { Accept: 'application/json', ...options.headers };
-  if (options.body !== undefined && !headers['Content-Type']) headers['Content-Type'] = 'application/json';
+  const conditional = options.conditional;
+  const fetchOptions = { ...options };
+  delete fetchOptions.conditional;
+  const conditionalKey = conditional?.key
+    ? `${state.authRevision}:${state.user?.id || 'anonymous'}:${state.user?.role || 'anonymous'}:${conditional.key}`
+    : null;
+  const cached = conditionalKey ? state.conditionalResponseCache.get(conditionalKey) : null;
+  const headers = { Accept: 'application/json', ...fetchOptions.headers };
+  if (cached?.etag) headers['If-None-Match'] = cached.etag;
+  if (fetchOptions.body !== undefined && !headers['Content-Type']) headers['Content-Type'] = 'application/json';
   if (state.csrfToken && !['GET', 'HEAD', 'OPTIONS'].includes(method)) headers['x-csrf-token'] = state.csrfToken;
   let response;
   try {
     response = await fetch(`${API_URL}${path}`, {
-      ...options,
+      ...fetchOptions,
       method,
       headers,
       credentials: 'same-origin',
@@ -14,6 +22,12 @@ async function request(path, options = {}) {
     });
   } catch {
     throw new Error('Không thể kết nối. Hãy kiểm tra mạng và thử lại.');
+  }
+  if (response.status === 304 && cached) {
+    cached.lastAccess = Date.now();
+    state.conditionalResponseCache.delete(conditionalKey);
+    state.conditionalResponseCache.set(conditionalKey, cached);
+    return cached.body;
   }
   let body = null;
   if (response.status !== 204) {
@@ -26,6 +40,17 @@ async function request(path, options = {}) {
     error.status = response.status;
     error.payload = body;
     throw error;
+  }
+  if (conditionalKey && response.headers.get('etag')) {
+    state.conditionalResponseCache.delete(conditionalKey);
+    state.conditionalResponseCache.set(conditionalKey, {
+      etag: response.headers.get('etag'), body, lastAccess: Date.now(),
+    });
+    while (state.conditionalResponseCache.size > 16) {
+      const oldest = state.conditionalResponseCache.keys().next().value;
+      if (oldest === undefined) break;
+      state.conditionalResponseCache.delete(oldest);
+    }
   }
   return body;
 }

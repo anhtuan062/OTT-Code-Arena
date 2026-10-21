@@ -3805,6 +3805,8 @@ function stopMultiStagePolling() {
   const multiStage = state.multiStage;
   if (!multiStage) return;
   if (multiStage.pollTimer) window.clearTimeout(multiStage.pollTimer);
+  if (multiStage.visibilityHandler) document.removeEventListener('visibilitychange', multiStage.visibilityHandler);
+  multiStage.visibilityHandler = null;
   if (multiStage.abortController) multiStage.abortController.abort();
   if (multiStage.pairingController) multiStage.pairingController.abort();
   multiStage.pollTimer = null;
@@ -3812,6 +3814,9 @@ function stopMultiStagePolling() {
   multiStage.pairingController = null;
   multiStage.requestToken += 1;
 }
+
+const MULTI_STAGE_POLL_RUNNING_INTERVAL_MS = 7000;
+const MULTI_STAGE_POLL_PAUSED_INTERVAL_MS = 15000;
 
 function multiStageNumber(value) {
   return new Intl.NumberFormat('vi-VN').format(Number(value) || 0);
@@ -5546,11 +5551,27 @@ function renderMultiStageError(error, retry) {
 function scheduleMultiStagePolling(tournamentId, authRevision, viewRevision) {
   const multiStage = state.multiStage;
   if (multiStage.pollTimer || !['running', 'paused'].includes(state.detailStatus)) return;
+  if (!multiStage.visibilityHandler) {
+    multiStage.visibilityHandler = () => {
+      if (document.hidden || !['running', 'paused'].includes(state.detailStatus)
+        || !isCurrentView('tournament-detail', authRevision, viewRevision, tournamentId)) return;
+      if (multiStage.pollTimer) {
+        window.clearTimeout(multiStage.pollTimer);
+        multiStage.pollTimer = null;
+      }
+      if (!multiStage.abortController) void refreshTournamentDetail();
+    };
+    document.addEventListener('visibilitychange', multiStage.visibilityHandler);
+  }
+  if (document.hidden) return;
+  const delay = state.detailStatus === 'paused'
+    ? MULTI_STAGE_POLL_PAUSED_INTERVAL_MS
+    : MULTI_STAGE_POLL_RUNNING_INTERVAL_MS;
   multiStage.pollTimer = window.setTimeout(() => {
     multiStage.pollTimer = null;
-    if (document.hidden) { scheduleMultiStagePolling(tournamentId, authRevision, viewRevision); return; }
+    if (document.hidden) return;
     if (isCurrentView('tournament-detail', authRevision, viewRevision, tournamentId)) void refreshTournamentDetail();
-  }, 7000);
+  }, delay);
 }
 
 async function loadMultiStageTournamentDetail(tournamentId, authRevision, viewRevision) {
@@ -5574,14 +5595,20 @@ async function loadMultiStageTournamentDetail(tournamentId, authRevision, viewRe
   const controller = new AbortController();
   multiStage.abortController = controller;
   try {
-    const progress = await request(`/tournaments/${tournamentId}/progress`, { signal: controller.signal });
+    const progress = await request(`/tournaments/${tournamentId}/progress`, {
+      signal: controller.signal,
+      conditional: { key: `tournament:${tournamentId}:progress` },
+    });
     if (token !== multiStage.requestToken || controller.signal.aborted || !isCurrentView('tournament-detail', authRevision, viewRevision, tournamentId)) return true;
     if (progress.isLegacy || progress.format !== 'multi_stage') {
       multiStage.loadedTournamentId = null;
       multiStage.loadedViewRevision = null;
       return false;
     }
-    const compact = await request(`/tournaments/${tournamentId}/stages?compact=true`, { signal: controller.signal });
+    const compact = await request(`/tournaments/${tournamentId}/stages?compact=true`, {
+      signal: controller.signal,
+      conditional: { key: `tournament:${tournamentId}:stages:compact` },
+    });
     if (token !== multiStage.requestToken || controller.signal.aborted || !isCurrentView('tournament-detail', authRevision, viewRevision, tournamentId)) return true;
     const dataSignature = JSON.stringify({
       progress: progress.progress,
@@ -5600,7 +5627,10 @@ async function loadMultiStageTournamentDetail(tournamentId, authRevision, viewRe
     multiStage.activeStageId = multiStage.stages.some(stage => stage.stageId === selectedStageId)
       ? stageSelection
       : progress.currentStage?.stageId || multiStage.stages.find(stage => stage.regions?.length)?.stageId || multiStage.stages[0]?.stageId || null;
-    const tournament = await request(`/tournaments/${tournamentId}`, { signal: controller.signal });
+    const tournament = await request(`/tournaments/${tournamentId}`, {
+      signal: controller.signal,
+      conditional: { key: `tournament:${tournamentId}:detail` },
+    });
     if (token !== multiStage.requestToken || controller.signal.aborted || !isCurrentView('tournament-detail', authRevision, viewRevision, tournamentId)) return true;
     state.currentTournament = tournament;
     state.viewerParticipantIds = Array.isArray(tournament.viewerParticipantIds) ? tournament.viewerParticipantIds : [];
