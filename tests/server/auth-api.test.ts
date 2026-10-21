@@ -3,7 +3,7 @@ import request from 'supertest';
 import * as fs from 'fs/promises';
 import * as os from 'os';
 import * as path from 'path';
-import { appExport, closeServer, initServer } from '../../server/index.js';
+import { appExport, closeServer, getTournamentManager, initServer } from '../../server/index.js';
 import { createControlledAccount } from '../../server/admin/role-bootstrap.js';
 import { getSharedDatabase } from '../../server/db.js';
 import { applicationMetrics } from '../../observability/metrics.js';
@@ -171,5 +171,41 @@ describe('authentication and ownership API', () => {
     expect((await other.agent.get(`/api/tournaments/${tournamentId}/standings`)).status).toBe(403);
     expect((await other.agent.get(`/api/tournaments/${tournamentId}/stats`)).status).toBe(403);
     expect((await other.agent.get(`/api/tournaments/${tournamentId}/replays/not-owned`)).status).toBe(403);
+  });
+
+  it('rechecks replay authorization when publication changes despite a cached payload', async () => {
+    const organizer = await createControlledAccount(path.join(dir, 'arena.sqlite'), 'cacheowner', 'correct horse battery staple', 'organizer');
+    const ownerAgent = request.agent(appExport);
+    const ownerLogin = await ownerAgent.post('/api/auth/login').send({ username: organizer.username, password: 'correct horse battery staple' });
+    const other = await account('cacheviewer');
+    const created = await ownerAgent.post('/api/tournaments')
+      .set('x-csrf-token', ownerLogin.body.csrfToken)
+      .send({ name: 'Replay cache publication' });
+    const tournamentId = created.body.tournamentId as string;
+    const matchId = `${tournamentId}-p-cache`;
+    const result = {
+      matchId, replayRef: matchId, pairingId: 'p-cache', participantA: 'bot-a', participantB: 'bot-b', winner: 'A',
+      completedAt: new Date().toISOString(),
+    } as any;
+    const replay = { matchId, moves: [], initialState: {}, finalState: {}, winner: 'A', terminationReason: 'unknown' };
+    const manager = getTournamentManager() as any;
+    const repository = manager.repository;
+    const tournament = (await manager.loadTournament(tournamentId)).data;
+    tournament.status = 'completed';
+    tournament.resultsPublishedAt = null;
+    tournament.rounds = [{ roundNumber: 1, pairings: [{ pairingId: 'p-cache', matchId, participantA: 'bot-a', participantB: 'bot-b', status: 'completed', matchResult: result }] }];
+    await repository.saveMatchResult(tournamentId, matchId, result, replay);
+    await repository.save(tournament);
+
+    expect((await ownerAgent.get(`/api/tournaments/${tournamentId}/replays/${matchId}`)).status).toBe(200);
+    expect((await other.agent.get(`/api/tournaments/${tournamentId}/replays/${matchId}`)).status).toBe(403);
+
+    tournament.resultsPublishedAt = new Date().toISOString();
+    await repository.save(tournament);
+    expect((await other.agent.get(`/api/tournaments/${tournamentId}/replays/${matchId}`)).status).toBe(200);
+
+    tournament.resultsPublishedAt = null;
+    await repository.save(tournament);
+    expect((await other.agent.get(`/api/tournaments/${tournamentId}/replays/${matchId}`)).status).toBe(403);
   });
 });

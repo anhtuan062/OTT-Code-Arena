@@ -58,6 +58,102 @@ export interface TournamentStorageConfig {
   indent?: number;
 }
 
+interface ReplayCacheEntry<T> {
+  value: T;
+  bytes: number;
+  lastAccess: number;
+  expiresAt: number;
+  generation: number;
+}
+
+interface ReplayVersion {
+  hash: string;
+  key: string;
+}
+
+/**
+ * Small, process-local LRU cache for validated replay payloads. The commit
+ * marker hash is part of the lookup key; writes also invalidate the match
+ * prefix so a replacement can never reuse the previous payload.
+ */
+class ReplayReadCache<T> {
+  private readonly entries = new Map<string, ReplayCacheEntry<T>>();
+  private readonly flights = new Map<string, { generation: number; promise: Promise<T> }>();
+  private readonly generations = new Map<string, number>();
+  private bytes = 0;
+
+  constructor(
+    private readonly maxEntries = 256,
+    private readonly maxBytes = 8 * 1024 * 1024,
+    private readonly ttlMs = 30_000,
+  ) {}
+
+  async getOrLoad(key: string, loader: () => Promise<T>): Promise<T> {
+    const now = Date.now();
+    const generation = this.generations.get(key) ?? 0;
+    const entry = this.entries.get(key);
+    if (entry && entry.generation === generation && entry.expiresAt > now) {
+      entry.lastAccess = now;
+      applicationMetrics.increment('cache.replay.hits');
+      return entry.value;
+    }
+    if (entry) this.remove(key, entry);
+
+    const currentFlight = this.flights.get(key);
+    if (currentFlight && currentFlight.generation === generation) {
+      applicationMetrics.increment('cache.replay.singleflight');
+      return currentFlight.promise;
+    }
+
+    applicationMetrics.increment('cache.replay.misses');
+    const loadGeneration = generation;
+    let flight!: Promise<T>;
+    flight = Promise.resolve().then(loader).then(value => {
+      if ((this.generations.get(key) ?? 0) === loadGeneration) this.set(key, value, loadGeneration);
+      return value;
+    }).finally(() => {
+      if (this.flights.get(key)?.promise === flight) this.flights.delete(key);
+    });
+    this.flights.set(key, { generation: loadGeneration, promise: flight });
+    return flight;
+  }
+
+  invalidate(prefix: string): void {
+    for (const [key, entry] of [...this.entries]) {
+      if (key.startsWith(prefix)) this.remove(key, entry);
+    }
+    for (const key of this.generations.keys()) {
+      if (key.startsWith(prefix)) this.generations.set(key, (this.generations.get(key) ?? 0) + 1);
+    }
+    for (const key of this.flights.keys()) {
+      if (key.startsWith(prefix)) this.generations.set(key, (this.generations.get(key) ?? 0) + 1);
+    }
+  }
+
+  private set(key: string, value: T, generation: number): void {
+    const serialized = JSON.stringify(value);
+    const bytes = serialized ? serialized.length * 2 : 0;
+    if (bytes > this.maxBytes) return;
+    const previous = this.entries.get(key);
+    if (previous) this.remove(key, previous);
+    const now = Date.now();
+    this.entries.set(key, { value, bytes, lastAccess: now, expiresAt: now + this.ttlMs, generation });
+    this.bytes += bytes;
+    while (this.entries.size > this.maxEntries || this.bytes > this.maxBytes) {
+      const oldest = [...this.entries.entries()].sort((a, b) => a[1].lastAccess - b[1].lastAccess)[0];
+      if (!oldest) break;
+      this.remove(oldest[0], oldest[1]);
+      applicationMetrics.increment('cache.replay.evictions');
+    }
+  }
+
+  private remove(key: string, entry: ReplayCacheEntry<T>): void {
+    if (this.entries.get(key) !== entry) return;
+    this.entries.delete(key);
+    this.bytes = Math.max(0, this.bytes - entry.bytes);
+  }
+}
+
 /**
  * File-based tournament repository
  */
@@ -66,6 +162,7 @@ export class FileTournamentRepository implements TournamentRepository {
   private indent: number;
   private readonly writeLocks = new Map<string, Promise<void>>();
   private readonly ownership: StorageOwnership;
+  private readonly replayCache = new ReplayReadCache<CommittedMatch>();
   private initialization?: Promise<void>;
   private activeWrites = 0;
   private closeRequested = false;
@@ -156,6 +253,7 @@ export class FileTournamentRepository implements TournamentRepository {
     const startedAt = performance.now();
     try {
       await this.withWriteLock(`tournament:${tournament.tournamentId}`, () => this.saveUnlocked(tournament));
+      this.replayCache.invalidate(`${tournament.tournamentId}:`);
     } finally {
       applicationMetrics.observe('persistence.write_ms', performance.now() - startedAt);
     }
@@ -286,6 +384,7 @@ export class FileTournamentRepository implements TournamentRepository {
     await this.withWriteLock(`tournament:${tournamentId}`, async () => {
       const dir = this.getTournamentDir(tournamentId);
       await fs.rm(dir, { recursive: true, force: true });
+      this.replayCache.invalidate(`${tournamentId}:`);
     });
   }
 
@@ -315,6 +414,7 @@ export class FileTournamentRepository implements TournamentRepository {
     try {
       await this.withWriteLock(`match:${tournamentId}:${matchId}`, () =>
         this.saveMatchResultUnlocked(tournamentId, matchId, result, replay));
+      this.replayCache.invalidate(`${tournamentId}:${matchId}:`);
     } finally {
       const durationMs = performance.now() - startedAt;
       applicationMetrics.observe('persistence.write_ms', durationMs);
@@ -331,6 +431,7 @@ export class FileTournamentRepository implements TournamentRepository {
         fs.rm(this.getReplayFile(tournamentId, matchId), { force: true }),
         fs.rm(this.getMatchCommitFile(tournamentId, matchId), { force: true }),
       ]);
+      this.replayCache.invalidate(`${tournamentId}:${matchId}:`);
     });
   }
 
@@ -440,7 +541,17 @@ export class FileTournamentRepository implements TournamentRepository {
     this.assertSafeId(matchId, 'match');
     const startedAt = performance.now();
     try {
-      const pair = await this.loadCommittedMatchWithHashes(tournamentId, matchId);
+      const version = await this.loadReplayVersion(tournamentId, matchId);
+      if (version === null) return null;
+      const key = `${tournamentId}:${matchId}:${version.key}`;
+      const pair = await this.replayCache.getOrLoad(key, async () => {
+        applicationMetrics.increment('cache.replay.source_reads');
+        const loaded = await this.loadCommittedMatchWithHashes(tournamentId, matchId);
+        if (!loaded || loaded.replayHash !== version.hash) {
+          throw new Error(`Inconsistent persisted replay ${matchId}: commit version changed during read`);
+        }
+        return loaded;
+      });
       return pair?.replay ?? null;
     } finally {
       applicationMetrics.observe('persistence.read_ms', performance.now() - startedAt);
@@ -453,6 +564,7 @@ export class FileTournamentRepository implements TournamentRepository {
     const resultFile = this.getMatchResultFile(tournamentId, matchId);
     const replayFile = this.getReplayFile(tournamentId, matchId);
     const commitFile = this.getMatchCommitFile(tournamentId, matchId);
+    applicationMetrics.increment('replay.persistence_reads');
     const read = async (file: string): Promise<string | null> => {
       try {
         return await fs.readFile(file, 'utf-8');
@@ -494,6 +606,32 @@ export class FileTournamentRepository implements TournamentRepository {
       throw new Error(`Inconsistent persisted match ${matchId}: result, replay, and commit marker do not match`);
     }
     return { result, replay, resultHash, replayHash };
+  }
+
+  private async loadReplayVersion(tournamentId: string, matchId: string): Promise<ReplayVersion | null> {
+    applicationMetrics.increment('replay.version_reads');
+    let data: string;
+    try {
+      data = await fs.readFile(this.getMatchCommitFile(tournamentId, matchId), 'utf-8');
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
+      throw error;
+    }
+    const commit = JSON.parse(data) as { matchId?: string; replayHash?: string };
+    const replayHash = commit.replayHash;
+    if (commit.matchId !== matchId || !/^[a-f0-9]{64}$/.test(replayHash ?? '')) {
+      throw new Error(`Invalid persisted replay commit marker ${matchId}`);
+    }
+    let stat;
+    try {
+      stat = await fs.stat(this.getReplayFile(tournamentId, matchId));
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+        throw new Error(`Incomplete persisted match ${matchId}: replay file is required`);
+      }
+      throw error;
+    }
+    return { hash: replayHash!, key: `${replayHash}:${stat.size}:${stat.mtimeMs}` };
   }
 
   /**
