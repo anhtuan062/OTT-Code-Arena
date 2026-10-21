@@ -9,6 +9,7 @@
 
 import { randomUUID, createHash } from 'crypto';
 import type { DatabaseWrapper } from '../db.js';
+import { applicationMetrics } from '../../observability/metrics.js';
 
 export interface SessionRecord {
   id: string;
@@ -38,9 +39,11 @@ export interface SessionRepository {
   deleteAllForUser(userId: string): number;
   deleteExpired(now?: string): number;
   touch(id: string): void;
+  touchIfDue(session: SessionRecord, now?: Date, minIntervalMs?: number): boolean;
 }
 
 const DEFAULT_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
+export const DEFAULT_SESSION_TOUCH_INTERVAL_MS = 60 * 1000;
 
 export class SqlSessionRepository implements SessionRepository {
   constructor(
@@ -114,6 +117,44 @@ export class SqlSessionRepository implements SessionRepository {
     this.db
       .prepare(`UPDATE sessions SET last_active_at = ? WHERE id = ?`)
       .run(new Date().toISOString(), id);
+  }
+
+  touchIfDue(
+    session: SessionRecord,
+    now = new Date(),
+    minIntervalMs = DEFAULT_SESSION_TOUCH_INTERVAL_MS,
+  ): boolean {
+    const nowMs = now.getTime();
+    const lastActiveMs = Date.parse(session.last_active_at);
+    const expiresMs = Date.parse(session.expires_at);
+    const intervalMs = Math.max(0, minIntervalMs);
+    const due = !Number.isFinite(lastActiveMs)
+      || !Number.isFinite(expiresMs)
+      || nowMs - lastActiveMs >= intervalMs
+      || expiresMs - nowMs <= intervalMs;
+
+    if (!due) {
+      applicationMetrics.increment('session.touch_skips');
+      return false;
+    }
+
+    // Preserve the session's persisted sliding window, including sessions
+    // created with a custom TTL, instead of relying on process-local state.
+    const persistedTtlMs = Number.isFinite(lastActiveMs) && Number.isFinite(expiresMs)
+      ? expiresMs - lastActiveMs
+      : this.ttlMs;
+    const nextExpiresAt = new Date(nowMs + Math.max(1, persistedTtlMs || this.ttlMs)).toISOString();
+    const result = this.db
+      .prepare(
+        `UPDATE sessions
+         SET last_active_at = ?, expires_at = ?
+         WHERE id = ? AND last_active_at = ? AND expires_at > ?`
+      )
+      .run(now.toISOString(), nextExpiresAt, session.id, session.last_active_at, now.toISOString());
+
+    if (result.changes === 1) applicationMetrics.increment('session.touch_updates');
+    else applicationMetrics.increment('session.touch_skips');
+    return result.changes === 1;
   }
 
   private map(row: SessionRow): SessionRecord {

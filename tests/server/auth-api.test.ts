@@ -5,12 +5,89 @@ import * as os from 'os';
 import * as path from 'path';
 import { appExport, closeServer, initServer } from '../../server/index.js';
 import { createControlledAccount } from '../../server/admin/role-bootstrap.js';
+import { getSharedDatabase } from '../../server/db.js';
+import { applicationMetrics } from '../../observability/metrics.js';
 
 describe('authentication and ownership API', () => {
   let dir: string;
   beforeEach(async () => { dir = path.join(os.tmpdir(), `ott-auth-${Date.now()}-${Math.random()}`); await fs.mkdir(dir); await initServer(dir); });
   afterEach(async () => { closeServer(); await fs.rm(dir, { recursive: true, force: true }); });
   async function account(name: string) { const agent = request.agent(appExport); const response = await agent.post('/api/auth/register').send({ username: name, password: 'correct horse battery staple' }); return { agent, csrf: response.body.csrfToken, response }; }
+  function sessionForUser(userId: string) {
+    return getSharedDatabase().prepare('SELECT * FROM sessions WHERE user_id = ?').get(userId) as any;
+  }
+  function setSessionActivity(userId: string, lastActiveAt: string, expiresAt: string) {
+    getSharedDatabase().prepare('UPDATE sessions SET last_active_at = ?, expires_at = ? WHERE user_id = ?').run(lastActiveAt, expiresAt, userId);
+  }
+  function counter(name: string): number { return applicationMetrics.snapshot().counters[name] ?? 0; }
+
+  it('throttles repeated authenticated GET session touches using persisted timestamps', async () => {
+    const a = await account('touchrepeat');
+    const old = new Date(Date.now() - 120_000).toISOString();
+    const future = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+    setSessionActivity(a.response.body.user.id, old, future);
+    const beforeUpdates = counter('session.touch_updates');
+    const beforeSkips = counter('session.touch_skips');
+
+    const responses = await Promise.all(Array.from({ length: 5 }, () => a.agent.get('/api/auth/me')));
+
+    expect(responses.every(response => response.status === 200)).toBe(true);
+    expect(counter('session.touch_updates') - beforeUpdates).toBe(1);
+    expect(counter('session.touch_skips') - beforeSkips).toBeGreaterThanOrEqual(4);
+  });
+
+  it('touches at the inactivity boundary and extends the persisted sliding expiry', async () => {
+    const a = await account('touchboundary');
+    const nearlyDue = new Date(Date.now() - 59_000).toISOString();
+    const originalExpiry = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+    setSessionActivity(a.response.body.user.id, nearlyDue, originalExpiry);
+    const before = sessionForUser(a.response.body.user.id);
+    expect((await a.agent.get('/api/auth/me')).status).toBe(200);
+    const notDue = sessionForUser(a.response.body.user.id);
+    expect(notDue.last_active_at).toBe(before.last_active_at);
+
+    const due = new Date(Date.now() - 61_000).toISOString();
+    setSessionActivity(a.response.body.user.id, due, originalExpiry);
+    expect((await a.agent.get('/api/auth/me')).status).toBe(200);
+    const touched = sessionForUser(a.response.body.user.id);
+    expect(new Date(touched.last_active_at).getTime()).toBeGreaterThan(new Date(due).getTime());
+    expect(new Date(touched.expires_at).getTime()).toBeGreaterThan(new Date(originalExpiry).getTime());
+  });
+
+  it('does not revive a logged-out session', async () => {
+    const a = await account('touchlogout');
+    expect((await a.agent.post('/api/auth/logout').set('x-csrf-token', a.csrf)).status).toBe(204);
+    expect((await a.agent.get('/api/auth/me')).status).toBe(401);
+    expect(sessionForUser(a.response.body.user.id)).toBeUndefined();
+  });
+
+  it('touches multiple users independently', async () => {
+    const a = await account('touchmulti');
+    const b = await account('touchmultib');
+    const old = new Date(Date.now() - 120_000).toISOString();
+    const future = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+    setSessionActivity(a.response.body.user.id, old, future);
+    setSessionActivity(b.response.body.user.id, old, future);
+    const beforeUpdates = counter('session.touch_updates');
+
+    expect((await a.agent.get('/api/auth/me')).status).toBe(200);
+    expect((await b.agent.get('/api/auth/me')).status).toBe(200);
+
+    expect(counter('session.touch_updates') - beforeUpdates).toBe(2);
+    expect(sessionForUser(a.response.body.user.id).last_active_at).not.toBe(old);
+    expect(sessionForUser(b.response.body.user.id).last_active_at).not.toBe(old);
+  });
+
+  it('uses the persisted session timestamp after server reinitialization', async () => {
+    const a = await account('touchrestart');
+    const old = new Date(Date.now() - 120_000).toISOString();
+    const future = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+    setSessionActivity(a.response.body.user.id, old, future);
+    await initServer(dir);
+
+    expect((await a.agent.get('/api/auth/me')).status).toBe(200);
+    expect(sessionForUser(a.response.body.user.id).last_active_at).not.toBe(old);
+  });
 
   it('hashes passwords, restores a session, and invalidates it at logout', async () => {
     const a = await account('alice'); expect(a.response.status).toBe(201);

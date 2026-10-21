@@ -149,7 +149,7 @@ describe('M6 progressive single-laptop API load', () => {
     expect(duplicateRequests.every(response => [201, 409].includes(response.status))).toBe(true);
 
     const baselineMemory = process.memoryUsage().rss;
-    const verified: Array<{ level: number; batchMs: number; throughputRps: number; p50: number; p95: number; p99: number; errors: number; statusCounts: Record<string, number>; updateOk: boolean; cacheHits: number; cacheMisses: number; sourceReads: number; eventLoopP95: number | null; rssDeltaMB: number; persistenceReadP95: number | null; persistenceWriteP95: number | null; persistenceCommitP95: number | null; capacity: string | undefined }> = [];
+    const verified: Array<{ level: number; batchMs: number; throughputRps: number; p50: number; p95: number; p99: number; errors: number; statusCounts: Record<string, number>; updateOk: boolean; cacheHits: number; cacheMisses: number; sourceReads: number; sessionTouchUpdates: number; sessionTouchSkips: number; eventLoopP95: number | null; rssDeltaMB: number; persistenceReadP95: number | null; persistenceWriteP95: number | null; persistenceCommitP95: number | null; capacity: string | undefined }> = [];
     let stopReason: string | null = null;
     for (const level of levels) {
       const before = applicationMetrics.snapshot();
@@ -189,6 +189,7 @@ describe('M6 progressive single-laptop API load', () => {
       const row = {
         level, batchMs, throughputRps: level / (batchMs / 1_000), p50: quantile(latencies, .5), p95: quantile(latencies, .95), p99: quantile(latencies, .99), errors, statusCounts, transportErrors, updateOk,
         cacheHits: cacheDelta('cache.projection.hits'), cacheMisses: cacheDelta('cache.projection.misses'), sourceReads: cacheDelta('cache.projection.source_reads'),
+        sessionTouchUpdates: cacheDelta('session.touch_updates'), sessionTouchSkips: cacheDelta('session.touch_skips'),
         eventLoopP95: after.eventLoop.delayMs.p95, rssDeltaMB: (process.memoryUsage().rss - baselineMemory) / (1024 * 1024),
         persistenceReadP95: after.histograms['persistence.read_ms']?.p95 ?? null,
         persistenceWriteP95: after.histograms['persistence.write_ms']?.p95 ?? null,

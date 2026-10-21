@@ -14,7 +14,7 @@ import { closeSharedDatabase, initializeDatabase, setSharedDatabase } from './db
 import { SqlBotRepository, type BotRecord } from './repositories/bot-repository.js';
 import { SqlBotRevisionRepository, SUPPORTED_SOURCE_RUNTIMES, MAX_SOURCE_BYTES, isSupportedSourceRuntime } from './repositories/bot-revision-repository.js';
 import { isUserRole, SqlUserRepository, type UserRole } from './repositories/user-repository.js';
-import { SqlSessionRepository } from './repositories/session-repository.js';
+import { DEFAULT_SESSION_TOUCH_INTERVAL_MS, SqlSessionRepository } from './repositories/session-repository.js';
 import { SqlRateLimitRepository } from './repositories/rate-limit-repository.js';
 import { SqlBotPreflightRepository } from './repositories/bot-preflight-repository.js';
 import { SqlTournamentMatchJobRepository } from './repositories/tournament-match-job-repository.js';
@@ -526,7 +526,7 @@ function requireAuth(req: express.Request, res: express.Response, next: express.
   if (!user) return res.status(401).json({ error: 'Authentication required' });
   if (!isUserRole(user.role)) return res.status(401).json({ error: 'Authentication required' });
   req.auth = { id: user.id, username: user.username, role: user.role, token, csrf: session.csrf_token };
-  sessionRepository.touch(session.id);
+  sessionRepository.touchIfDue(session, new Date(), DEFAULT_SESSION_TOUCH_INTERVAL_MS);
   next();
 }
 export function requireRole(...roles: UserRole[]): express.RequestHandler {
