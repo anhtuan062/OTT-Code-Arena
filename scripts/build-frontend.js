@@ -15,6 +15,7 @@ const moduleFiles = [
   'tournaments.js',
   'live.js',
   'replay.js',
+  'playground.js',
   'events.js'
 ];
 

@@ -32,7 +32,9 @@ import { isMultiStageTournament, getAllTournamentPairings, normalizeToMultiStage
 import type { Server } from 'node:http';
 import { BotProtocol } from '../bot-protocol/index.js';
 import { chooseSystemOpponentMove, createEngine, posToAlgebraic } from '../engine/index.js';
-import { createPracticeScenario, serializePracticeLegalMoves } from '../practice/scenarios.js';
+import { createPracticeScenario, createCustomPracticeScenario, serializePracticeLegalMoves, type PracticeScenario } from '../practice/scenarios.js';
+import { executeStrategyLocally } from '../practice/local-runner.js';
+import type { MoveOption } from '../engine/types.js';
 import { getSeriesSides } from '../tournament/series.js';
 import { applicationMetrics } from '../observability/metrics.js';
 import { ProjectionCache } from './projection-cache.js';
@@ -608,6 +610,7 @@ function waitForActivePracticeExecutions(): Promise<void> {
 
 function localizePracticeError(code: string, compilerDiagnostic: string, runtimeDiagnostic: string, exitCode: number | null): string {
   if (['EXECUTOR_ERROR', 'EXECUTOR_UNAVAILABLE', 'SANDBOX_REQUIRED'].includes(code)) return 'Không thể kết nối môi trường Docker sandbox.';
+  if (code === 'COMPILER_ERROR') return `C++ không biên dịch được: ${compilerDiagnostic}`;
   if (code === 'COMPILATION_TIMEOUT') return 'Biên dịch C++ quá thời gian cho phép.';
   if (code === 'RUNTIME_TIMEOUT') return 'Bot thực thi quá thời gian cho phép.';
   if (code === 'TIMEOUT') return 'Bot chạy quá thời gian cho phép.';
@@ -839,30 +842,47 @@ app.delete('/api/bots/:id/revisions/:revisionId', requireAuth, requireRole('comp
 
 // Execute one deterministic opening position through the configured source
 // sandbox. This does not create a match or mutate tournament state.
-app.post('/api/bots/:id/revisions/:revisionId/test', requireAuth, requireRole('competitor'), requireCsrf, async (req, res) => {
+const singleTurnTestHandler = async (req: express.Request, res: express.Response, draft: { revision: any; source: Buffer } | null = null) => {
   const practiceStarted = performance.now();
   if (shuttingDown) return res.status(503).json({ error: 'Server is shutting down' });
-  if (!sourceRevisionExecutor) return res.status(503).json({ error: 'Source revision testing requires sandbox execution to be enabled' });
-  const revision = botRevisionRepository.findOwned(routeParam(req, 'id'), routeParam(req, 'revisionId'), req.auth!.id);
+  const revision = draft?.revision || botRevisionRepository.findOwned(routeParam(req, 'id'), routeParam(req, 'revisionId'), req.auth!.id);
   if (!revision) return res.status(404).json({ error: 'Source revision not found' });
   if (!isSupportedSourceRuntime(revision.runtime_id)) return res.status(400).json({ error: 'Only C++17 and Python 3 revisions can be tested' });
-  const scenarioId = typeof req.body?.scenarioId === 'string' ? req.body.scenarioId : 'initial';
-  const scenario = createPracticeScenario(scenarioId);
+
+  let scenario: PracticeScenario | null = null;
+  let scenarioId = 'initial';
+  if (Array.isArray(req.body?.customPieces)) {
+    try {
+      scenario = createCustomPracticeScenario(req.body.customPieces);
+      scenarioId = 'custom';
+    } catch (scenarioError: any) {
+      return res.status(400).json({ error: scenarioError.message || 'Thế cờ thử nghiệm không hợp lệ.' });
+    }
+  } else {
+    scenarioId = typeof req.body?.scenarioId === 'string' ? req.body.scenarioId : 'initial';
+    scenario = createPracticeScenario(scenarioId);
+  }
   if (!scenario) return res.status(400).json({ error: 'Invalid practice scenario' });
+
   if (!allowPracticeAttempt(req.auth!.id)) return res.status(429).json({ error: 'Practice rate limit exceeded' });
   const practiceKey = `${req.auth!.id}:${revision.revision_id}`;
   if (activePracticeExecutions.has(practiceKey)) return res.status(409).json({ error: 'This revision is already being tested' });
   if (!acquirePracticeSlot(req.auth!.id)) return res.status(429).json({ error: 'Practice execution capacity is busy' });
   trackPracticeExecution(practiceKey);
   try {
-    const source = Buffer.from(await botRevisionRepository.readSource(revision), 'utf8');
+    const source = draft?.source || Buffer.from(await botRevisionRepository.readSource(revision), 'utf8');
     const executionId = `revision-practice-${randomUUID()}`;
     const request = BotProtocol.createRequest(executionId, scenario.state, scenario.legalMoves);
-    const result = await sourceRevisionExecutor.executeRevision(
-      { executionId, matchId: `practice-${scenario.id}`, turn: scenario.state.turn, player: scenario.expectedPlayer },
-      { execution: { kind: 'source-revision', competitorId: req.auth!.id, botId: revision.bot_id, revisionId: revision.revision_id, runtimeId: revision.runtime_id, sourceDigest: revision.source_digest, executionMode: revision.execution_mode, sdkVersion: revision.sdk_version ?? undefined, sdkDigest: revision.sdk_digest ?? undefined }, source },
-      request,
-    );
+    let result: any;
+    if (sourceRevisionExecutor) {
+      result = await sourceRevisionExecutor.executeRevision(
+        { executionId, matchId: `practice-${scenario.id}`, turn: scenario.state.turn, player: scenario.expectedPlayer },
+        { execution: { kind: 'source-revision', competitorId: req.auth!.id, botId: revision.bot_id, revisionId: revision.revision_id, runtimeId: revision.runtime_id, sourceDigest: revision.source_digest, executionMode: revision.execution_mode, sdkVersion: revision.sdk_version ?? undefined, sdkDigest: revision.sdk_digest ?? undefined }, source },
+        request,
+      );
+    } else {
+      result = await executeStrategyLocally(revision.runtime_id, source, request);
+    }
     const timings = { ...result.timings, practiceRequestMs: Math.round(performance.now() - practiceStarted) };
     const safeProvenance = result.provenance ? {
       compilationBackend: result.provenance.compilationBackend,
@@ -876,30 +896,15 @@ app.post('/api/bots/:id/revisions/:revisionId/test', requireAuth, requireRole('c
     if (!result.success) {
       const code = result.error?.code || 'INVALID_BOT';
       const infrastructure = ['EXECUTOR_ERROR', 'EXECUTOR_UNAVAILABLE', 'SANDBOX_REQUIRED'].includes(code);
-      const compilerDiagnostic = result.error?.message === 'C++ compilation failed'
-        ? result.stderr.trim().split(/\r?\n/).filter(Boolean).slice(-3).join(' ').replaceAll('/app/source/main.cpp', 'main.cpp').slice(0, 600)
+      const compilerDiagnostic = (result.error?.message === 'C++ compilation failed' || code === 'COMPILER_ERROR')
+        ? (result.stderr || '').trim().split(/\r?\n/).filter(Boolean).slice(-3).join(' ').replaceAll('/app/source/main.cpp', 'main.cpp').slice(0, 600)
         : '';
-      const runtimeDiagnostic = code === 'PROCESS_CRASHED' && result.error?.message.startsWith('Bot container exited with code ')
-        ? result.stderr.trim().split(/\r?\n/).filter(Boolean).slice(-3).join(' ')
+      const runtimeDiagnostic = code === 'PROCESS_CRASHED'
+        ? (result.stderr || '').trim().split(/\r?\n/).filter(Boolean).slice(-3).join(' ')
           .replaceAll('/app/source/main.cpp', 'main.cpp')
           .replaceAll('/app/bin/bot', 'bot')
           .slice(0, 600)
         : '';
-      const errorMessage = infrastructure
-        ? 'Không thể kết nối môi trường Docker sandbox.'
-        : code === 'PROCESS_CRASHED'
-          ? compilerDiagnostic
-            ? `C++ không biên dịch được: ${compilerDiagnostic}`
-            : runtimeDiagnostic
-              ? `Bot chạy lỗi trong Docker: ${runtimeDiagnostic}`
-            : result.error?.message.startsWith('Bot container exited with code ')
-              ? `Bot đã kết thúc trong môi trường Docker với mã ${result.exitCode ?? 'không xác định'}.`
-              : 'Mã nguồn không biên dịch được hoặc Bot đã kết thúc với lỗi.'
-          : code === 'EMPTY_OUTPUT'
-            ? 'Bot không trả về nước đi.'
-            : code === 'INVALID_JSON' || code === 'INVALID_RESPONSE'
-              ? 'Bot trả về dữ liệu không đúng giao thức.'
-              : 'Bot không trả về nước đi hợp lệ trong lần chạy thử.';
       return res.status(infrastructure ? 503 : 422).json({
         valid: false,
         status: 'failed',
@@ -922,7 +927,7 @@ app.post('/api/bots/:id/revisions/:revisionId/test', requireAuth, requireRole('c
       });
     }
     const selectedMove = result.response?.move;
-    const legalMove = selectedMove && scenario.legalMoves.find(move =>
+    const legalMove = selectedMove && scenario.legalMoves.find((move: MoveOption) =>
       move.pieceId === selectedMove.piece_id
       && posToAlgebraic(move.from) === selectedMove.from
       && posToAlgebraic(move.to) === selectedMove.to
@@ -972,7 +977,25 @@ app.post('/api/bots/:id/revisions/:revisionId/test', requireAuth, requireRole('c
     settlePracticeExecution(practiceKey);
     releasePracticeSlot(req.auth!.id);
   }
+};
+
+app.post('/api/bots/:id/revisions/:revisionId/test', requireAuth, requireRole('competitor'), requireCsrf, (req, res) => singleTurnTestHandler(req, res));
+
+app.post('/api/bots/draft/test', requireAuth, requireRole('competitor'), requireCsrf, async (req, res) => {
+  const source = typeof req.body?.source === 'string' ? req.body.source : '';
+  const runtimeId = typeof req.body?.runtimeId === 'string' ? req.body.runtimeId : '';
+  if (!source.trim()) return res.status(400).json({ error: 'Mã nguồn không được để trống.' });
+  if (!isSupportedSourceRuntime(runtimeId)) return res.status(400).json({ error: 'Only C++17 and Python 3 revisions can be tested' });
+  if (Buffer.byteLength(source, 'utf8') > MAX_SOURCE_BYTES) return res.status(400).json({ error: 'Mã nguồn không được vượt quá 64 KiB.' });
+  const revisionId = `draft-${randomUUID()}`;
+  const executionMode = req.body?.executionMode === 'raw' ? 'raw' : 'strategy';
+  const sdk = executionMode === 'strategy' ? await getStrategySdkIdentity(runtimeId) : undefined;
+  return singleTurnTestHandler(req, res, {
+    revision: { bot_id: 'draft-bot', revision_id: revisionId, runtime_id: runtimeId, source_digest: createHash('sha256').update(source, 'utf8').digest('hex'), execution_mode: executionMode, sdk_version: sdk?.version || null, sdk_digest: sdk?.digest || null },
+    source: Buffer.from(source, 'utf8'),
+  });
 });
+
 
 // Run an ephemeral practice match: the submitted revision plays as A against
 // the deterministic built-in system opponent as B. Nothing is persisted.

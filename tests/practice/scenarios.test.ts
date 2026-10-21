@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { createPracticeScenario, matchesPracticeSelectedMove, serializePracticeLegalMoves } from '../../practice/scenarios.js';
+import { createPracticeScenario, createCustomPracticeScenario, matchesPracticeSelectedMove, serializePracticeLegalMoves } from '../../practice/scenarios.js';
 import { canCapture, posToAlgebraic, validateState } from '@engine/index.js';
 
 describe('practice scenarios', () => {
@@ -71,4 +71,34 @@ describe('practice scenarios', () => {
     expect(matchesPracticeSelectedMove(selected, legalMoves)).toBe(true);
     expect(matchesPracticeSelectedMove({ ...selected, to: 'z0' }, legalMoves)).toBe(false);
   });
+
+  it('creates custom practice scenario with exactly 1 Player A piece and valid Player B pieces', () => {
+    const custom = createCustomPracticeScenario([
+      { player: 'A', type: 'dam', row: 4, col: 4 },
+      { player: 'B', type: 'keo', row: 4, col: 5 },
+    ]);
+    expect(custom.id).toBe('custom');
+    expect(custom.expectedPlayer).toBe('A');
+    expect(custom.legalMoves.length).toBeGreaterThan(0);
+    expect(custom.state.pieces).toHaveLength(2);
+  });
+
+  it('rejects custom practice scenario when Player A does not have exactly 1 piece', () => {
+    expect(() => createCustomPracticeScenario([
+      { player: 'B', type: 'keo', row: 4, col: 5 },
+    ])).toThrow(/đúng 1 quân của Bot A/);
+
+    expect(() => createCustomPracticeScenario([
+      { player: 'A', type: 'dam', row: 4, col: 4 },
+      { player: 'A', type: 'la', row: 2, col: 2 },
+    ])).toThrow(/đúng 1 quân của Bot A/);
+  });
+
+  it('rejects custom practice scenario with overlapping pieces', () => {
+    expect(() => createCustomPracticeScenario([
+      { player: 'A', type: 'dam', row: 4, col: 4 },
+      { player: 'B', type: 'keo', row: 4, col: 4 },
+    ])).toThrow(/trùng ô/);
+  });
 });
+

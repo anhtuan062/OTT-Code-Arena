@@ -1,0 +1,158 @@
+<!-- BOT PLAYGROUND -->
+<div id="bot-playground" class="page bot-playground-page" aria-label="Khu vực kiểm thử Bot">
+  <div class="playground-header">
+    <div class="playground-heading">
+      <p class="section-kicker">BOT ARENA PLAYGROUND</p>
+      <h1>Test thế cờ</h1>
+      <p class="dialog-copy">Thiết lập thế cờ trên bàn 9×9, gửi một lượt kiểm thử vào Bot và quan sát nước đi mà mã nguồn trả về.</p>
+    </div>
+  </div>
+
+  <div id="playground-toast" class="form-error playground-toast" role="status" aria-live="polite" hidden></div>
+
+  <div class="playground-layout">
+    <!-- CỘT TRÁI: BÀN CỜ KIỂM THỬ -->
+    <section class="playground-board-card">
+      <div class="playground-card-head">
+        <div>
+          <h2>Bàn cờ kiểm thử</h2>
+          <p id="playground-placement-hint" class="field-help">Hãy đặt đúng 1 quân của Bot A trước, sau đó có thể đặt thêm quân Bot B.</p>
+        </div>
+        <span class="playground-turn-badge">Lượt của Bot A</span>
+      </div>
+
+      <div class="playground-legend" aria-label="Chú giải bàn cờ kiểm thử">
+        <span class="playground-legend-item"><span class="legend-dot player-a"></span>Quân bạn (Bot A)</span>
+        <span class="playground-legend-item"><span class="legend-dot player-b"></span>Quân đối thủ (Bot B)</span>
+        <span class="playground-legend-item"><span class="legend-dot goal-a"></span>Mục tiêu A (i9)</span>
+        <span class="playground-legend-item"><span class="legend-dot goal-b"></span>Mục tiêu B (a1)</span>
+      </div>
+
+      <div class="playground-board-wrap">
+        <div id="playground-columns" class="replay-coordinates replay-columns" aria-hidden="true"></div>
+        <div class="replay-board-row">
+          <div id="playground-rows" class="replay-coordinates replay-rows" aria-hidden="true"></div>
+          <div id="playground-board" class="replay-board" role="grid" aria-label="Bàn cờ kiểm thử 9 x 9"></div>
+        </div>
+      </div>
+
+      <!-- POPUP / DIALOG CHỌN QUÂN CỜ KHI CLICK Ô -->
+      <div id="playground-piece-menu-backdrop" class="modal-overlay playground-menu-backdrop" hidden></div>
+      <div id="playground-piece-menu" class="playground-piece-menu" role="dialog" aria-modal="true" aria-labelledby="playground-menu-title" hidden>
+        <div class="piece-menu-head">
+          <div>
+            <span class="section-kicker">THIẾT LẬP THẾ CỜ</span>
+            <strong id="playground-menu-title">Chọn loại quân</strong>
+          </div>
+          <button id="playground-close-menu-btn" class="icon-btn modal-close" type="button" aria-label="Đóng">
+            <svg class="ui-icon" aria-hidden="true"><use href="#icon-x"></use></svg>
+          </button>
+        </div>
+        <p id="playground-menu-description" class="field-help">Chọn quân để đặt vào ô đã chọn.</p>
+        <div class="playground-menu-actions">
+          <button type="button" class="secondary-btn piece-choice-btn" data-piece-type="dam">
+            <svg class="ui-icon" aria-hidden="true"><use href="#icon-piece-dam"></use></svg>
+            <span>Đấm (Búa)</span>
+          </button>
+          <button type="button" class="secondary-btn piece-choice-btn" data-piece-type="la">
+            <svg class="ui-icon" aria-hidden="true"><use href="#icon-piece-la"></use></svg>
+            <span>Lá (Bao)</span>
+          </button>
+          <button type="button" class="secondary-btn piece-choice-btn" data-piece-type="keo">
+            <svg class="ui-icon" aria-hidden="true"><use href="#icon-piece-keo"></use></svg>
+            <span>Kéo</span>
+          </button>
+          <button id="playground-remove-piece-btn" type="button" class="danger-btn piece-remove-btn" hidden>
+            Xoá quân ô này
+          </button>
+        </div>
+      </div>
+
+      <div class="playground-presets">
+        <span class="field-label">Kịch bản mẫu:</span>
+        <div class="playground-preset-buttons">
+          <button type="button" class="secondary-btn preset-btn" data-preset="capture">Có cơ hội ăn quân</button>
+          <button type="button" class="secondary-btn preset-btn" data-preset="near-goal">Tiến gần ô đích</button>
+        </div>
+      </div>
+
+      <div class="playground-board-actions">
+        <button id="playground-clear-board" class="secondary-btn" type="button">Xoá bàn cờ</button>
+        <button id="playground-run-test" class="primary-btn" type="button">
+          <svg class="ui-icon" aria-hidden="true"><use href="#icon-play"></use></svg>
+          <span>Test 1 lượt</span>
+        </button>
+      </div>
+    </section>
+
+    <!-- CỘT PHẢI: MÃ NGUỒN BOT & KẾT QUẢ -->
+    <aside class="playground-side-panel">
+      <!-- THẺ SOẠN MÃ NGUỒN -->
+      <section class="playground-code-card">
+        <div class="playground-card-head">
+          <div>
+            <h2>Mã nguồn Bot</h2>
+            <p id="playground-bot-hint" class="field-help">Bot nhận <code>legalMoves</code> và trạng thái bàn cờ, trả về một nước đi.</p>
+          </div>
+        </div>
+
+        <div class="playground-source-picker-row">
+          <label class="playground-field-label" for="playground-bot-selector">
+            <span>Chọn Bot</span>
+            <select id="playground-bot-selector" class="input-shell">
+              <option value="">Bản nháp tự do (hoặc mã hiện tại)</option>
+            </select>
+          </label>
+          <label class="playground-field-label" for="playground-runtime-selector">
+            <span>Ngôn ngữ</span>
+            <select id="playground-runtime-selector" class="input-shell">
+              <option value="cpp">C++17</option>
+              <option value="python3">Python 3</option>
+            </select>
+          </label>
+        </div>
+
+        <div class="playground-editor-wrap">
+          <label for="playground-code" class="visually-hidden">Mã nguồn kiểm thử</label>
+          <textarea id="playground-code" class="source-editor playground-code-area" spellcheck="false" rows="13" placeholder="// Nhập hoặc dán mã Bot cần kiểm thử..."></textarea>
+        </div>
+
+        <div class="playground-editor-footer">
+          <span id="playground-code-stats" class="field-help">0 ký tự · 1 dòng</span>
+          <button id="playground-reset-code" type="button" class="secondary-btn btn-xs">Mã mẫu</button>
+        </div>
+      </section>
+
+      <!-- THẺ KẾT QUẢ KIỂM THỬ -->
+      <section id="playground-result-card" class="playground-result-card" aria-labelledby="playground-result-title">
+        <div class="playground-card-head">
+          <div>
+            <h2 id="playground-result-title">Kết quả lượt test</h2>
+            <p id="playground-result-subtitle" class="field-help">Chưa chạy kiểm thử.</p>
+          </div>
+        </div>
+        <div id="playground-result-body" class="playground-result-body" hidden>
+          <div class="playground-result-banner" id="playground-result-banner">
+            <strong id="playground-result-status-text">Nước đi hợp lệ</strong>
+            <p id="playground-result-move-text">—</p>
+          </div>
+          <dl id="playground-result-dl" class="playground-result-details"></dl>
+        </div>
+      </section>
+
+      <!-- THẺ LỊCH SỬ KIỂM THỬ TRONG PHIÊN -->
+      <section class="playground-history-card" aria-labelledby="playground-history-title">
+        <div class="playground-card-head">
+          <div>
+            <h3 id="playground-history-title">Lịch sử test trong phiên</h3>
+            <p class="field-help">Lưu tạm trên trình duyệt trong phiên làm việc hiện tại.</p>
+          </div>
+          <button id="playground-clear-history" type="button" class="secondary-btn btn-xs">Xoá lịch sử</button>
+        </div>
+        <div id="playground-history-list" class="playground-history-list">
+          <p class="practice-move-history-empty">Chưa có lần test nào.</p>
+        </div>
+      </section>
+    </aside>
+  </div>
+</div>
