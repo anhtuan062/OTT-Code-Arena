@@ -2345,21 +2345,30 @@ export class TournamentManager {
             return { success: false, error: 'Tournament results are incomplete or inconsistent' };
           }
           const replay = await this.repository.loadReplay(tournamentId, pairing.matchId!);
-          const seriesValid = record.series && replay?.series
-            && replay.series.format === record.series.format
-            && replay.series.seed === record.series.seed
-            && replay.series.winsA === record.series.winsA
-            && replay.series.winsB === record.series.winsB
-            && replay.series.winner === record.series.winner
-            && replay.series.games.length === record.series.games.length
-            && replay.series.games.every((game, index) => {
-              const expected = record.series!.games[index];
-              return expected && game.gameNumber === expected.gameNumber && game.participantA === expected.participantA &&
-                game.participantB === expected.participantB && game.winner === expected.winner &&
-                game.winnerParticipantId === expected.winnerParticipantId && game.replay.matchId === expected.matchId &&
-                game.replay.winner === expected.winner &&
-                (game.replay.finalState.winner === null || game.replay.finalState.winner === game.replay.winner);
-            });
+          let seriesValid = false;
+          if (record.series && replay?.series) {
+            const replayGames = await Promise.all(replay.series.games.map(async (game, index) => {
+              const gameMatchId = game.replay?.matchId ?? record.series?.games[index]?.matchId;
+              const storedReplay = gameMatchId
+                ? await this.repository.loadReplay(tournamentId, gameMatchId)
+                : null;
+              return { game, replay: game.replay ?? storedReplay };
+            }));
+            seriesValid = replay.series.format === record.series.format
+              && replay.series.seed === record.series.seed
+              && replay.series.winsA === record.series.winsA
+              && replay.series.winsB === record.series.winsB
+              && replay.series.winner === record.series.winner
+              && replayGames.length === record.series.games.length
+              && replayGames.every(({ game, replay: gameReplay }, index) => {
+                const expected = record.series!.games[index];
+                return Boolean(expected && gameReplay && game.gameNumber === expected.gameNumber &&
+                  game.participantA === expected.participantA && game.participantB === expected.participantB &&
+                  game.winner === expected.winner && game.winnerParticipantId === expected.winnerParticipantId &&
+                  gameReplay.matchId === expected.matchId && gameReplay.winner === expected.winner &&
+                  (gameReplay.finalState.winner === null || gameReplay.finalState.winner === gameReplay.winner));
+              });
+          }
           // A Bot forfeit has an official match winner, but the engine state
           // may correctly retain winner=null because no legal move ended the
           // board game. BO1 uses the historical checks; series additionally

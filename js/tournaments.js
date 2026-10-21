@@ -5944,6 +5944,7 @@ async function renderParticipationRequests(tournamentId, status) {
 }
 
 function renderStandings(standings, executionSummary = { completed: 0 }, viewerParticipantIds = []) {
+  executionSummary = executionSummary || { completed: 0 };
   const tbody = $('#td-standings tbody'); clear(tbody);
   const table = $('#td-standings');
   const empty = $('#td-standings-empty');
