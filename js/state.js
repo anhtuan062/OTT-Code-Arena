@@ -10,6 +10,7 @@ const state = {
   replayGameIndex: 0,
   replayMoveIndex: -1,
   modalReturnFocus: null,
+  liveModalReturnFocus: null,
   authRevision: 0,
   viewRevision: 0,
   loading: new Set(),

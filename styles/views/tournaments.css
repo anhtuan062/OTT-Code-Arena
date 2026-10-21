@@ -768,6 +768,12 @@
         max-width: none;
       }
 
+      /* The desktop toolbar gives search a fixed flex basis; release it in the
+         stacked mobile toolbar so the control keeps its intrinsic height. */
+      .tournament-toolbar .bot-search {
+        flex: 0 0 auto;
+      }
+
       .tournament-toolbar .bots-count {
         align-self: flex-start;
       }
@@ -779,6 +785,17 @@
 
       .tournaments-page .tournament-grid {
         grid-template-columns: 1fr;
+      }
+
+      /* Keep the responsive breakpoints ahead of the compact-card desktop override. */
+      body .tournaments-page .tournament-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    @media (min-width: 768px) and (max-width: 1199px) {
+      body .tournaments-page .tournament-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
       }
     }
 
@@ -1164,6 +1181,79 @@
 .regional-standings-pagination .secondary-btn { font-size: var(--font-size-caption); line-height: 1.3; }
 .tournament-detail-redesign .participant-meta,
 .tournament-detail-redesign .regional-region-meta { font-size: var(--font-size-caption); line-height: 1.3; }
+
+/* Shared modal contract: preserve each panel's own width, normalize the chrome. */
+.modal-overlay {
+  visibility: hidden;
+  box-sizing: border-box;
+  padding: 16px;
+  overscroll-behavior: contain;
+}
+.modal-overlay.open { visibility: visible; }
+.modal-box { box-sizing: border-box; min-width: 0; }
+.modal-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 16px;
+  margin-bottom: 18px;
+}
+.modal-head > :first-child { min-width: 0; }
+.modal-head h2,
+.modal-head h4 {
+  margin: 0;
+  color: var(--color-text-primary);
+  font-size: 1.25rem;
+  font-weight: 700;
+  line-height: 1.25;
+  letter-spacing: -.02em;
+  overflow-wrap: anywhere;
+}
+.modal-head .section-kicker { margin: 0 0 5px; line-height: 1.3; }
+.modal-head .dialog-copy { margin-top: 8px; }
+.modal-close,
+.modal-close.icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 44px;
+  width: 44px;
+  min-width: 44px;
+  height: 44px;
+  min-height: 44px;
+  padding: 0;
+  border: 1px solid var(--color-border);
+  border-radius: 9px;
+  background: var(--color-surface);
+  color: var(--color-text-secondary);
+  font-size: 1rem;
+  line-height: 1;
+}
+.modal-close:hover,
+.modal-close:focus-visible {
+  border-color: #a9cdb5;
+  background: #f1f8f3;
+  color: var(--color-brand-hover);
+}
+.modal-close .ui-icon,
+.modal-close .modal-close-icon { width: 18px; height: 18px; }
+.dialog-actions { align-items: center; flex-wrap: wrap; gap: 10px; }
+#live-game-result-modal { visibility: hidden; overscroll-behavior: contain; }
+#live-game-result-modal.is-visible { visibility: visible; }
+#live-game-result-modal .live-game-result-card { box-sizing: border-box; max-height: calc(100dvh - 32px); overflow-y: auto; }
+#live-game-result-close { display: inline-flex; align-items: center; justify-content: center; gap: 7px; min-height: 44px; }
+#live-game-result-close .ui-icon { width: 16px; height: 16px; }
+
+@media (max-width: 640px) {
+  .modal-overlay { align-items: flex-end; padding: 12px; }
+  .modal-head { gap: 12px; margin-bottom: 16px; }
+  .modal-head h2,
+  .modal-head h4 { font-size: 1.15rem; }
+  .modal-close,
+  .modal-close.icon-btn { flex-basis: 44px; width: 44px; }
+  #live-game-result-modal { align-items: center; padding: 12px; }
+  #live-game-result-modal .live-game-result-card { max-height: calc(100dvh - 24px); }
+}
 .regional-pairing-list { display:grid; gap:7px; }
 .regional-pairing-row { min-height:52px; padding:10px 12px; border:1px solid #edf1ed; border-radius:8px; background:#fbfcfb; }
 .regional-pairing-names { display:flex; align-items:center; gap:9px; min-width:0; }
@@ -4352,5 +4442,135 @@
 
   .tournament-detail-redesign #td-standings tbody tr.is-viewer-standing td:nth-child(-n + 2) {
     background: #f3f6ff;
+  }
+}
+
+/* Shared action control contract: keep view-specific colors, normalize interaction states. */
+.primary-btn,
+.secondary-btn,
+.danger-btn,
+.icon-btn {
+  box-sizing: border-box;
+  min-height: var(--control-height);
+  line-height: 1.25;
+}
+
+.primary-btn,
+.secondary-btn,
+.danger-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
+.primary-btn > svg,
+.secondary-btn > svg,
+.danger-btn > svg,
+.icon-btn > svg {
+  width: 18px;
+  height: 18px;
+  flex: 0 0 auto;
+}
+
+.icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  min-width: 44px;
+  height: 44px;
+  min-height: 44px;
+  padding: 0;
+  flex: 0 0 44px;
+}
+
+.primary-btn:disabled,
+.secondary-btn:disabled,
+.danger-btn:disabled,
+.icon-btn:disabled,
+.primary-btn[aria-disabled="true"],
+.secondary-btn[aria-disabled="true"],
+.danger-btn[aria-disabled="true"],
+.icon-btn[aria-disabled="true"] {
+  cursor: not-allowed;
+  opacity: .58;
+  transform: none;
+  box-shadow: none;
+}
+
+.primary-btn:disabled:hover,
+.secondary-btn:disabled:hover,
+.danger-btn:disabled:hover,
+.icon-btn:disabled:hover,
+.primary-btn[aria-disabled="true"]:hover,
+.secondary-btn[aria-disabled="true"]:hover,
+.danger-btn[aria-disabled="true"]:hover,
+.icon-btn[aria-disabled="true"]:hover {
+  transform: none;
+  box-shadow: none;
+}
+
+button.primary-btn:disabled,
+button.secondary-btn:disabled,
+button.danger-btn:disabled,
+button.icon-btn:disabled {
+  opacity: .58;
+}
+
+.bot-workspace-page .bot-source-actions button:disabled {
+  opacity: .58;
+}
+
+.secondary-btn:disabled:hover,
+.secondary-btn[aria-disabled="true"]:hover,
+.icon-btn:disabled:hover,
+.icon-btn[aria-disabled="true"]:hover {
+  background: #fff;
+  border-color: var(--border-light);
+  color: var(--text-secondary);
+}
+
+.primary-btn[aria-busy="true"],
+.secondary-btn[aria-busy="true"],
+.danger-btn[aria-busy="true"],
+.icon-btn[aria-busy="true"],
+.primary-btn.is-loading,
+.secondary-btn.is-loading,
+.danger-btn.is-loading,
+.icon-btn.is-loading {
+  cursor: wait;
+}
+
+/* Workspace action rows had a more specific 34px legacy rule; keep their
+   primary/secondary actions inside the shared control contract. */
+.bot-workspace-page .bot-source-actions button.primary-btn,
+.bot-workspace-page .bot-source-actions button.secondary-btn,
+.bot-workspace-page .bot-source-actions button.danger-btn {
+  height: auto;
+  min-height: var(--control-height);
+}
+
+@media (max-width: 640px) {
+  .primary-btn,
+  .secondary-btn,
+  .danger-btn {
+    min-height: 44px;
+  }
+
+  body .bots-page .bot-empty-action,
+  body #dashboard.dashboard-page .dashboard-empty-actions button,
+  body #dashboard.dashboard-page .dashboard-bot-empty-action,
+  body .bot-source-header .workspace-save-action,
+  body .bot-workspace-page .workspace-practice-action {
+    min-height: 44px;
+  }
+
+  .bot-workspace-page .bot-source-actions button.primary-btn,
+  .bot-workspace-page .bot-source-actions button.secondary-btn,
+  .bot-workspace-page .bot-source-actions button.danger-btn {
+    min-height: 44px;
   }
 }

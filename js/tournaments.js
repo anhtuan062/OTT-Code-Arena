@@ -3987,7 +3987,9 @@ function tiebreakerResolutionModal() {
   modal = create('div', { className: 'modal-overlay', attrs: { id: 'tiebreaker-resolution-modal', role: 'dialog', 'aria-modal': 'true', 'aria-labelledby': 'tiebreaker-resolution-title', 'aria-hidden': 'true' } });
   const panel = create('div', { className: 'modal-box tiebreaker-resolution-panel' });
   const header = create('div', { className: 'modal-head' });
-  header.append(create('h4', { id: 'tiebreaker-resolution-title', text: 'Phân định trận hòa' }), create('button', { className: 'modal-close', type: 'button', attrs: { 'aria-label': 'Đóng', 'data-close-modal': 'tiebreaker-resolution-modal' }, text: '×' }));
+  const close = create('button', { className: 'icon-btn modal-close', type: 'button', attrs: { 'aria-label': 'Đóng', 'data-close-modal': 'tiebreaker-resolution-modal' } });
+  close.append(icon('icon-x'));
+  header.append(create('h2', { id: 'tiebreaker-resolution-title', text: 'Phân định trận hòa' }), close);
   const body = create('div', { className: 'tiebreaker-resolution-body' });
   body.append(create('p', { className: 'tiebreaker-resolution-match' }), create('div', { className: 'tiebreaker-resolution-options', attrs: { role: 'radiogroup', 'aria-label': 'Chọn Bot thắng' } }));
   const reason = create('textarea', { className: 'input-control tiebreaker-resolution-reason', attrs: { id: 'tiebreaker-resolution-reason', rows: '4', maxlength: '500', placeholder: 'Nhập lý do phân định (bắt buộc)…' } });

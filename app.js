@@ -189,6 +189,7 @@ const state = {
   replayGameIndex: 0,
   replayMoveIndex: -1,
   modalReturnFocus: null,
+  liveModalReturnFocus: null,
   authRevision: 0,
   viewRevision: 0,
   loading: new Set(),
@@ -462,7 +463,14 @@ function openModal(id) {
   modal.setAttribute('aria-hidden', 'false');
   document.body.classList.add('modal-open');
   const focusable = getModalFocusable(modal)[0];
-  if (focusable instanceof HTMLElement) focusable.focus();
+  if (focusable && typeof focusable.focus === 'function') {
+    focusable.focus();
+    const restoreEntryFocus = () => {
+      if (modal.classList.contains('open') && !modal.contains(document.activeElement)) focusable.focus();
+    };
+    if (typeof globalThis.requestAnimationFrame === 'function') globalThis.requestAnimationFrame(restoreEntryFocus);
+    if (typeof globalThis.setTimeout === 'function') globalThis.setTimeout(restoreEntryFocus, 50);
+  }
 }
 
 function getModalFocusable(modal) {
@@ -499,7 +507,7 @@ function closeModal(id) {
 
 function trapModalFocus(event) {
   if (event.key !== 'Tab') return;
-  const modal = document.querySelector('.modal-overlay.open');
+  const modal = document.querySelector('.modal-overlay.open, #live-game-result-modal.is-visible');
   if (!modal) return;
   const focusable = getModalFocusable(modal);
   if (!focusable.length) return;
@@ -1859,6 +1867,11 @@ function renderRevisionList() {
     const technical = create('details', { className: 'bot-revision-technical' });
     technical.appendChild(create('summary', { text: 'Chi tiết kỹ thuật' }));
     if (revision.sourceDigest) technical.appendChild(create('div', { className: 'bot-revision-digest', text: `Mã nguồn · ${String(revision.sourceDigest).slice(0, 12)}…` }));
+    if (revision.githubRepositoryUrl || revision.githubCommitSha) {
+      const repository = revision.githubRepositoryUrl ? ` · ${revision.githubRepositoryUrl}` : '';
+      const commit = revision.githubCommitSha ? ` · commit ${String(revision.githubCommitSha).slice(0, 12)}…` : '';
+      technical.appendChild(create('div', { className: 'bot-revision-digest bot-revision-github', text: `Nguồn GitHub${repository}${commit}` }));
+    }
     if (revision.executionMode) technical.appendChild(create('div', { className: 'bot-revision-digest', text: `Chế độ: ${revision.executionMode === 'strategy' ? 'Strategy SDK' : 'Mã nguồn trực tiếp'}` }));
     if (revision.sdkVersion) technical.appendChild(create('div', { className: 'bot-revision-digest', text: `SDK ${revision.sdkVersion}${revision.sdkDigest ? ` · ${revision.sdkDigest}` : ''}` }));
     item.appendChild(technical);
@@ -2197,7 +2210,8 @@ async function submitBot() {
           $('#bot-github-url').value = '';
           setSourceDirty(false);
           await loadBotRevisions(editingBot);
-          showToast(`Đã nhập revision ${revision.githubCommitSha?.slice(0, 8) || ''} từ GitHub.`, 'success');
+          const revisionLabel = revision.githubCommitSha ? ` ${revision.githubCommitSha.slice(0, 8)}` : '';
+          showToast(`Đã nhập revision${revisionLabel} từ GitHub.`, 'success');
         } else if (state.sourceDirty && !(await saveBotSource())) throw new Error('Không thể hoàn tất việc chọn phiên bản mã nguồn.');
       } catch (error) {
         if (isBotView()) showBotFormError(error.message || 'Không thể lưu Bot hoặc phiên bản mã nguồn.');
@@ -6814,7 +6828,9 @@ function tiebreakerResolutionModal() {
   modal = create('div', { className: 'modal-overlay', attrs: { id: 'tiebreaker-resolution-modal', role: 'dialog', 'aria-modal': 'true', 'aria-labelledby': 'tiebreaker-resolution-title', 'aria-hidden': 'true' } });
   const panel = create('div', { className: 'modal-box tiebreaker-resolution-panel' });
   const header = create('div', { className: 'modal-head' });
-  header.append(create('h4', { id: 'tiebreaker-resolution-title', text: 'Phân định trận hòa' }), create('button', { className: 'modal-close', type: 'button', attrs: { 'aria-label': 'Đóng', 'data-close-modal': 'tiebreaker-resolution-modal' }, text: '×' }));
+  const close = create('button', { className: 'icon-btn modal-close', type: 'button', attrs: { 'aria-label': 'Đóng', 'data-close-modal': 'tiebreaker-resolution-modal' } });
+  close.append(icon('icon-x'));
+  header.append(create('h2', { id: 'tiebreaker-resolution-title', text: 'Phân định trận hòa' }), close);
   const body = create('div', { className: 'tiebreaker-resolution-body' });
   body.append(create('p', { className: 'tiebreaker-resolution-match' }), create('div', { className: 'tiebreaker-resolution-options', attrs: { role: 'radiogroup', 'aria-label': 'Chọn Bot thắng' } }));
   const reason = create('textarea', { className: 'input-control tiebreaker-resolution-reason', attrs: { id: 'tiebreaker-resolution-reason', rows: '4', maxlength: '500', placeholder: 'Nhập lý do phân định (bắt buộc)…' } });
@@ -9389,8 +9405,14 @@ function showLiveGameResultModal(snapshot, completedGame = null) {
   if (close) close.hidden = transition;
   const modal = $('#live-game-result-modal');
   if (modal) {
+    if (!modal.classList.contains('is-visible')) {
+      state.liveModalReturnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    }
     modal.classList.add('is-visible');
     modal.setAttribute('aria-hidden', 'false');
+    document.body.classList.add('modal-open');
+    const closeButton = $('#live-game-result-close');
+    if (closeButton && !closeButton.hidden) closeButton.focus();
   }
 }
 
@@ -9400,6 +9422,9 @@ function hideLiveGameResultModal() {
     modal.classList.remove('is-visible');
     modal.setAttribute('aria-hidden', 'true');
   }
+  if (state.liveModalReturnFocus?.isConnected) state.liveModalReturnFocus.focus();
+  state.liveModalReturnFocus = null;
+  if (!document.querySelector('.modal-overlay.open')) document.body.classList.remove('modal-open');
 }
 
 function closeLiveGameResultModal() {
@@ -10728,11 +10753,13 @@ function bindEvents() {
    });
   on('#close-replay', 'click', closeReplay); on('#btn-replay-play', 'click', toggleReplayPlayback); on('#replay-retry', 'click', retryReplay); on('#replay-speed', 'change', event => { state.replaySpeed = Number(event.target.value); if (state.replayPlaybackActive) { stopReplayPlayback(); toggleReplayPlayback(); } }); on('#replay-scrubber', 'input', event => { stopReplayPlayback(); goToReplayTurn(Number(event.target.value)); }); on('#new-tourney-name', 'input', () => { $('#new-tourney-name').setAttribute('aria-invalid', 'false'); $('#tournament-form-error').hidden = true; }); on('#submit-tournament', 'click', () => void submitNewTournament()); on('#submit-registration', 'click', () => void submitTournamentRegistration());
   on('#live-game-result-close', 'click', closeLiveGameResultModal);
+  on('#live-game-result-modal', 'click', event => { if (event.target === event.currentTarget) closeLiveGameResultModal(); });
   document.querySelectorAll('[data-close-modal]').forEach(button => on(button, 'click', () => closeModal(button.dataset.closeModal)));
   document.querySelectorAll('.modal-overlay').forEach(modal => on(modal, 'click', event => { if (event.target === modal) closeModal(modal.id); }));
   on(document, 'keydown', event => {
     if (event.key === 'Escape') {
       document.querySelectorAll('.modal-overlay.open').forEach(modal => closeModal(modal.id));
+      if (document.querySelector('#live-game-result-modal.is-visible')) closeLiveGameResultModal();
       closeMobileNavigation();
     }
     else if (state.activeView === 'replay-view' && (!(event.target instanceof Element) || !event.target.closest('input:not(#replay-scrubber), textarea, select'))) {

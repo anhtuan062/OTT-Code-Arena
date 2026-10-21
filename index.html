@@ -7534,7 +7534,7 @@
 
 
   <!-- MODALS -->
-  <div class="live-game-result-modal" id="live-game-result-modal" role="status" aria-live="polite" aria-hidden="true">
+  <div class="live-game-result-modal" id="live-game-result-modal" role="dialog" aria-modal="true" aria-labelledby="live-game-result-title" aria-describedby="live-game-result-winner" aria-live="polite" aria-hidden="true">
     <div class="live-game-result-card">
       <p class="live-game-result-kicker">Kết quả ván đấu</p>
       <h2 id="live-game-result-title">Ván đấu đã kết thúc</h2>
@@ -7546,11 +7546,11 @@
       </div>
       <p id="live-game-result-score">Tỷ số 0-0</p>
       <p id="live-game-result-next">Đang chuẩn bị ván tiếp theo</p>
-      <button id="live-game-result-close" class="secondary-btn" type="button" hidden>Đóng</button>
+      <button id="live-game-result-close" class="secondary-btn" type="button" aria-label="Đóng kết quả ván đấu" hidden><svg class="ui-icon" aria-hidden="true"><use href="#icon-x"></use></svg><span>Đóng</span></button>
     </div>
   </div>
   <div class="modal-overlay" id="bot-guide-modal" role="dialog" aria-modal="true" aria-labelledby="bot-guide-title"
-    aria-describedby="bot-guide-description">
+    aria-describedby="bot-guide-description" aria-hidden="true">
     <div class="modal-box bot-guide-modal">
       <div class="modal-head">
         <div>
@@ -7641,7 +7641,7 @@ return legal_moves[0]</pre>
     aria-describedby="practice-description" aria-hidden="true">
     <div class="modal-box practice-dialog">
       <div class="modal-head">
-        <h4 id="practice-title">Chạy thử Bot</h4><button class="modal-close" type="button"
+        <h2 id="practice-title">Chạy thử Bot</h2><button class="icon-btn modal-close" type="button"
           data-close-modal="practice-modal" aria-label="Đóng cửa sổ chạy thử"><svg class="ui-icon" aria-hidden="true"><use href="#icon-x"></use></svg></button>
       </div>
       <p class="dialog-copy" id="practice-description">Kiểm tra chiến thuật trong Docker sandbox trước khi tham gia giải đấu.</p>
@@ -7716,8 +7716,8 @@ return legal_moves[0]</pre>
     aria-describedby="delete-bot-support" aria-hidden="true">
     <div class="modal-box confirmation-dialog">
       <div class="modal-head">
-        <h4 id="delete-bot-title">Xóa Bot</h4><button class="modal-close" type="button"
-          data-close-modal="delete-bot-modal" aria-label="Đóng xác nhận xóa">×</button>
+        <h2 id="delete-bot-title">Xóa Bot</h2><button class="icon-btn modal-close" type="button"
+          data-close-modal="delete-bot-modal" aria-label="Đóng xác nhận xóa"><svg class="ui-icon" aria-hidden="true"><use href="#icon-x"></use></svg></button>
       </div>
       <p class="delete-bot-message">Bạn có chắc muốn xóa Bot «<strong id="delete-bot-name"></strong>»?</p>
       <p class="dialog-copy" id="delete-bot-support">Chỉ Bot chưa có phiên bản mã nguồn bất biến và chưa được giải đấu
@@ -7734,8 +7734,8 @@ return legal_moves[0]</pre>
     aria-describedby="delete-revision-support" aria-hidden="true">
     <div class="modal-box confirmation-dialog">
       <div class="modal-head">
-        <h4 id="delete-revision-title">Xóa phiên bản</h4><button class="modal-close" type="button"
-          data-close-modal="delete-revision-modal" aria-label="Đóng xác nhận xóa">×</button>
+        <h2 id="delete-revision-title">Xóa phiên bản</h2><button class="icon-btn modal-close" type="button"
+          data-close-modal="delete-revision-modal" aria-label="Đóng xác nhận xóa"><svg class="ui-icon" aria-hidden="true"><use href="#icon-x"></use></svg></button>
       </div>
       <p class="delete-bot-message">Bạn có chắc muốn xóa phiên bản «<strong id="delete-revision-name"></strong>»?</p>
       <p class="dialog-copy" id="delete-revision-support">Phiên bản đã xóa không thể khôi phục. Nếu đây là phiên bản đang chọn, hệ thống sẽ chuyển sang phiên bản khác trước khi xóa.</p>
@@ -7750,7 +7750,7 @@ return legal_moves[0]</pre>
     aria-describedby="tourney-dialog-description" aria-hidden="true">
     <div class="modal-box">
       <div class="modal-head">
-        <h4 id="add-tourney-title">Tạo giải đấu mới</h4><button class="modal-close" type="button"
+        <h2 id="add-tourney-title">Tạo giải đấu mới</h2><button class="icon-btn modal-close" type="button"
           data-close-modal="add-tourney-modal" aria-label="Đóng hộp thoại tạo giải đấu"><svg class="modal-close-icon" aria-hidden="true"><use href="#icon-x"></use></svg></button>
       </div>
       <p class="dialog-copy" id="tourney-dialog-description">Thiết lập giải đấu để đăng ký Bot và tổ chức các trận đấu.
@@ -7769,8 +7769,8 @@ return legal_moves[0]</pre>
     aria-labelledby="register-participant-title" aria-describedby="register-participant-description" aria-hidden="true">
     <div class="modal-box">
       <div class="modal-head">
-        <h4 id="register-participant-title">Đăng ký Bot tham gia</h4><button class="modal-close" type="button"
-          data-close-modal="register-bot-tourney-modal" aria-label="Đóng hộp thoại đăng ký người tham gia">×</button>
+        <h2 id="register-participant-title">Đăng ký Bot tham gia</h2><button class="icon-btn modal-close" type="button"
+          data-close-modal="register-bot-tourney-modal" aria-label="Đóng hộp thoại đăng ký người tham gia"><svg class="ui-icon" aria-hidden="true"><use href="#icon-x"></use></svg></button>
       </div>
       <p class="dialog-copy" id="register-participant-description">Chọn một Bot của bạn và đặt tên hiển thị cho người
         tham gia trong giải đấu.</p>
@@ -7823,8 +7823,8 @@ return legal_moves[0]</pre>
     aria-hidden="true">
     <div class="modal-box confirmation-dialog">
       <div class="modal-head">
-        <h4 id="tournament-action-title">XÁC NHẬN THAO TÁC</h4><button class="modal-close" type="button"
-          data-close-modal="tournament-action-modal" aria-label="Đóng xác nhận thao tác">×</button>
+        <h2 id="tournament-action-title">XÁC NHẬN THAO TÁC</h2><button class="icon-btn modal-close" type="button"
+          data-close-modal="tournament-action-modal" aria-label="Đóng xác nhận thao tác"><svg class="ui-icon" aria-hidden="true"><use href="#icon-x"></use></svg></button>
       </div>
       <p id="tournament-action-copy" class="dialog-copy"></p>
       <p id="tournament-action-support" class="dialog-copy"></p>

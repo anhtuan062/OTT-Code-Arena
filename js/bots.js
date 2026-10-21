@@ -490,6 +490,11 @@ function renderRevisionList() {
     const technical = create('details', { className: 'bot-revision-technical' });
     technical.appendChild(create('summary', { text: 'Chi tiết kỹ thuật' }));
     if (revision.sourceDigest) technical.appendChild(create('div', { className: 'bot-revision-digest', text: `Mã nguồn · ${String(revision.sourceDigest).slice(0, 12)}…` }));
+    if (revision.githubRepositoryUrl || revision.githubCommitSha) {
+      const repository = revision.githubRepositoryUrl ? ` · ${revision.githubRepositoryUrl}` : '';
+      const commit = revision.githubCommitSha ? ` · commit ${String(revision.githubCommitSha).slice(0, 12)}…` : '';
+      technical.appendChild(create('div', { className: 'bot-revision-digest bot-revision-github', text: `Nguồn GitHub${repository}${commit}` }));
+    }
     if (revision.executionMode) technical.appendChild(create('div', { className: 'bot-revision-digest', text: `Chế độ: ${revision.executionMode === 'strategy' ? 'Strategy SDK' : 'Mã nguồn trực tiếp'}` }));
     if (revision.sdkVersion) technical.appendChild(create('div', { className: 'bot-revision-digest', text: `SDK ${revision.sdkVersion}${revision.sdkDigest ? ` · ${revision.sdkDigest}` : ''}` }));
     item.appendChild(technical);
@@ -828,7 +833,8 @@ async function submitBot() {
           $('#bot-github-url').value = '';
           setSourceDirty(false);
           await loadBotRevisions(editingBot);
-          showToast(`Đã nhập revision ${revision.githubCommitSha?.slice(0, 8) || ''} từ GitHub.`, 'success');
+          const revisionLabel = revision.githubCommitSha ? ` ${revision.githubCommitSha.slice(0, 8)}` : '';
+          showToast(`Đã nhập revision${revisionLabel} từ GitHub.`, 'success');
         } else if (state.sourceDirty && !(await saveBotSource())) throw new Error('Không thể hoàn tất việc chọn phiên bản mã nguồn.');
       } catch (error) {
         if (isBotView()) showBotFormError(error.message || 'Không thể lưu Bot hoặc phiên bản mã nguồn.');

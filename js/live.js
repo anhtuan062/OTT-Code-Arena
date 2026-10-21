@@ -95,8 +95,14 @@ function showLiveGameResultModal(snapshot, completedGame = null) {
   if (close) close.hidden = transition;
   const modal = $('#live-game-result-modal');
   if (modal) {
+    if (!modal.classList.contains('is-visible')) {
+      state.liveModalReturnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    }
     modal.classList.add('is-visible');
     modal.setAttribute('aria-hidden', 'false');
+    document.body.classList.add('modal-open');
+    const closeButton = $('#live-game-result-close');
+    if (closeButton && !closeButton.hidden) closeButton.focus();
   }
 }
 
@@ -106,6 +112,9 @@ function hideLiveGameResultModal() {
     modal.classList.remove('is-visible');
     modal.setAttribute('aria-hidden', 'true');
   }
+  if (state.liveModalReturnFocus?.isConnected) state.liveModalReturnFocus.focus();
+  state.liveModalReturnFocus = null;
+  if (!document.querySelector('.modal-overlay.open')) document.body.classList.remove('modal-open');
 }
 
 function closeLiveGameResultModal() {

@@ -220,11 +220,13 @@ function bindEvents() {
    });
   on('#close-replay', 'click', closeReplay); on('#btn-replay-play', 'click', toggleReplayPlayback); on('#replay-retry', 'click', retryReplay); on('#replay-speed', 'change', event => { state.replaySpeed = Number(event.target.value); if (state.replayPlaybackActive) { stopReplayPlayback(); toggleReplayPlayback(); } }); on('#replay-scrubber', 'input', event => { stopReplayPlayback(); goToReplayTurn(Number(event.target.value)); }); on('#new-tourney-name', 'input', () => { $('#new-tourney-name').setAttribute('aria-invalid', 'false'); $('#tournament-form-error').hidden = true; }); on('#submit-tournament', 'click', () => void submitNewTournament()); on('#submit-registration', 'click', () => void submitTournamentRegistration());
   on('#live-game-result-close', 'click', closeLiveGameResultModal);
+  on('#live-game-result-modal', 'click', event => { if (event.target === event.currentTarget) closeLiveGameResultModal(); });
   document.querySelectorAll('[data-close-modal]').forEach(button => on(button, 'click', () => closeModal(button.dataset.closeModal)));
   document.querySelectorAll('.modal-overlay').forEach(modal => on(modal, 'click', event => { if (event.target === modal) closeModal(modal.id); }));
   on(document, 'keydown', event => {
     if (event.key === 'Escape') {
       document.querySelectorAll('.modal-overlay.open').forEach(modal => closeModal(modal.id));
+      if (document.querySelector('#live-game-result-modal.is-visible')) closeLiveGameResultModal();
       closeMobileNavigation();
     }
     else if (state.activeView === 'replay-view' && (!(event.target instanceof Element) || !event.target.closest('input:not(#replay-scrubber), textarea, select'))) {

@@ -153,7 +153,14 @@ function openModal(id) {
   modal.setAttribute('aria-hidden', 'false');
   document.body.classList.add('modal-open');
   const focusable = getModalFocusable(modal)[0];
-  if (focusable instanceof HTMLElement) focusable.focus();
+  if (focusable && typeof focusable.focus === 'function') {
+    focusable.focus();
+    const restoreEntryFocus = () => {
+      if (modal.classList.contains('open') && !modal.contains(document.activeElement)) focusable.focus();
+    };
+    if (typeof globalThis.requestAnimationFrame === 'function') globalThis.requestAnimationFrame(restoreEntryFocus);
+    if (typeof globalThis.setTimeout === 'function') globalThis.setTimeout(restoreEntryFocus, 50);
+  }
 }
 
 function getModalFocusable(modal) {
@@ -190,7 +197,7 @@ function closeModal(id) {
 
 function trapModalFocus(event) {
   if (event.key !== 'Tab') return;
-  const modal = document.querySelector('.modal-overlay.open');
+  const modal = document.querySelector('.modal-overlay.open, #live-game-result-modal.is-visible');
   if (!modal) return;
   const focusable = getModalFocusable(modal);
   if (!focusable.length) return;

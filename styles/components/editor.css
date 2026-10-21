@@ -64,6 +64,32 @@
 .bot-workspace-page .editor-sandbox { font-size: .62rem; }
 .bot-workspace-page .source-editor-actions { display: none; }
 
+.bot-workspace-page .bot-revision-github {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+/* Keep the code overlay in the same viewport as the textarea. The textarea
+   owns scrolling; the input handler mirrors its offsets to this layer. */
+.bot-workspace-page .source-highlight {
+  width: 100%;
+  min-width: 100%;
+  max-width: none;
+}
+
+/* Compact controls still need a usable touch target on narrow screens. */
+.bot-workspace-page .source-tool-button {
+  min-height: 36px;
+  height: auto;
+  padding: 6px 10px;
+  line-height: 1.25;
+}
+
+@media (max-width: 560px) {
+  .bot-workspace-page .source-tools { gap: 8px; }
+  .bot-workspace-page .source-tool-button { min-height: 40px; }
+}
+
 /* Keep workspace helper copy legible after the compact editor rules above. */
 .bot-workspace-page .editor-footer .field-help,
 .bot-workspace-page .editor-footer .editor-sandbox { font-size: var(--font-size-caption); line-height: 1.3; }
