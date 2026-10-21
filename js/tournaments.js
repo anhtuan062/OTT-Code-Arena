@@ -204,6 +204,129 @@ function setRegistrationLoadingState() {
   $('#submit-registration').hidden = true;
 }
 
+const CLIENT_GITHUB_SOURCE_LIMIT = 64 * 1024;
+const CLIENT_GITHUB_REPOSITORY_CACHE_TTL_MS = 5 * 60 * 1000;
+const CLIENT_GITHUB_REPOSITORY_CACHE_MAX_ENTRIES = 64;
+// Cache only public repository metadata and root-file candidates. Source text
+// is deliberately fetched from raw.githubusercontent.com for each import so
+// the preview and revision always reflect a fresh content response.
+const clientGithubRepositoryCache = new Map();
+
+function githubRetryAfterSeconds(response) {
+  const retryAfter = response.headers.get('retry-after');
+  if (retryAfter) {
+    const seconds = Number(retryAfter);
+    if (Number.isFinite(seconds) && seconds >= 0) return Math.ceil(seconds);
+    const retryAt = Date.parse(retryAfter);
+    if (Number.isFinite(retryAt)) return Math.max(0, Math.ceil((retryAt - Date.now()) / 1000));
+  }
+  const reset = Number(response.headers.get('x-ratelimit-reset'));
+  if (Number.isFinite(reset) && reset > 0) return Math.max(0, Math.ceil(reset - Date.now() / 1000));
+  return null;
+}
+
+function githubRateLimitError(response, fallbackMessage) {
+  const retryAfterSeconds = githubRetryAfterSeconds(response);
+  if (retryAfterSeconds === null) return new Error(fallbackMessage);
+  const retryHint = retryAfterSeconds === 0
+    ? 'Bạn có thể thử lại ngay.'
+    : `Hãy thử lại sau khoảng ${retryAfterSeconds} giây.`;
+  return new Error(`GitHub đang giới hạn yêu cầu. ${retryHint}`);
+}
+
+function githubRepositoryCacheKey(parsed) {
+  return `${parsed.owner.toLowerCase()}/${parsed.repository.toLowerCase()}`;
+}
+
+function cloneGithubCandidates(candidates) {
+  return candidates.map(candidate => ({ ...candidate }));
+}
+
+function cacheGithubRepositoryCandidates(key, candidates) {
+  clientGithubRepositoryCache.delete(key);
+  clientGithubRepositoryCache.set(key, { cachedAt: Date.now(), candidates: cloneGithubCandidates(candidates) });
+  while (clientGithubRepositoryCache.size > CLIENT_GITHUB_REPOSITORY_CACHE_MAX_ENTRIES) {
+    const oldestKey = clientGithubRepositoryCache.keys().next().value;
+    if (oldestKey === undefined) break;
+    clientGithubRepositoryCache.delete(oldestKey);
+  }
+}
+
+function parseClientGithubUrl(value) {
+  let url;
+  try { url = new URL(value); } catch { throw new Error('URL GitHub không hợp lệ.'); }
+  if (url.protocol !== 'https:' || url.username || url.password || url.search || url.hash) throw new Error('URL GitHub phải dùng HTTPS và không có query hoặc credential.');
+  const parts = url.pathname.split('/').filter(Boolean);
+  if (url.hostname.toLowerCase() === 'raw.githubusercontent.com') {
+    if (parts.length !== 4 || !['main.cpp', 'main.py'].includes(parts[3])) throw new Error('URL raw phải trỏ tới main.cpp hoặc main.py ở thư mục gốc.');
+    return { kind: 'file', owner: parts[0], repository: parts[1], ref: parts[2], filename: parts[3], rawUrl: url.href, repositoryUrl: `https://github.com/${parts[0]}/${parts[1]}` };
+  }
+  if (url.hostname.toLowerCase() !== 'github.com' || (parts.length !== 2 && parts.length !== 5) || !/^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37})$/.test(parts[0]) || !/^[A-Za-z0-9_.-]+$/.test(parts[1])) throw new Error('URL GitHub phải có dạng repository hoặc file main.cpp/main.py công khai.');
+  if (parts.length === 2) return { kind: 'repository', owner: parts[0], repository: parts[1], repositoryUrl: url.href.replace(/\/$/, '') };
+  if (parts[2] !== 'blob' || !['main.cpp', 'main.py'].includes(parts[4]) || parts.length !== 5) throw new Error('URL file phải trỏ tới main.cpp hoặc main.py ở thư mục gốc.');
+  return { kind: 'file', owner: parts[0], repository: parts[1], ref: parts[3], filename: parts[4], rawUrl: `https://raw.githubusercontent.com/${parts[0]}/${parts[1]}/${encodeURIComponent(parts[3])}/${parts[4]}`, repositoryUrl: `https://github.com/${parts[0]}/${parts[1]}` };
+}
+
+async function readClientGithubText(response) {
+  if (!response.ok) {
+    if (response.status === 403 || response.status === 429) throw githubRateLimitError(response, 'Không thể tải file GitHub.');
+    if (response.status === 404) throw new Error('Không tìm thấy file GitHub công khai.');
+    throw new Error(`Không thể tải file GitHub (${response.status}).`);
+  }
+  const length = Number(response.headers.get('content-length'));
+  if (Number.isFinite(length) && length > CLIENT_GITHUB_SOURCE_LIMIT) throw new Error('Mã nguồn vượt quá giới hạn 64 KiB.');
+  if (!response.body) throw new Error('GitHub không trả về dữ liệu mã nguồn.');
+  const reader = response.body.getReader();
+  const chunks = [];
+  let total = 0;
+  while (true) {
+    const next = await reader.read();
+    if (next.done) break;
+    total += next.value.byteLength;
+    if (total > CLIENT_GITHUB_SOURCE_LIMIT) { await reader.cancel(); throw new Error('Mã nguồn vượt quá giới hạn 64 KiB.'); }
+    chunks.push(next.value);
+  }
+  const bytes = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
+  try { return new TextDecoder('utf-8', { fatal: true }).decode(bytes); }
+  catch { throw new Error('Mã nguồn GitHub phải là UTF-8 hợp lệ.'); }
+}
+
+async function githubApiJson(url) {
+  const response = await fetch(url, { credentials: 'omit', headers: { accept: 'application/vnd.github+json' } });
+  if (!response.ok) {
+    if (response.status === 403 || response.status === 429) throw githubRateLimitError(response, 'Không thể đọc repository GitHub.');
+    if (response.status === 404) throw new Error('Repository GitHub không tồn tại hoặc không công khai.');
+    throw new Error(`Không thể đọc repository GitHub (${response.status}).`);
+  }
+  return response.json();
+}
+
+async function clientGithubCandidates(parsed, runtimeId) {
+  if (parsed.kind === 'file') {
+    if (!['main.cpp', 'main.py'].includes(parsed.filename)) throw new Error('File GitHub phải là main.cpp hoặc main.py.');
+    return [{ ...parsed }];
+  }
+  const cacheKey = githubRepositoryCacheKey(parsed);
+  const cached = clientGithubRepositoryCache.get(cacheKey);
+  if (cached && Date.now() - cached.cachedAt < CLIENT_GITHUB_REPOSITORY_CACHE_TTL_MS) {
+    return cloneGithubCandidates(cached.candidates);
+  }
+  if (cached) clientGithubRepositoryCache.delete(cacheKey);
+  const metadata = await githubApiJson(`https://api.github.com/repos/${encodeURIComponent(parsed.owner)}/${encodeURIComponent(parsed.repository)}`);
+  if (metadata.private === true || typeof metadata.default_branch !== 'string') throw new Error('Repository phải công khai và có nhánh mặc định.');
+  const contents = await githubApiJson(`https://api.github.com/repos/${encodeURIComponent(parsed.owner)}/${encodeURIComponent(parsed.repository)}/contents?ref=${encodeURIComponent(metadata.default_branch)}`);
+  if (!Array.isArray(contents)) throw new Error('Không thể đọc danh sách file ở thư mục gốc.');
+  const candidates = contents.filter(item => item?.type === 'file' && item.path === item.name && ['main.cpp', 'main.py'].includes(item.name)).map(item => ({
+    kind: 'file', owner: parsed.owner, repository: parsed.repository, ref: metadata.default_branch, filename: item.name,
+    rawUrl: `https://raw.githubusercontent.com/${parsed.owner}/${parsed.repository}/${encodeURIComponent(metadata.default_branch)}/${item.name}`,
+    repositoryUrl: parsed.repositoryUrl,
+  }));
+  cacheGithubRepositoryCandidates(cacheKey, candidates);
+  return cloneGithubCandidates(candidates);
+}
+
 function openRegistrationDialog() {
   state.registrationDialogRevision += 1;
   const context = state.tournamentRegistrationContext || state.tournaments.find(item => item.tournamentId === state.tournamentId);

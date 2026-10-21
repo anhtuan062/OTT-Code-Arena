@@ -7,6 +7,45 @@ async function source(file: string): Promise<string> {
 }
 
 describe('Phase 2 Registration Management Workspace', () => {
+  it('retrieves Bot workspace GitHub source in the browser and persists only validated source', async () => {
+    const bots = await source('js/bots.js');
+    expect(bots).toContain('parseClientGithubUrl(sourceInput.githubUrl)');
+    expect(bots).toContain('clientGithubCandidates(parsed, sourceInput.runtimeId)');
+    expect(bots).toContain("fetch(selected.rawUrl, { credentials: 'omit', mode: 'cors', redirect: 'error' })");
+    expect(bots).toContain('githubRepositoryUrl');
+    expect(bots).toContain('githubCommitSha');
+    expect(bots).not.toContain('/revisions/github');
+  });
+
+  it('uses direct raw downloads and bounded browser caching for repository discovery', async () => {
+    const tournaments = await source('js/tournaments.js');
+    expect(tournaments).toContain('raw.githubusercontent.com');
+    expect(tournaments).toContain('CLIENT_GITHUB_REPOSITORY_CACHE_TTL_MS');
+    expect(tournaments).toContain('CLIENT_GITHUB_REPOSITORY_CACHE_MAX_ENTRIES');
+    expect(tournaments).toContain('return cloneGithubCandidates(cached.candidates);');
+    expect(tournaments).toContain('response.headers.get(\'retry-after\')');
+    expect(tournaments).toContain('response.headers.get(\'x-ratelimit-reset\')');
+    expect(tournaments).toContain('response.status === 403 || response.status === 429');
+    expect(tournaments).not.toContain('github.com/search');
+  });
+
+  it('keeps tournament registration limited to existing Bot and revision selection', async () => {
+    const [markup, tournaments, events, css] = await Promise.all([
+      readAssembledFrontendMarkup(), source('js/tournaments.js'), source('js/events.js'), readAssembledFrontendStyles(),
+    ]);
+    expect(markup).not.toContain('open-github-import-from-registration');
+    expect(markup).not.toContain('registration-github-import');
+    expect(markup).not.toContain('registration-github-runtime');
+    expect(markup).toContain('id="reg-bot-select"');
+    expect(markup).toContain('id="reg-revision-select"');
+    expect(tournaments).not.toContain('importGithubBotForRegistration');
+    expect(events).not.toContain('openRegistrationGithubImport');
+    expect(events).not.toContain('importGithubBotForRegistration');
+    expect(css).not.toContain('.registration-github-import');
+    expect(tournaments).toContain('void populateBotSelect();');
+    expect(tournaments).toContain('updateRegistrationRevisionSummary');
+  });
+
   it('declares organizer authorization context before rendering tournament actions', async () => {
     const tournaments = await source('js/tournaments.js');
     const start = tournaments.indexOf('async function refreshTournamentDetail()');

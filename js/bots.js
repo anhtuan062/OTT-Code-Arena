@@ -756,10 +756,8 @@ function botSourceInput() {
   const githubUrl = $('#bot-github-url')?.value.trim();
   if (!['cpp', 'python3'].includes(runtimeId)) return { error: 'Hãy chọn C++17 hoặc Python 3.', field: 'bot-source-runtime' };
   if (githubUrl) {
-    try {
-      const url = new URL(githubUrl);
-      if (url.protocol !== 'https:' || url.hostname.toLowerCase() !== 'github.com' || url.username || url.password || url.search || url.hash || url.pathname.split('/').filter(Boolean).length !== 2) throw new Error();
-    } catch { return { error: 'URL GitHub phải có dạng https://github.com/owner/repository.', field: 'bot-github-url' }; }
+    try { parseClientGithubUrl(githubUrl); }
+    catch { return { error: 'URL GitHub không hợp lệ hoặc không trỏ tới main.cpp/main.py công khai.', field: 'bot-github-url' }; }
     return { runtimeId, githubUrl };
   }
   if (!source.trim()) return { error: 'Mã nguồn không được để trống.', field: 'bot-source-editor' };
@@ -770,12 +768,22 @@ function botSourceInput() {
 }
 
 async function saveGitHubRevision(bot, sourceInput) {
-  const revision = await api(`/bots/${bot.id}/revisions/github`, {
-    method: 'POST',
-    body: JSON.stringify({ githubUrl: sourceInput.githubUrl, runtimeId: sourceInput.runtimeId, executionMode: state.sourceExecutionMode }),
-  });
+  const parsed = parseClientGithubUrl(sourceInput.githubUrl);
+  const candidates = await clientGithubCandidates(parsed, sourceInput.runtimeId);
+  const compatible = candidates.filter(item => item.filename === (sourceInput.runtimeId === 'cpp' ? 'main.cpp' : 'main.py'));
+  if (!compatible.length) throw new Error(`Repository không có file ${sourceInput.runtimeId === 'cpp' ? 'main.cpp' : 'main.py'} ở thư mục gốc.`);
+  if (parsed.kind === 'file' && compatible[0].filename !== parsed.filename) throw new Error('File GitHub không khớp với ngôn ngữ đã chọn.');
+  const selected = compatible[0];
+  const source = await readClientGithubText(await fetch(selected.rawUrl, { credentials: 'omit', mode: 'cors', redirect: 'error' }));
+  if (!source.trim()) throw new Error('File mã nguồn GitHub đang trống.');
+  const syntaxError = sourceSyntaxCheck(source, sourceInput.runtimeId);
+  if (syntaxError) throw new Error(syntaxError);
+  const body = { source, runtimeId: sourceInput.runtimeId, executionMode: state.sourceExecutionMode };
+  const commitSha = /^[0-9a-f]{40}$/i.test(selected.ref) ? selected.ref.toLowerCase() : null;
+  if (selected.repositoryUrl && commitSha) Object.assign(body, { githubRepositoryUrl: selected.repositoryUrl, githubCommitSha: commitSha });
+  const revision = await api(`/bots/${bot.id}/revisions`, { method: 'POST', body: JSON.stringify(body) });
   await api(`/bots/${bot.id}/revisions/${revision.revisionId}/select`, { method: 'POST', body: JSON.stringify({}) });
-  return revision;
+  return { ...revision, githubCommitSha: commitSha };
 }
 
 function openBotDialog(bot = null) {
