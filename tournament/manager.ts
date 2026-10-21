@@ -112,6 +112,9 @@ function createMatchId(tournamentId: string, pairingId: string): string {
 
 function classifyMatchExecutionFailure(error: unknown): { code: PairingFailureCode; reason: string } {
   const message = error instanceof Error ? error.message : String(error);
+  if (/saveMatchResult|persistence/i.test(message)) {
+    return { code: 'PERSISTENCE', reason: 'Match result persistence failed' };
+  }
   if (/docker|container|runtime image|sandbox/i.test(message)) {
     return { code: 'DOCKER_INFRASTRUCTURE', reason: 'Docker execution infrastructure failed' };
   }

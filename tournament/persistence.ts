@@ -614,7 +614,25 @@ export class FileTournamentRepository implements TournamentRepository {
     try {
       data = await fs.readFile(this.getMatchCommitFile(tournamentId, matchId), 'utf-8');
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+        const [resultExists, replayExists] = await Promise.all([
+          fs.access(this.getMatchResultFile(tournamentId, matchId)).then(() => true).catch(accessError => {
+            if ((accessError as NodeJS.ErrnoException).code === 'ENOENT') return false;
+            throw accessError;
+          }),
+          fs.access(this.getReplayFile(tournamentId, matchId)).then(() => true).catch(accessError => {
+            if ((accessError as NodeJS.ErrnoException).code === 'ENOENT') return false;
+            throw accessError;
+          }),
+        ]);
+        if (resultExists !== replayExists) {
+          throw new Error(`Incomplete persisted match ${matchId}: result, replay, and commit marker are required`);
+        }
+        if (resultExists || replayExists) {
+          throw new Error(`Uncommitted persisted match ${matchId}: commit marker is required`);
+        }
+        return null;
+      }
       throw error;
     }
     const commit = JSON.parse(data) as { matchId?: string; replayHash?: string };

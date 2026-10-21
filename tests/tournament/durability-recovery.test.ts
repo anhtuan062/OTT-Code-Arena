@@ -189,6 +189,12 @@ function createDummyParticipants(count: number): TournamentParticipant[] {
   }));
 }
 
+const EXPECTED_256_PAIRINGS = 383;
+// The deterministic executor gives each BO2/BO3 pairing a decisive second game.
+const EXPECTED_256_GAME_EXECUTIONS = EXPECTED_256_PAIRINGS * 2;
+// Each pairing persists two game checkpoints plus one aggregate series result.
+const EXPECTED_256_RESULT_WRITES = EXPECTED_256_PAIRINGS * 3;
+
 describe('Phase 3E - Tournament Durability & Recovery Validation', () => {
   let tempDir: string;
   let repository: DurabilityTrackingRepository;
@@ -256,7 +262,7 @@ describe('Phase 3E - Tournament Durability & Recovery Validation', () => {
         expect(runRes.success).toBe(true);
 
         const durationMs = Date.now() - startTime;
-        const throughput = Number((383 / (durationMs / 1000)).toFixed(2));
+        const throughput = Number((EXPECTED_256_PAIRINGS / (durationMs / 1000)).toFixed(2));
         const finalMem = process.memoryUsage();
         const heapUsedMB = Number((finalMem.heapUsed / (1024 * 1024)).toFixed(2));
 
@@ -269,10 +275,9 @@ describe('Phase 3E - Tournament Durability & Recovery Validation', () => {
           matchWrites: cycleRepo.saveMatchResultCount - writesBefore,
           heapUsedMB,
         });
-
         // Verification for each cycle
-        expect(executor.executedMatches.length).toBe(383);
-        expect(new Set(executor.executedMatches).size).toBe(383);
+        expect(executor.executedMatches.length).toBe(EXPECTED_256_GAME_EXECUTIONS);
+        expect(new Set(executor.executedMatches).size).toBe(EXPECTED_256_GAME_EXECUTIONS);
 
         const finished = (await cycleRepo.load(tournamentId))!;
         expect(finished.status).toBe('completed');
@@ -290,10 +295,10 @@ describe('Phase 3E - Tournament Durability & Recovery Validation', () => {
         );
       }
 
-      // Verify throughput is robust (> 15 matches/s)
+      // Verify pairing throughput is robust (> 15 pairings/s)
       for (const m of cycleMetrics) {
         expect(m.throughput).toBeGreaterThan(15);
-        expect(m.matchWrites).toBe(383);
+        expect(m.matchWrites).toBe(EXPECTED_256_RESULT_WRITES);
       }
 
       // Verify heap stability: Cycle 3 heapUsed should not experience runaway growth (> 350 MB)
@@ -366,7 +371,7 @@ describe('Phase 3E - Tournament Durability & Recovery Validation', () => {
       expect(preCrashTourney.stages![1]!.status).toBe('pending'); // Group Stage must be pending
 
       const matchesBeforeRestart = executor1.executedMatches.length;
-      expect(matchesBeforeRestart).toBe(32 + 20 + 10); // 62 matches completed
+      expect(matchesBeforeRestart).toBe((32 + 20 + 10) * 2); // 62 pairings, 2 games each
 
       // 5. SERVER CRASH & REBOOT: New TournamentManager instance pointing to the same repository
       const executor2 = new DurabilityMockExecutor();
@@ -403,8 +408,8 @@ describe('Phase 3E - Tournament Durability & Recovery Validation', () => {
       const finishRes = await manager2.runAllMatches(tournamentId);
       expect(finishRes.success).toBe(true);
 
-      // Total matches executed: 62 (first run) + 321 (resumed run) = 383
-      expect(matchesBeforeRestart + executor2.executedMatches.length).toBe(383);
+      // Total game executions: 124 (first run) + 642 (resumed run) = 766
+      expect(matchesBeforeRestart + executor2.executedMatches.length).toBe(EXPECTED_256_GAME_EXECUTIONS);
 
       const finalTourney = (await repository.load(tournamentId))!;
       expect(finalTourney.status).toBe('completed');
@@ -447,7 +452,7 @@ describe('Phase 3E - Tournament Durability & Recovery Validation', () => {
 
       const runRes = await manager.runPairingById(tournamentId, firstPairing.pairingId);
       expect(runRes.success).toBe(false);
-      expect(runRes.error).toContain('Match result persistence failed');
+      expect(runRes.error).toContain('Series execution failed: Error: INJECTED_FAULT: saveMatchResult I/O error');
 
       // Tournament must remain running, pairing must be marked failed with PERSISTENCE
       const tourneyAfterFail = (await repository.load(tournamentId))!;
@@ -492,9 +497,9 @@ describe('Phase 3E - Tournament Durability & Recovery Validation', () => {
       repository.failSaveTournamentOnCompleted = true;
 
       // runPairing will fail on tournament save after matchResult is already saved to disk
-      await expect(manager.runPairingById(tournamentId, firstPairing.pairingId)).rejects.toThrow(
-        'INJECTED_FAULT: saveTournament disk failure after match result saved'
-      );
+      const runRes = await manager.runPairingById(tournamentId, firstPairing.pairingId);
+      expect(runRes.success).toBe(false);
+      expect(runRes.error).toContain('Series execution failed: Error: INJECTED_FAULT: saveTournament disk failure after match result saved');
 
       // Verify that match result exists on disk
       const matchId = `${tournamentId}-${firstPairing.pairingId}`;
@@ -554,7 +559,9 @@ describe('Phase 3E - Tournament Durability & Recovery Validation', () => {
       const matchId = `${tournamentId}-${koPairing.pairingId}`;
 
       // Force draw in elimination match
-      executor.setOutcome(matchId, 'draw');
+      for (const gameNumber of [1, 2, 3]) {
+        executor.setOutcome(`${matchId}-g${gameNumber}`, 'draw');
+      }
       const runRes = await manager.runPairingById(tournamentId, koPairing.pairingId);
       expect(runRes.success).toBe(false);
       expect(runRes.error).toContain('tiebreaker pending');
