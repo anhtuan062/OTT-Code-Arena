@@ -21,6 +21,10 @@ describe('UX.2 role-aware navigation and dashboard', () => {
     expect(app).toContain("on(window, 'popstate'");
     expect(app).toContain('canLeaveBotWorkspace()');
   });
+  it('limits the browser unsaved-changes warning to the Bot workspace', async () => {
+    const app = await source('app.js');
+    expect(app).toContain("if (state.activeView !== 'bot-workspace' || !hasUnsavedBotWorkspaceChanges()) return;");
+  });
   it('uses role-specific dashboard API data and safe DOM rendering', async () => {
     const app = await source('app.js');
     expect(app).toContain("competitor ? '/tournaments/discoverable' : '/tournaments'");

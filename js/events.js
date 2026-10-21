@@ -236,7 +236,9 @@ function bindEvents() {
     } else trapModalFocus(event);
   }, { required: true, feature: 'global keyboard navigation' });
   on(window, 'beforeunload', event => {
-    if (!hasUnsavedBotWorkspaceChanges()) return;
+    // A draft may remain in memory after navigating to another view. The
+    // browser warning is only relevant while the editor is visible.
+    if (state.activeView !== 'bot-workspace' || !hasUnsavedBotWorkspaceChanges()) return;
     event.preventDefault();
     event.returnValue = '';
   });

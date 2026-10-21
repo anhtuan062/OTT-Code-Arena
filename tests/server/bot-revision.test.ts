@@ -35,37 +35,16 @@ describe('Bot source revisions', () => {
     await fs.rm(dir, { recursive: true, force: true });
   });
 
-  function storedZip(entries: Array<{ name: string; content: string }>): Buffer {
-    const local: Buffer[] = [];
-    const central: Buffer[] = [];
-    let offset = 0;
-    for (const entry of entries) {
-      const name = Buffer.from(entry.name);
-      const content = Buffer.from(entry.content);
-      const header = Buffer.alloc(30);
-      header.writeUInt32LE(0x04034b50, 0); header.writeUInt16LE(20, 4);
-      header.writeUInt32LE(content.length, 18); header.writeUInt32LE(content.length, 22);
-      header.writeUInt16LE(name.length, 26);
-      local.push(header, name, content);
-      const directory = Buffer.alloc(46);
-      directory.writeUInt32LE(0x02014b50, 0); directory.writeUInt16LE(20, 4); directory.writeUInt16LE(20, 6);
-      directory.writeUInt32LE(content.length, 20); directory.writeUInt32LE(content.length, 24);
-      directory.writeUInt16LE(name.length, 28); directory.writeUInt32LE(offset, 42);
-      central.push(directory, name);
-      offset += header.length + name.length + content.length;
-    }
-    const centralBytes = Buffer.concat(central);
-    const end = Buffer.alloc(22);
-    end.writeUInt32LE(0x06054b50, 0); end.writeUInt16LE(entries.length, 8); end.writeUInt16LE(entries.length, 10);
-    end.writeUInt32LE(centralBytes.length, 12); end.writeUInt32LE(offset, 16);
-    return Buffer.concat([...local, centralBytes, end]);
-  }
-
-  function mockGitHub(archive: Buffer, sha = 'a'.repeat(40)) {
+  function mockGitHub(source: string, sha = 'a'.repeat(40), filename = 'main.cpp') {
     vi.stubGlobal('fetch', vi.fn(async (url: string) => {
       if (url.includes('/repos/octo/bot/commits/')) return new Response(JSON.stringify({ sha }), { status: 200 });
+      if (url.includes('/contents/')) {
+        if (url.includes(`/contents/${filename}?ref=${sha}`)) return new Response(JSON.stringify({
+          type: 'file', name: filename, path: filename, encoding: 'base64', content: Buffer.from(source, 'utf8').toString('base64'),
+        }), { status: 200 });
+        return new Response('', { status: 404 });
+      }
       if (url.includes('/repos/octo/bot')) return new Response(JSON.stringify({ private: false, default_branch: 'main' }), { status: 200 });
-      if (url.includes('codeload.github.com')) return new Response(archive, { status: 200, headers: { 'content-length': String(archive.length) } });
       return new Response('', { status: 404 });
     }));
   }
@@ -109,12 +88,27 @@ describe('Bot source revisions', () => {
     expect((await agent.post(`/api/bots/${botId}/revisions`).set('x-csrf-token', csrf).send({ runtimeId: 'nodejs', source: 'console.log(1);' })).status).toBe(400);
   });
 
-  it('imports a public GitHub archive into the existing immutable revision store at a pinned commit', async () => {
+  it('stores client-validated GitHub provenance without fetching the supplied URL', async () => {
+    const sha = '1'.repeat(40);
+    const source = 'int main() { return 9; }\n';
+    const revision = await agent.post(`/api/bots/${botId}/revisions`).set('x-csrf-token', csrf).send({
+      runtimeId: 'cpp', source, executionMode: 'raw',
+      githubRepositoryUrl: 'https://github.com/octo/bot', githubCommitSha: sha,
+    });
+    expect(revision.status).toBe(201);
+    expect(revision.body).toMatchObject({ githubRepositoryUrl: 'https://github.com/octo/bot', githubCommitSha: sha });
+    expect((await agent.get(`/api/bots/${botId}/revisions/${revision.body.revisionId}`)).body.source).toBe(source);
+  });
+
+  it('rejects incomplete or invalid client GitHub provenance', async () => {
+    const base = { runtimeId: 'cpp', source: 'int main() { return 0; }\n' };
+    expect((await agent.post(`/api/bots/${botId}/revisions`).set('x-csrf-token', csrf).send({ ...base, githubRepositoryUrl: 'https://evil.example/repo', githubCommitSha: '2'.repeat(40) })).status).toBe(400);
+    expect((await agent.post(`/api/bots/${botId}/revisions`).set('x-csrf-token', csrf).send({ ...base, githubRepositoryUrl: 'https://github.com/octo/bot' })).status).toBe(400);
+  });
+
+  it('imports the root main.cpp through GitHub Contents API at a pinned commit', async () => {
     const sha = 'b'.repeat(40);
-    mockGitHub(storedZip([
-      { name: `octo-bot-${sha.slice(0, 7)}/`, content: '' },
-      { name: `octo-bot-${sha.slice(0, 7)}/main.cpp`, content: 'int main() { return 7; }\n' },
-    ]), sha);
+    mockGitHub('int main() { return 7; }\n', sha);
     const response = await agent.post(`/api/bots/${botId}/revisions/github`).set('x-csrf-token', csrf)
       .send({ githubUrl: 'https://github.com/octo/bot', runtimeId: 'cpp' });
     expect(response.status).toBe(201);
@@ -123,14 +117,90 @@ describe('Bot source revisions', () => {
     expect(stored.body.source).toBe('int main() { return 7; }\n');
   });
 
-  it('rejects unsafe GitHub URLs and ZIP path traversal without executing source', async () => {
+  it('imports Python main.py and selects the new immutable revision', async () => {
+    const sha = 'c'.repeat(40);
+    mockGitHub('print("ok")\n', sha, 'main.py');
+    const response = await agent.post(`/api/bots/${botId}/revisions/github`).set('x-csrf-token', csrf)
+      .send({ githubUrl: 'https://github.com/octo/bot', runtimeId: 'python3' });
+
+    expect(response.status).toBe(201);
+    expect(response.body).toMatchObject({
+      botId, runtimeId: 'python3', githubRepositoryUrl: 'https://github.com/octo/bot', githubCommitSha: sha,
+      selected: false,
+    });
+    const selected = await agent.post(`/api/bots/${botId}/revisions/${response.body.revisionId}/select`)
+      .set('x-csrf-token', csrf).send({});
+    expect(selected.status).toBe(200);
+    expect((await agent.get(`/api/bots/${botId}`)).body.currentRevisionId).toBe(response.body.revisionId);
+    expect((await agent.get(`/api/bots/${botId}/revisions/${response.body.revisionId}`)).body.source).toBe('print("ok")\n');
+  });
+
+  it('maps private, missing and rate-limited repositories without creating revisions', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.includes('/repos/private/bot')) return new Response(JSON.stringify({ private: true, default_branch: 'main' }), { status: 200 });
+      if (url.includes('/repos/missing/bot')) return new Response('', { status: 404 });
+      if (url.includes('/repos/limited/bot')) return new Response('', { status: 429 });
+      return new Response('', { status: 404 });
+    }));
+
+    const privateRepo = await agent.post(`/api/bots/${botId}/revisions/github`).set('x-csrf-token', csrf)
+      .send({ githubUrl: 'https://github.com/private/bot', runtimeId: 'cpp' });
+    const missingRepo = await agent.post(`/api/bots/${botId}/revisions/github`).set('x-csrf-token', csrf)
+      .send({ githubUrl: 'https://github.com/missing/bot', runtimeId: 'cpp' });
+    const limitedRepo = await agent.post(`/api/bots/${botId}/revisions/github`).set('x-csrf-token', csrf)
+      .send({ githubUrl: 'https://github.com/limited/bot', runtimeId: 'cpp' });
+
+    expect(privateRepo.status).toBe(404);
+    expect(missingRepo.status).toBe(404);
+    expect(limitedRepo.status).toBe(429);
+    expect((await agent.get(`/api/bots/${botId}/revisions`)).body).toEqual([]);
+  });
+
+  it('rejects missing source files, malformed Contents responses and oversized downloads', async () => {
+    mockGitHub('no bot source', 'a'.repeat(40), 'README.md');
+    const missingSource = await agent.post(`/api/bots/${botId}/revisions/github`).set('x-csrf-token', csrf)
+      .send({ githubUrl: 'https://github.com/octo/bot', runtimeId: 'cpp' });
+    expect(missingSource.status).toBe(400);
+
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.includes('/repos/octo/bot/commits/')) return new Response(JSON.stringify({ sha: 'd'.repeat(40) }), { status: 200 });
+      if (url.includes('/contents/main.cpp?ref=')) return new Response('{"type":"file","path":"main.cpp"}', { status: 200 });
+      if (url.includes('/repos/octo/bot')) return new Response(JSON.stringify({ private: false, default_branch: 'main' }), { status: 200 });
+      return new Response('', { status: 404 });
+    }));
+    const malformedContents = await agent.post(`/api/bots/${botId}/revisions/github`).set('x-csrf-token', csrf)
+      .send({ githubUrl: 'https://github.com/octo/bot', runtimeId: 'cpp' });
+    expect(malformedContents.status).toBe(422);
+
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.includes('/repos/octo/bot/commits/')) return new Response(JSON.stringify({ sha: 'e'.repeat(40) }), { status: 200 });
+      if (url.includes('/contents/main.cpp?ref=')) return new Response('too large', {
+        status: 200, headers: { 'content-length': String(256 * 1024 + 1) },
+      });
+      if (url.includes('/repos/octo/bot')) return new Response(JSON.stringify({ private: false, default_branch: 'main' }), { status: 200 });
+      return new Response('', { status: 404 });
+    }));
+    const oversizedContents = await agent.post(`/api/bots/${botId}/revisions/github`).set('x-csrf-token', csrf)
+      .send({ githubUrl: 'https://github.com/octo/bot', runtimeId: 'cpp' });
+    expect(oversizedContents.status).toBe(413);
+    expect((await agent.get(`/api/bots/${botId}/revisions`)).body).toEqual([]);
+  });
+
+  it('rejects unsafe GitHub URLs and non-root Contents paths without executing source', async () => {
     const invalid = await agent.post(`/api/bots/${botId}/revisions/github`).set('x-csrf-token', csrf)
       .send({ githubUrl: 'http://github.com/octo/bot', runtimeId: 'cpp' });
     expect(invalid.status).toBe(400);
-    mockGitHub(storedZip([{ name: 'root/../main.cpp', content: 'int main() {}' }]));
-    const unsafeArchive = await agent.post(`/api/bots/${botId}/revisions/github`).set('x-csrf-token', csrf)
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.includes('/repos/octo/bot/commits/')) return new Response(JSON.stringify({ sha: 'f'.repeat(40) }), { status: 200 });
+      if (url.includes('/contents/main.cpp?ref=')) return new Response(JSON.stringify({
+        type: 'file', name: 'main.cpp', path: 'subdir/main.cpp', encoding: 'base64', content: Buffer.from('int main() {}').toString('base64'),
+      }), { status: 200 });
+      if (url.includes('/repos/octo/bot')) return new Response(JSON.stringify({ private: false, default_branch: 'main' }), { status: 200 });
+      return new Response('', { status: 404 });
+    }));
+    const unsafeContents = await agent.post(`/api/bots/${botId}/revisions/github`).set('x-csrf-token', csrf)
       .send({ githubUrl: 'https://github.com/octo/bot', runtimeId: 'cpp' });
-    expect(unsafeArchive.status).toBe(422);
+    expect(unsafeContents.status).toBe(422);
   });
 
   it('preserves historical Node.js revisions as readable legacy records', async () => {

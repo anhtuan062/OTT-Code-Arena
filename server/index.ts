@@ -26,7 +26,7 @@ import type { ExecutionPolicy } from '../bot-executor/types.js';
 import type { SourceRevisionExecutor } from '../bot-executor/types.js';
 import { ExecutionCancelledError } from '../bot-executor/types.js';
 import { getStrategySdkIdentity } from '../bot-executor/strategy-sdk.js';
-import { GitHubSourceError, importGitHubSource } from './github-source-import.js';
+import { GitHubSourceError, importGitHubSource, parseGitHubRepositoryUrl } from './github-source-import.js';
 import type { Tournament, TournamentBot, ParticipationRequest, SourceRevisionExecution, TournamentRound, TournamentPairing, TournamentStage } from '../tournament/types.js';
 import { isMultiStageTournament, getAllTournamentPairings, normalizeToMultiStageView } from '../tournament/multi-stage.js';
 import type { Server } from 'node:http';
@@ -743,16 +743,22 @@ function apiRevision(revision: ReturnType<SqlBotRevisionRepository['listForOwner
 }
 
 app.post('/api/bots/:id/revisions', requireAuth, requireRole('competitor'), requireCsrf, async (req, res) => {
-  const body = req.body as { source?: unknown; runtimeId?: unknown; label?: unknown; executionMode?: unknown } | undefined;
+  const body = req.body as { source?: unknown; runtimeId?: unknown; label?: unknown; executionMode?: unknown; githubRepositoryUrl?: unknown; githubCommitSha?: unknown } | undefined;
   if (typeof body?.source !== 'string' || body.source.length === 0) return res.status(400).json({ error: 'Source is required' });
   if (body.source.length > MAX_SOURCE_BYTES * 2) return res.status(413).json({ error: 'Source exceeds the maximum size' });
   if (!isSupportedSourceRuntime(body.runtimeId)) return res.status(400).json({ error: `Unsupported source runtime. Use ${SUPPORTED_SOURCE_RUNTIMES.join(' or ')}` });
   if (body.executionMode !== undefined && body.executionMode !== 'raw' && body.executionMode !== 'strategy') return res.status(400).json({ error: 'Unsupported execution mode' });
   if (body.label !== undefined && typeof body.label !== 'string') return res.status(400).json({ error: 'Invalid revision label' });
+  if (body.githubRepositoryUrl !== undefined || body.githubCommitSha !== undefined) {
+    try {
+      if (typeof body.githubRepositoryUrl !== 'string' || typeof body.githubCommitSha !== 'string' || !/^[0-9a-f]{40}$/i.test(body.githubCommitSha)) throw new Error();
+      parseGitHubRepositoryUrl(body.githubRepositoryUrl);
+    } catch { return res.status(400).json({ error: 'Invalid GitHub source provenance' }); }
+  }
   try {
     const executionMode = (body.executionMode as 'raw' | 'strategy' | undefined) ?? 'raw';
     const sdk = executionMode === 'strategy' ? await getStrategySdkIdentity(body.runtimeId) : undefined;
-    const revision = await botRevisionRepository.create({ botId: routeParam(req, 'id'), ownerId: req.auth!.id, source: body.source, runtimeId: body.runtimeId, label: body.label as string | undefined, executionMode, sdkVersion: sdk?.version, sdkDigest: sdk?.digest });
+    const revision = await botRevisionRepository.create({ botId: routeParam(req, 'id'), ownerId: req.auth!.id, source: body.source, runtimeId: body.runtimeId, label: body.label as string | undefined, executionMode, sdkVersion: sdk?.version, sdkDigest: sdk?.digest, githubRepositoryUrl: body.githubRepositoryUrl as string | undefined, githubCommitSha: body.githubCommitSha as string | undefined });
     res.status(201).json(apiRevision(revision));
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unable to save source revision';
