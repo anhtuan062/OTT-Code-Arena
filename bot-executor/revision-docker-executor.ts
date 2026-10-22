@@ -1000,9 +1000,19 @@ export class RevisionDockerExecutor {
       : args;
     const timeoutMs = context.timeoutMs ?? this.config.defaultTimeoutMs ?? 2_000;
     const runtimeStarted = performance.now();
-    const result = process.env.NODE_ENV !== 'test' && artifact.key
-      ? await this.runWarmContainer(artifact.key, strategyArgs, JSON.stringify(request), timeoutMs, context.signal)
-      : await this.runContainer(context.executionId, strategyArgs, JSON.stringify(request), timeoutMs, context.signal);
+    // Authoritative turns must not share writable container state. In
+    // particular, a warm container's /tmp tmpfs survives docker exec and can
+    // carry data from one turn into the next. Keep the prepared artifact and
+    // compiled-artifact cache, but create a fresh runtime container per turn so
+    // filesystem, process and tmpfs state are isolated without changing the
+    // bot input/output contract or sandbox limits.
+    const result = await this.runContainer(
+      context.executionId,
+      strategyArgs,
+      JSON.stringify(request),
+      timeoutMs,
+      context.signal,
+    );
     timings.runtimeContainerMs = result.elapsedMs ?? Math.round(performance.now() - runtimeStarted);
     timings.cleanupMs += result.cleanupMs ?? 0;
     timings.cleanupSucceeded &&= result.cleanupSucceeded !== false;
@@ -1348,10 +1358,8 @@ export class RevisionDockerExecutor {
     try {
       release = await this.dockerExecutionLimiter.acquire(signal, `warm-runtime:${key}`);
     } catch (error) {
-      if (warm.created) {
-        await this.stopWarmContainer(warm.name).catch(() => {});
-        this.warmContainers.delete(key);
-      }
+      await this.stopWarmContainer(warm.name).catch(() => {});
+      this.warmContainers.delete(key);
       if (signal?.aborted) throw new ExecutionCancelledError();
       throw error;
     }
@@ -1360,6 +1368,8 @@ export class RevisionDockerExecutor {
       proc = spawn(this.config.dockerBinary!, ['exec', '-i', warm.name, ...warm.command], { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true } as SpawnOptionsWithoutStdio);
     } catch (error) {
       release();
+      await this.stopWarmContainer(warm.name).catch(() => {});
+      this.warmContainers.delete(key);
       throw error;
     }
     let stdout = '';
@@ -1383,8 +1393,11 @@ export class RevisionDockerExecutor {
     clearTimeout(timer);
     signal?.removeEventListener('abort', onAbort);
     const cleanupStarted = performance.now();
-    const cleanupSucceeded = timedOut || cancelled ? await this.stopWarmContainer(warm.name) : true;
-    if (timedOut || cancelled) this.warmContainers.delete(key);
+    // Never retain a writable /tmp tmpfs after a turn. This method is kept as
+    // a defensive boundary for callers outside the authoritative path, which
+    // now uses runContainer directly for fresh-turn isolation.
+    const cleanupSucceeded = await this.stopWarmContainer(warm.name);
+    this.warmContainers.delete(key);
     return { code, stdout, stderr, timedOut, killed: timedOut, cancelled, elapsedMs: Math.round(performance.now() - started), cleanupMs: Math.round(performance.now() - cleanupStarted), cleanupSucceeded };
   }
 
