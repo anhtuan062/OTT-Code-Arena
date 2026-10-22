@@ -4471,8 +4471,8 @@
 .secondary-btn > svg,
 .danger-btn > svg,
 .icon-btn > svg {
-  width: 18px;
-  height: 18px;
+  height: 25px;
+  width: 25px;
   flex: 0 0 auto;
 }
 

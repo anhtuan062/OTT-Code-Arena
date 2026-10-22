@@ -1,33 +1,39 @@
 <!-- BOT PLAYGROUND -->
 <div id="bot-playground" class="page bot-playground-page" aria-label="Khu vực kiểm thử Bot">
-  <div class="playground-header">
+  <!-- 1. COMPACT TOOLBAR HEADER -->
+  <header class="playground-header">
     <div class="playground-heading">
-      <p class="section-kicker">BOT ARENA PLAYGROUND</p>
-      <h1>Test thế cờ</h1>
-      <p class="dialog-copy">Thiết lập thế cờ trên bàn 9×9, gửi một lượt kiểm thử vào Bot và quan sát nước đi mà mã nguồn trả về.</p>
+      <div class="playground-title-row">
+        <h1>Test thế cờ</h1>
+        <span class="playground-badge">Sa bàn 9×9</span>
+      </div>
+      <p class="dialog-copy">Thử nghiệm nước đi của Bot với thế cờ tùy biến trước khi tham gia giải đấu.</p>
     </div>
-  </div>
+  </header>
 
   <div id="playground-toast" class="form-error playground-toast" role="status" aria-live="polite" hidden></div>
 
+  <!-- 2. MAIN 2-COLUMN WORKBENCH -->
   <div class="playground-layout">
-    <!-- CỘT TRÁI: BÀN CỜ KIỂM THỬ -->
+    <!-- CỘT TRÁI: BÀN CỜ & CÔNG CỤ ĐẶT QUÂN -->
     <section class="playground-board-card">
       <div class="playground-card-head">
         <div>
-          <h2>Bàn cờ kiểm thử</h2>
+          <h2>Sa bàn kiểm thử</h2>
           <p id="playground-placement-hint" class="field-help">Hãy đặt đúng 1 quân của Bot A trước, sau đó có thể đặt thêm quân Bot B.</p>
         </div>
         <span class="playground-turn-badge">Lượt của Bot A</span>
       </div>
 
+      <!-- Quick Legend -->
       <div class="playground-legend" aria-label="Chú giải bàn cờ kiểm thử">
-        <span class="playground-legend-item"><span class="legend-dot player-a"></span>Quân bạn (Bot A)</span>
-        <span class="playground-legend-item"><span class="legend-dot player-b"></span>Quân đối thủ (Bot B)</span>
+        <span class="playground-legend-item"><span class="legend-dot player-a"></span>Quân bạn (A)</span>
+        <span class="playground-legend-item"><span class="legend-dot player-b"></span>Quân đối thủ (B)</span>
         <span class="playground-legend-item"><span class="legend-dot goal-a"></span>Mục tiêu A (i9)</span>
         <span class="playground-legend-item"><span class="legend-dot goal-b"></span>Mục tiêu B (a1)</span>
       </div>
 
+      <!-- 9x9 Board with Coordinates -->
       <div class="playground-board-wrap">
         <div id="playground-columns" class="replay-coordinates replay-columns" aria-hidden="true"></div>
         <div class="replay-board-row">
@@ -36,11 +42,11 @@
         </div>
       </div>
 
-      <!-- POPUP / DIALOG CHỌN QUÂN CỜ KHI CLICK Ô -->
+      <!-- POPUP / DIALOG CHỌN QUÂN CỜ (Styled as clean micro-popover) -->
       <div id="playground-piece-menu-backdrop" class="modal-overlay playground-menu-backdrop" hidden></div>
       <div id="playground-piece-menu" class="playground-piece-menu" role="dialog" aria-modal="true" aria-labelledby="playground-menu-title" hidden>
         <div class="piece-menu-head">
-          <div>
+          <div class="piece-menu-title-wrap">
             <span class="section-kicker">THIẾT LẬP THẾ CỜ</span>
             <strong id="playground-menu-title">Chọn loại quân</strong>
           </div>
@@ -51,31 +57,46 @@
         <p id="playground-menu-description" class="field-help">Chọn quân để đặt vào ô đã chọn.</p>
         <div class="playground-menu-actions">
           <button type="button" class="secondary-btn piece-choice-btn" data-piece-type="dam">
-            <svg class="ui-icon" aria-hidden="true"><use href="#icon-piece-dam"></use></svg>
+            <span class="replay-piece replay-player-a" aria-hidden="true">
+              <svg><use href="#icon-piece-dam"></use></svg>
+            </span>
             <span>Đấm (Búa)</span>
           </button>
           <button type="button" class="secondary-btn piece-choice-btn" data-piece-type="la">
-            <svg class="ui-icon" aria-hidden="true"><use href="#icon-piece-la"></use></svg>
+            <span class="replay-piece replay-player-a" aria-hidden="true">
+              <svg><use href="#icon-piece-la"></use></svg>
+            </span>
             <span>Lá (Bao)</span>
           </button>
           <button type="button" class="secondary-btn piece-choice-btn" data-piece-type="keo">
-            <svg class="ui-icon" aria-hidden="true"><use href="#icon-piece-keo"></use></svg>
+            <span class="replay-piece replay-player-a" aria-hidden="true">
+              <svg><use href="#icon-piece-keo"></use></svg>
+            </span>
             <span>Kéo</span>
           </button>
-          <button id="playground-remove-piece-btn" type="button" class="danger-btn piece-remove-btn" hidden>
-            Xoá quân ô này
+        </div>
+        <button id="playground-remove-piece-btn" type="button" class="danger-btn piece-remove-btn" hidden>
+          <svg class="ui-icon" aria-hidden="true"><use href="#icon-trash-2"></use></svg>
+          <span>Xoá quân ô này</span>
+        </button>
+      </div>
+
+      <!-- Presets & Quick Scenarios -->
+      <div class="playground-presets" role="group" aria-label="Kịch bản mẫu">
+        <span class="field-label">Kịch bản mẫu:</span>
+        <div class="playground-preset-buttons">
+          <button type="button" class="secondary-btn preset-btn" data-preset="capture" title="Có cơ hội ăn quân">
+            <svg class="ui-icon" aria-hidden="true"><use href="#icon-crosshair"></use></svg>
+            <span>Có cơ hội ăn quân</span>
+          </button>
+          <button type="button" class="secondary-btn preset-btn" data-preset="near-goal" title="Tiến gần ô đích">
+            <svg class="ui-icon" aria-hidden="true"><use href="#icon-flag"></use></svg>
+            <span>Tiến gần ô đích</span>
           </button>
         </div>
       </div>
 
-      <div class="playground-presets">
-        <span class="field-label">Kịch bản mẫu:</span>
-        <div class="playground-preset-buttons">
-          <button type="button" class="secondary-btn preset-btn" data-preset="capture">Có cơ hội ăn quân</button>
-          <button type="button" class="secondary-btn preset-btn" data-preset="near-goal">Tiến gần ô đích</button>
-        </div>
-      </div>
-
+      <!-- Footer Board Actions -->
       <div class="playground-board-actions">
         <button id="playground-clear-board" class="secondary-btn" type="button">Xoá bàn cờ</button>
         <button id="playground-run-test" class="primary-btn" type="button">
@@ -85,14 +106,17 @@
       </div>
     </section>
 
-    <!-- CỘT PHẢI: MÃ NGUỒN BOT & KẾT QUẢ -->
+    <!-- CỘT PHẢI: MÃ NGUỒN BOT & THANH THANH TRA KẾT QUẢ / LỊCH SỬ -->
     <aside class="playground-side-panel">
-      <!-- THẺ SOẠN MÃ NGUỒN -->
+      <!-- 1. THẺ SOẠN MÃ NGUỒN (IDE FRAME) -->
       <section class="playground-code-card">
         <div class="playground-card-head">
-          <div>
+          <div class="playground-code-head-left">
             <h2>Mã nguồn Bot</h2>
-            <p id="playground-bot-hint" class="field-help">Bot nhận <code>legalMoves</code> và trạng thái bàn cờ, trả về một nước đi.</p>
+            <span class="playground-code-sub">Strategy SDK</span>
+          </div>
+          <div class="playground-editor-quick-actions">
+            <button id="playground-reset-code" type="button" class="secondary-btn btn-xs">Mã mẫu</button>
           </div>
         </div>
 
@@ -114,45 +138,60 @@
 
         <div class="playground-editor-wrap">
           <label for="playground-code" class="visually-hidden">Mã nguồn kiểm thử</label>
-          <textarea id="playground-code" class="source-editor playground-code-area" spellcheck="false" rows="13" placeholder="// Nhập hoặc dán mã Bot cần kiểm thử..."></textarea>
+          <textarea id="playground-code" class="source-editor playground-code-area" spellcheck="false" rows="11" placeholder="// Nhập hoặc dán mã Bot cần kiểm thử..."></textarea>
         </div>
 
         <div class="playground-editor-footer">
           <span id="playground-code-stats" class="field-help">0 ký tự · 1 dòng</span>
-          <button id="playground-reset-code" type="button" class="secondary-btn btn-xs">Mã mẫu</button>
+          <span class="playground-kbd-hint"><kbd>Ctrl</kbd> + <kbd>Enter</kbd> để chạy</span>
         </div>
       </section>
 
-      <!-- THẺ KẾT QUẢ KIỂM THỬ -->
-      <section id="playground-result-card" class="playground-result-card" aria-labelledby="playground-result-title">
-        <div class="playground-card-head">
-          <div>
+      <!-- 2. THANH THANH TRA (INSPECTOR CARD: TABS CHO KẾT QUẢ & LỊCH SỬ) -->
+      <div class="playground-inspector-card">
+        <div class="playground-inspector-nav" role="tablist" aria-label="Kết quả và lịch sử kiểm thử">
+          <button type="button" class="playground-tab-btn active" role="tab" aria-selected="true" data-tab="result" id="tab-btn-result">
+            <svg class="ui-icon" aria-hidden="true"><use href="#icon-activity"></use></svg>
+            <span>Kết quả lượt test</span>
+          </button>
+          <button type="button" class="playground-tab-btn" role="tab" aria-selected="false" data-tab="history" id="tab-btn-history">
+            <svg class="ui-icon" aria-hidden="true"><use href="#icon-clock"></use></svg>
+            <span>Lịch sử (<span id="playground-history-count">0</span>)</span>
+          </button>
+        </div>
+
+        <!-- TAB CONTENT: KẾT QUẢ -->
+        <section id="playground-result-card" class="playground-result-card playground-tab-pane" aria-labelledby="playground-result-title">
+          <div class="playground-card-head visually-hidden">
             <h2 id="playground-result-title">Kết quả lượt test</h2>
-            <p id="playground-result-subtitle" class="field-help">Chưa chạy kiểm thử.</p>
           </div>
-        </div>
-        <div id="playground-result-body" class="playground-result-body" hidden>
-          <div class="playground-result-banner" id="playground-result-banner">
-            <strong id="playground-result-status-text">Nước đi hợp lệ</strong>
-            <p id="playground-result-move-text">—</p>
+          <div id="playground-result-empty" class="playground-empty-hint">
+            <svg class="ui-icon" aria-hidden="true"><use href="#icon-play"></use></svg>
+            <p id="playground-result-subtitle">Chưa chạy kiểm thử. Nhấn "Test 1 lượt" để thực thi Bot.</p>
           </div>
-          <dl id="playground-result-dl" class="playground-result-details"></dl>
-        </div>
-      </section>
+          <div id="playground-result-body" class="playground-result-body" hidden>
+            <div class="playground-result-banner" id="playground-result-banner">
+              <strong id="playground-result-status-text">Nước đi hợp lệ</strong>
+              <p id="playground-result-move-text">—</p>
+            </div>
+            <dl id="playground-result-dl" class="playground-result-details"></dl>
+          </div>
+        </section>
 
-      <!-- THẺ LỊCH SỬ KIỂM THỬ TRONG PHIÊN -->
-      <section class="playground-history-card" aria-labelledby="playground-history-title">
-        <div class="playground-card-head">
-          <div>
-            <h3 id="playground-history-title">Lịch sử test trong phiên</h3>
-            <p class="field-help">Lưu tạm trên trình duyệt trong phiên làm việc hiện tại.</p>
+        <!-- TAB CONTENT: LỊCH SỬ -->
+        <section class="playground-history-card playground-tab-pane" aria-labelledby="playground-history-title" hidden>
+          <div class="playground-card-head">
+            <div>
+              <h3 id="playground-history-title">Lịch sử test trong phiên</h3>
+              <p class="field-help">Lưu tạm trên trình duyệt trong phiên làm việc hiện tại.</p>
+            </div>
+            <button id="playground-clear-history" type="button" class="secondary-btn btn-xs">Xoá lịch sử</button>
           </div>
-          <button id="playground-clear-history" type="button" class="secondary-btn btn-xs">Xoá lịch sử</button>
-        </div>
-        <div id="playground-history-list" class="playground-history-list">
-          <p class="practice-move-history-empty">Chưa có lần test nào.</p>
-        </div>
-      </section>
+          <div id="playground-history-list" class="playground-history-list">
+            <p class="practice-move-history-empty">Chưa có lần test nào.</p>
+          </div>
+        </section>
+      </div>
     </aside>
   </div>
 </div>

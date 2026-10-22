@@ -45,8 +45,19 @@ function initBotPlayground() {
 
   loadPlaygroundBotsList();
   setupPlaygroundCode();
+  setupPlaygroundPiecePickerTokens();
   renderPlaygroundBoard();
   setupPlaygroundEvents();
+}
+
+function setupPlaygroundPiecePickerTokens() {
+  ['dam', 'la', 'keo'].forEach(type => {
+    const token = document.querySelector(`.piece-choice-btn[data-piece-type="${type}"] .replay-piece`);
+    if (token) {
+      const symbol = PLAYGROUND_PIECE_TYPES[type] || 'icon-piece-dam';
+      token.replaceChildren(icon(symbol));
+    }
+  });
 }
 
 async function openPlaygroundForBot(bot) {
@@ -60,14 +71,26 @@ async function openPlaygroundForBot(bot) {
   }
 }
 
-function loadPlaygroundBotsList() {
+async function loadPlaygroundBotsList(botsList = null) {
   const select = $('#playground-bot-selector');
   if (!select) return;
+
+  let bots = Array.isArray(botsList) ? botsList : (Array.isArray(state.bots) ? state.bots : []);
+
+  if (!botsList && state.user?.role === 'competitor' && (!bots.length || state.botsDirty)) {
+    try {
+      const freshBots = await api('/bots');
+      if (Array.isArray(freshBots)) {
+        bots = freshBots;
+        state.bots = freshBots;
+        state.botsDirty = false;
+      }
+    } catch {}
+  }
 
   const currentVal = select.value;
   select.replaceChildren(create('option', { value: '', text: 'Bản nháp tự do (hoặc mã hiện tại)' }));
 
-  const bots = Array.isArray(state.bots) ? state.bots : [];
   bots.forEach(bot => {
     select.appendChild(create('option', {
       value: bot.id,
@@ -75,7 +98,9 @@ function loadPlaygroundBotsList() {
     }));
   });
 
-  if (currentVal) select.value = currentVal;
+  if (currentVal && bots.some(b => b.id === currentVal)) {
+    select.value = currentVal;
+  }
 }
 
 function setupPlaygroundCode() {
@@ -137,11 +162,19 @@ function renderPlaygroundBoard() {
         }
       });
 
-      if (isGoalA || isGoalB) {
-        cell.classList.add('goal');
+      if (isGoalA) {
+        cell.classList.add('goal', 'goal-a');
         const flag = create('span', {
-          className: 'goal-flag',
-          attrs: { 'aria-hidden': 'true', title: isGoalA ? 'Mục tiêu Bot A (i9)' : 'Mục tiêu Bot B (a1)' }
+          className: 'goal-flag goal-flag-a',
+          attrs: { 'aria-hidden': 'true', title: 'Mục tiêu Bot A (i9)' }
+        });
+        flag.appendChild(icon('icon-flag'));
+        cell.appendChild(flag);
+      } else if (isGoalB) {
+        cell.classList.add('goal', 'goal-b');
+        const flag = create('span', {
+          className: 'goal-flag goal-flag-b',
+          attrs: { 'aria-hidden': 'true', title: 'Mục tiêu Bot B (a1)' }
         });
         flag.appendChild(icon('icon-flag'));
         cell.appendChild(flag);
@@ -195,6 +228,13 @@ function openPlaygroundPiecePicker(row, col) {
   const desc = $('#playground-menu-description');
   const removeBtn = $('#playground-remove-piece-btn');
   if (!modal || !backdrop || !title || !desc || !removeBtn) return;
+
+  const targetPlayer = existing ? existing.player : (hasA ? 'B' : 'A');
+  modal.dataset.targetPlayer = targetPlayer;
+
+  modal.querySelectorAll('.piece-choice-btn .replay-piece').forEach(token => {
+    token.className = `replay-piece replay-player-${targetPlayer.toLowerCase()}`;
+  });
 
   if (existing) {
     title.textContent = `Quân ô ${coordinate} (${existing.player === 'A' ? 'Bot A' : 'Bot B'})`;
@@ -317,6 +357,8 @@ async function runPlaygroundSingleTest() {
   const detailsList = $('#playground-result-dl');
 
   setPlaygroundToast('');
+  const emptyHint = $('#playground-result-empty');
+  if (emptyHint) emptyHint.hidden = true;
   playgroundBusy = true;
   if (runButton) {
     runButton.disabled = true;
@@ -384,6 +426,7 @@ async function runPlaygroundSingleTest() {
       });
 
       if (resultBody) resultBody.hidden = false;
+      switchPlaygroundTab('result');
       setPlaygroundToast(`Test thành công! Bot đã chọn nước đi ${move.from} → ${move.to}.`, 'info');
 
       // Kích hoạt animation nước đi trên bàn cờ
@@ -417,6 +460,7 @@ async function runPlaygroundSingleTest() {
     });
 
     if (resultBody) resultBody.hidden = false;
+    switchPlaygroundTab('result');
     setPlaygroundToast(errorMsg, 'error');
 
     addPlaygroundHistoryEntry({
@@ -472,8 +516,31 @@ function animatePlaygroundMove(fromAlg, toAlg, pieceId, capturedId) {
   }, 2400);
 }
 
+
+function switchPlaygroundTab(tabName) {
+  const resultCard = $('#playground-result-card');
+  const historyCard = $('.playground-history-card');
+  const tabBtns = document.querySelectorAll('.playground-tab-btn');
+  tabBtns.forEach(btn => {
+    const isTarget = btn.dataset.tab === tabName;
+    btn.classList.toggle('active', isTarget);
+    btn.setAttribute('aria-selected', isTarget ? 'true' : 'false');
+  });
+  if (resultCard && historyCard) {
+    if (tabName === 'history') {
+      resultCard.hidden = true;
+      historyCard.hidden = false;
+    } else {
+      resultCard.hidden = false;
+      historyCard.hidden = true;
+    }
+  }
+}
+
 function addPlaygroundHistoryEntry(entry) {
   playgroundHistory.unshift(entry);
+  const countEl = $('#playground-history-count');
+  if (countEl) countEl.textContent = String(playgroundHistory.length);
   renderPlaygroundHistory();
 }
 
@@ -528,10 +595,27 @@ function setupPlaygroundEvents() {
   });
 
   $('#playground-clear-board')?.addEventListener('click', clearPlaygroundBoard);
+  $('#playground-header-clear')?.addEventListener('click', clearPlaygroundBoard);
   $('#playground-run-test')?.addEventListener('click', runPlaygroundSingleTest);
+  $('#playground-header-run')?.addEventListener('click', runPlaygroundSingleTest);
+
+  document.querySelectorAll('.playground-tab-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      if (btn.dataset.tab) switchPlaygroundTab(btn.dataset.tab);
+    });
+  });
+
+  $('#playground-code')?.addEventListener('keydown', (e) => {
+    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+      e.preventDefault();
+      runPlaygroundSingleTest();
+    }
+  });
 
   $('#playground-clear-history')?.addEventListener('click', () => {
     playgroundHistory = [];
+    const countEl = $('#playground-history-count');
+    if (countEl) countEl.textContent = '0';
     renderPlaygroundHistory();
   });
 
@@ -560,28 +644,63 @@ function setupPlaygroundEvents() {
     if (!botId) return;
 
     try {
-      const bot = (state.bots || []).find(b => b.id === botId);
-      if (bot?.selectedRevision) {
-        const rev = bot.selectedRevision;
-        if (rev.runtimeId) {
-          const runtimeSelect = $('#playground-runtime-selector');
-          if (runtimeSelect) runtimeSelect.value = rev.runtimeId;
+      let bot = (state.bots || []).find(b => b.id === botId);
+      if (!bot) {
+        try {
+          const freshBots = await api('/bots');
+          if (Array.isArray(freshBots)) {
+            state.bots = freshBots;
+            await loadPlaygroundBotsList(freshBots);
+            bot = freshBots.find(b => b.id === botId);
+          }
+        } catch {}
+      }
+
+      if (!bot) {
+        setPlaygroundToast('Không tìm thấy Bot đã chọn trong danh sách của bạn.', 'error');
+        return;
+      }
+
+      let revisionId = bot.selectedRevision?.revisionId || bot.currentRevisionId;
+
+      if (!revisionId) {
+        try {
+          const revisions = await api(`/bots/${botId}/revisions`);
+          if (Array.isArray(revisions) && revisions.length > 0) {
+            revisionId = revisions[0].revisionId;
+          }
+        } catch (revErr) {
+          console.warn('Could not query revisions for bot', revErr);
         }
-        // Load source from revision endpoint
-        const fullBot = await api(`/bots/${botId}`);
-        if (fullBot?.revisions?.length) {
-          const targetRev = fullBot.revisions.find(r => r.revisionId === rev.revisionId) || fullBot.revisions[0];
-          if (targetRev?.source) {
-            const codeArea = $('#playground-code');
-            if (codeArea) {
-              codeArea.value = targetRev.source;
-              updatePlaygroundCodeStats();
-            }
+      }
+
+      if (revisionId) {
+        const revData = await api(`/bots/${botId}/revisions/${revisionId}`);
+        if (revData?.runtimeId) {
+          const runtimeSelect = $('#playground-runtime-selector');
+          if (runtimeSelect) runtimeSelect.value = revData.runtimeId;
+        }
+        if (typeof revData?.source === 'string') {
+          const codeArea = $('#playground-code');
+          if (codeArea) {
+            codeArea.value = revData.source;
+            updatePlaygroundCodeStats();
           }
         }
       }
     } catch (err) {
       console.warn('Could not load bot source for playground', err);
+      // If server returned 404 Bot not found, purge stale bots from select
+      if (err?.message?.includes('Bot not found') || err?.status === 404) {
+        try {
+          const freshBots = await api('/bots');
+          if (Array.isArray(freshBots)) {
+            state.bots = freshBots;
+            await loadPlaygroundBotsList(freshBots);
+          }
+        } catch {}
+      }
+      setPlaygroundToast('Không thể tải mã nguồn của Bot đã chọn.', 'error');
     }
   });
 }

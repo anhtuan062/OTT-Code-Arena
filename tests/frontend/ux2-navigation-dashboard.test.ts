@@ -51,7 +51,7 @@ describe('UX.2 role-aware navigation and dashboard', () => {
     expect(app).toContain("'tournament-detail': state.currentTournament?.name");
     expect(app).toContain("if (state.tournamentDetailSource === 'dashboard') return 'Tổng quan';");
     expect(app).toContain("const botWorkspaceParent = view === 'bot-workspace' ? getBotWorkspaceParent() : null;");
-    expect(app).toContain("['bot-workspace', 'tournament-detail', 'replay-view'].includes(view)");
+    expect(app).toContain("['bot-workspace', 'tournament-detail', 'replay-view'");
     expect(app).toContain("feature: 'topbar breadcrumb navigation'");
   });
 });

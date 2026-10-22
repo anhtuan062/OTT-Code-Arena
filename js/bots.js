@@ -164,7 +164,7 @@ function renderBotList() {
     const header = create('div', { className: 'bot-card-header' });
     const identity = create('div', { className: 'bot-card-identity' });
     const botIcon = create('span', { className: 'bot-card-icon' }); botIcon.appendChild(icon('icon-bot'));
-    const heading = create('div'); heading.append(create('h3', { className: 'bot-card-title', text: bot.name }));
+    const heading = create('div'); heading.append(create('h3', { className: 'bot-card-title', text: bot.name, title: bot.name }));
     const badges = create('div', { className: 'bot-card-badges' });
     identity.append(botIcon, heading);
     header.append(identity, badges); card.appendChild(header);
@@ -195,14 +195,21 @@ function renderBotList() {
     revisionBody.appendChild(revisionRow);
     card.appendChild(revisionBody);
     const footer = create('div', { className: 'bot-card-footer' });
-    const date = new Date(bot.registeredAt); footer.appendChild(create('small', { text: Number.isNaN(date.getTime()) ? 'Không có ngày đăng ký' : `Đăng ký ngày ${date.toLocaleDateString('vi-VN')}` }));
+    const date = new Date(bot.registeredAt);
+    footer.appendChild(create('small', {
+      className: 'bot-card-date',
+      text: Number.isNaN(date.getTime()) ? 'Không có ngày đăng ký' : `Đăng ký ngày ${date.toLocaleDateString('vi-VN')}`
+    }));
     const actions = create('div', { className: 'bot-actions' });
     const actionIcons = ['icon-code-2', 'icon-activity', 'icon-trash-2'];
-    actions.append(
-      actionButton('Mã nguồn', () => openSourceWorkspace(bot), `source-bot:${bot.id}`, 'primary-btn bot-action'),
-      actionButton('Test thế cờ', () => typeof openPlaygroundForBot === 'function' ? openPlaygroundForBot(bot) : navigate('bot-playground'), `playground-bot:${bot.id}`, 'secondary-btn bot-action'),
-      actionButton('Xóa', () => openDeleteBotDialog(bot), `delete-bot:${bot.id}`, 'secondary-btn bot-action bot-delete')
-    );
+    const sourceBtn = actionButton('Mã nguồn', () => openSourceWorkspace(bot), `source-bot:${bot.id}`, 'primary-btn bot-action');
+    sourceBtn.title = 'Mở trình soạn thảo mã nguồn';
+    const testBtn = actionButton('Test thế cờ', () => typeof openPlaygroundForBot === 'function' ? openPlaygroundForBot(bot) : navigate('bot-playground'), `playground-bot:${bot.id}`, 'secondary-btn bot-action');
+    testBtn.title = 'Kiểm tra thế cờ trong sa bàn thử nghiệm';
+    const deleteBtn = actionButton('Xóa', () => openDeleteBotDialog(bot), `delete-bot:${bot.id}`, 'secondary-btn bot-action bot-delete');
+    deleteBtn.title = 'Xóa Bot này';
+    deleteBtn.setAttribute('aria-label', `Xóa Bot ${bot.name || ''}`);
+    actions.append(sourceBtn, testBtn, deleteBtn);
     actionIcons.forEach((iconId, index) => {
       const action = actions.children[index];
       if (!action || action.querySelector('svg')) return;
