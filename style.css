@@ -943,18 +943,18 @@ body #bots.bots-page .workspace-primary-action .ui-icon { width: 25px; height: 2
 }
 
 body #bots.bots-page .bot-actions .bot-action.primary-btn {
-  border: 1px solid #b9ddc6;
-  background: transparent;
-  color: #176b4d;
-  box-shadow: none;
+  border: 1px solid #cbd5e1;
+  background: #ffffff;
+  color: #0f172a;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, .04);
 }
 body #bots.bots-page .bot-actions .bot-action.primary-btn:hover,
 body #bots.bots-page .bot-actions .bot-action.primary-btn:focus-visible {
-  border-color: #8fc5a2;
-  background: #e0f2e7;
-  color: #0f553c;
-  box-shadow: none;
-  transform: none;
+  border-color: #2563eb;
+  background: #eff6ff;
+  color: #1d4ed8;
+  box-shadow: 0 3px 8px rgba(37, 99, 235, .15);
+  transform: translateY(-1px);
 }
 body #bots.bots-page .bot-actions .bot-delete { background: transparent; box-shadow: none; }
 

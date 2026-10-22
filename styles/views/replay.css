@@ -938,8 +938,8 @@
     #replay-series-controls { display:flex; align-items:center; gap:8px; max-width:100%; margin:0 0 14px; padding:9px 11px; overflow-x:auto; border:1px solid #dfe8e1; border-radius:11px; background:#fbfdfb; scrollbar-width:thin; }
     #replay-series-controls::before { content:'Các ván'; flex:0 0 auto; color:#7b8980; font-size:.7rem; font-weight:800; letter-spacing:.06em; text-transform:uppercase; }
     #replay-series-controls .secondary-btn { width:auto; min-width:max-content; flex:0 0 auto; margin:0; padding:7px 10px; border:1px solid #d7e3da; border-radius:8px; background:#fff; color:#53645a; font-size:.74rem; white-space:nowrap; box-shadow:none; }
-    #replay-series-controls .secondary-btn:hover { border-color:#9fc7ab; background:#f3faf5; color:#176b50; }
-    #replay-series-controls .secondary-btn.active { border-color:#176b50; background:#e8f5ed; color:#176b50; font-weight:750; }
+    #replay-series-controls .secondary-btn:hover { border-color:#2563eb; background:#eff6ff; color:#1d4ed8; }
+    #replay-series-controls .secondary-btn.active { border-color:#2563eb; background:#dbeafe; color:#1e40af; font-weight:750; }
     #replay-view .replay-detail { min-width: 0; padding: 10px 11px; }
     #replay-view .replay-detail small { font-size: .68rem; text-transform: uppercase; letter-spacing: .04em; }
     #replay-view .replay-detail strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

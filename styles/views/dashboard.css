@@ -995,8 +995,8 @@
     #dashboard.dashboard-page .welcome-copy { max-width: 660px; margin-top: 10px; color: var(--dash-muted); font-size: .86rem; line-height: 1.55; }
     #dashboard.dashboard-page .dashboard-actions { align-items: center; gap: 8px; }
     #dashboard.dashboard-page .dashboard-action { min-height: 38px; padding: 8px 13px; border-radius: 7px; font-size: .77rem; box-shadow: none; }
-    #dashboard.dashboard-page .dashboard-action.primary-btn { background: var(--dash-accent); }
-    #dashboard.dashboard-page .dashboard-action.primary-btn:hover { background: #0f553c; }
+    #dashboard.dashboard-page .dashboard-action.primary-btn { background: var(--color-brand, #2563eb); }
+    #dashboard.dashboard-page .dashboard-action.primary-btn:hover { background: var(--color-brand-hover, #1d4ed8); }
     #dashboard.dashboard-page .dashboard-action.secondary-btn { border-color: var(--dash-line); background: #fff; color: var(--dash-ink); }
 
     #dashboard.dashboard-page .summary-grid { gap: 0; margin-top: 22px; border-top: 1px solid var(--dash-line); border-bottom: 1px solid var(--dash-line); background: var(--dash-surface); }
@@ -1039,11 +1039,11 @@
       margin-top: 10px;
       padding: 9px 18px;
       border-radius: 8px;
-      background: #176b4d;
+      background: var(--color-brand, #2563eb);
       box-shadow: none;
       font-size: .8rem;
     }
-    #dashboard.dashboard-page .dashboard-bot-empty-action:hover { background: #0f553c; box-shadow: none; }
+    #dashboard.dashboard-page .dashboard-bot-empty-action:hover { background: var(--color-brand-hover, #1d4ed8); box-shadow: none; }
 
     @media (max-width: 900px) {
       #dashboard.organizer-dashboard .summary-grid, #dashboard.player-dashboard .summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }

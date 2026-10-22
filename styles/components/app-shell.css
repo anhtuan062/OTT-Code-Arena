@@ -4689,7 +4689,7 @@
       padding: 0;
       border: 0;
       background: transparent;
-      color: #176b4d;
+      color: var(--color-brand, #2563eb);
       font-size: inherit;
       font-weight: 750;
       text-decoration: underline;
@@ -4699,7 +4699,7 @@
 
     .text-button:hover,
     .text-button:focus-visible {
-      color: #0f553c;
+      color: var(--color-brand-hover, #1d4ed8);
       text-decoration-color: currentColor;
     }
 
@@ -4716,24 +4716,24 @@
     .primary-btn,
     .workspace-primary-action,
     .primary-btn.dashboard-action {
-      background: #176b4d;
+      background: var(--color-brand, #2563eb);
     }
 
     .primary-btn:hover,
     .workspace-primary-action:hover,
     .primary-btn.dashboard-action:hover {
-      background: #0f553c;
+      background: var(--color-brand-hover, #1d4ed8);
     }
 
     .secondary-btn {
-      border-color: #cbd8cf;
-      color: #17231d;
+      border-color: #cbd5e1;
+      color: #1e293b;
     }
 
     .secondary-btn:hover {
-      border-color: #176b4d;
-      background: #edf4ef;
-      color: #0f553c;
+      border-color: var(--color-brand, #2563eb);
+      background: #eff6ff;
+      color: var(--color-brand-hover, #1d4ed8);
     }
 
     .summary-card,
@@ -5568,8 +5568,8 @@
     #replay-series-controls { display:flex; align-items:center; gap:8px; max-width:100%; margin:0 0 14px; padding:9px 11px; overflow-x:auto; border:1px solid #dfe8e1; border-radius:11px; background:#fbfdfb; scrollbar-width:thin; }
     #replay-series-controls::before { content:'Các ván'; flex:0 0 auto; color:#7b8980; font-size:.7rem; font-weight:800; letter-spacing:.06em; text-transform:uppercase; }
     #replay-series-controls .secondary-btn { width:auto; min-width:max-content; flex:0 0 auto; margin:0; padding:7px 10px; border:1px solid #d7e3da; border-radius:8px; background:#fff; color:#53645a; font-size:.74rem; white-space:nowrap; box-shadow:none; }
-    #replay-series-controls .secondary-btn:hover { border-color:#9fc7ab; background:#f3faf5; color:#176b50; }
-    #replay-series-controls .secondary-btn.active { border-color:#176b50; background:#e8f5ed; color:#176b50; font-weight:750; }
+    #replay-series-controls .secondary-btn:hover { border-color:#2563eb; background:#eff6ff; color:#1d4ed8; }
+    #replay-series-controls .secondary-btn.active { border-color:#2563eb; background:#dbeafe; color:#1e40af; font-weight:750; }
     #replay-view .replay-detail { min-width: 0; padding: 10px 11px; }
     #replay-view .replay-detail small { font-size: .68rem; text-transform: uppercase; letter-spacing: .04em; }
     #replay-view .replay-detail strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -7149,8 +7149,8 @@
     .tournament-detail-redesign .tournament-actions .tournament-action { flex:0 0 auto; }
     .tournament-detail-redesign .tournament-actions .tournament-action-danger { color:#a23d3d; background:#fff; border:1px solid #e7caca; }
     .tournament-detail-redesign .tournament-actions .tournament-action-danger { min-width:0; padding:8px 10px; font-size:.72rem; }
-    .tournament-detail-redesign .tournament-actions .tournament-refresh-action { min-width:0; color:#176b50; background:#f3faf5; border:1px solid #cfe4d4; }
-    .tournament-detail-redesign .tournament-actions .tournament-refresh-action:hover { background:#e4f3e9; border-color:#b7d8c1; }
+    .tournament-detail-redesign .tournament-actions .tournament-refresh-action { min-width:0; color:#1e293b; background:#fff; border:1px solid #cbd5e1; }
+    .tournament-detail-redesign .tournament-actions .tournament-refresh-action:hover { background:#eff6ff; border-color:#2563eb; color:#1d4ed8; }
     .tournament-detail-redesign .tournament-action.is-loading { cursor:wait; opacity:.7; }
     .tournament-detail-redesign .execution-status { display:inline-flex; align-items:center; gap:5px; padding:5px 9px; border-radius:999px; font-size:.7rem; font-weight:700; }
     .tournament-detail-redesign .execution-status-ready { color:#5d6c63; background:#f1f5f2; }
@@ -7230,7 +7230,7 @@
     .tournament-detail-redesign .request-meta-row { display:flex; align-items:center; gap:7px; min-width:0; }
     .tournament-detail-redesign .request-meta { color:#68786e; font-size:.78rem; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
     .tournament-detail-redesign .request-copy-id { display:inline-flex; align-items:center; justify-content:center; flex:0 0 28px; width:28px; height:28px; padding:0; border:1px solid #dfe7e1; border-radius:7px; background:#fff; color:#68786e; }
-    .tournament-detail-redesign .request-copy-id:hover { color:#176b50; border-color:#176b50; background:#f3faf5; }
+    .tournament-detail-redesign .request-copy-id:hover { color:#2563eb; border-color:#2563eb; background:#eff6ff; }
     .tournament-detail-redesign .request-controls { display:flex; align-items:center; justify-content:flex-end; gap:10px; flex:0 0 auto; }
     .tournament-detail-redesign .request-status { display:inline-flex; align-items:center; gap:5px; padding:6px 8px; border-radius:999px; font-size:.7rem; font-weight:700; white-space:nowrap; }
     .tournament-detail-redesign .request-status-pending { color:#946200; background:#fff4d6; }
@@ -7374,9 +7374,9 @@
       white-space: nowrap;
     }
     #bots.bots-page .workspace-primary-action .ui-icon { width: 25px; height: 25px; flex: 0 0 auto; }
-    #bots.bots-page .bot-actions .bot-action.primary-btn { border: 1px solid #b9ddc6; background: transparent; color: #176b4d; box-shadow: none; }
+    #bots.bots-page .bot-actions .bot-action.primary-btn { border: 1px solid #cbd5e1; background: #ffffff; color: #0f172a; box-shadow: 0 1px 2px rgba(15, 23, 42, .04); }
     #bots.bots-page .bot-actions .bot-action.primary-btn:hover,
-    #bots.bots-page .bot-actions .bot-action.primary-btn:focus-visible { border-color: #8fc5a2; background: #e0f2e7; color: #0f553c; box-shadow: none; transform: none; }
+    #bots.bots-page .bot-actions .bot-action.primary-btn:focus-visible { border-color: #2563eb; background: #eff6ff; color: #1d4ed8; box-shadow: 0 3px 8px rgba(37, 99, 235, .15); transform: translateY(-1px); }
     #bots.bots-page .bot-actions .bot-delete { background: transparent; box-shadow: none; }
     .bot-workspace-page .bot-workspace-selector {
       display: grid;
@@ -8883,6 +8883,7 @@ body[data-role] .bottom-nav button.active {
 }
 .secondary-btn:hover {
   border-color: var(--color-brand);
+  background: #eff6ff;
   color: var(--color-brand-hover);
 }
   

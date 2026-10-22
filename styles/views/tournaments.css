@@ -839,8 +839,8 @@
     .tournament-detail-redesign .tournament-actions .tournament-action { flex:0 0 auto; }
     .tournament-detail-redesign .tournament-actions .tournament-action-danger { color:#a23d3d; background:#fff; border:1px solid #e7caca; }
     .tournament-detail-redesign .tournament-actions .tournament-action-danger { min-width:0; padding:8px 10px; font-size:.72rem; }
-    .tournament-detail-redesign .tournament-actions .tournament-refresh-action { min-width:0; color:#176b50; background:#f3faf5; border:1px solid #cfe4d4; }
-    .tournament-detail-redesign .tournament-actions .tournament-refresh-action:hover { background:#e4f3e9; border-color:#b7d8c1; }
+    .tournament-detail-redesign .tournament-actions .tournament-refresh-action { min-width:0; color:#1e293b; background:#fff; border:1px solid #cbd5e1; }
+    .tournament-detail-redesign .tournament-actions .tournament-refresh-action:hover { background:#eff6ff; border-color:#2563eb; color:#1d4ed8; }
     .tournament-detail-redesign .tournament-action.is-loading { cursor:wait; opacity:.7; }
     .tournament-detail-redesign .execution-status { display:inline-flex; align-items:center; gap:5px; padding:5px 9px; border-radius:999px; font-size:.7rem; font-weight:700; }
     .tournament-detail-redesign .execution-status-ready { color:#5d6c63; background:#f1f5f2; }
@@ -972,7 +972,7 @@
     .tournament-detail-redesign .request-meta-row { display:flex; align-items:center; gap:7px; min-width:0; }
     .tournament-detail-redesign .request-meta { color:#68786e; font-size:.78rem; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
     .tournament-detail-redesign .request-copy-id { display:inline-flex; align-items:center; justify-content:center; flex:0 0 28px; width:28px; height:28px; padding:0; border:1px solid #dfe7e1; border-radius:7px; background:#fff; color:#68786e; }
-    .tournament-detail-redesign .request-copy-id:hover { color:#176b50; border-color:#176b50; background:#f3faf5; }
+    .tournament-detail-redesign .request-copy-id:hover { color:#2563eb; border-color:#2563eb; background:#eff6ff; }
     .tournament-detail-redesign .request-controls { display:flex; align-items:center; justify-content:flex-end; gap:10px; flex:0 0 auto; }
     .tournament-detail-redesign .request-status { display:inline-flex; align-items:center; gap:5px; padding:6px 8px; border-radius:999px; font-size:.7rem; font-weight:700; white-space:nowrap; }
     .tournament-detail-redesign .request-status-pending { color:#946200; background:#fff4d6; }
