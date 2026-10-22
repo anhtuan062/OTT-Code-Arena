@@ -3,16 +3,16 @@
 
 :root {
   /* Application design tokens. Keep legacy aliases below for existing markup. */
-  --color-page: #f6f8f6;
+  --color-page: #f7f8fc;
   --color-surface: #ffffff;
   --color-surface-elevated: #ffffff;
-  --color-surface-subtle: #eef5ef;
-  --color-text-primary: #1e2b22;
-  --color-text-secondary: #647168;
-  --color-text-muted: #849087;
-  --color-border: #dfe7e0;
-  --color-brand: #16803c;
-  --color-brand-hover: #11652f;
+  --color-surface-subtle: #eef2ff;
+  --color-text-primary: #1e293b;
+  --color-text-secondary: #64748b;
+  --color-text-muted: #94a3b8;
+  --color-border: #e2e8f0;
+  --color-brand: #2563eb;
+  --color-brand-hover: #1d4ed8;
   --color-success: #15803d;
   --color-warning: #b45309;
   --color-error: #b91c1c;
@@ -48,7 +48,7 @@
   --text-secondary: var(--color-text-secondary);
   --text-faint: var(--color-text-muted);
   --accent-blue: var(--color-brand);
-  --accent-cyan: #0f9f58;
+  --accent-cyan: #60a5fa;
   --p1-color: var(--color-player-a);
   --p2-color: var(--color-player-b);
   --goal-color: var(--color-goal);
@@ -80,7 +80,7 @@
   --auth-border-focus: var(--color-brand);
   --auth-brand: var(--color-brand);
   --auth-brand-hover: var(--color-brand-hover);
-  --auth-brand-dark: #0f553c;
+  --auth-brand-dark: #1e40af;
   --auth-error: var(--color-error);
   --auth-error-bg: #fef2f2;
   --auth-error-border: #fecaca;
@@ -944,7 +944,7 @@ body #bots.bots-page .workspace-primary-action .ui-icon { width: 25px; height: 2
 
 body #bots.bots-page .bot-actions .bot-action.primary-btn {
   border: 1px solid #b9ddc6;
-  background: #edf8f1;
+  background: transparent;
   color: #176b4d;
   box-shadow: none;
 }

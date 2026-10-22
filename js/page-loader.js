@@ -25,7 +25,7 @@ function showPageLoadError(error) {
 
 function startApplication() {
   const script = document.createElement('script');
-  script.src = `/app.js?v=registration-workspace-7`;
+  script.src = `/app.js?v=registration-workspace-8`;
   script.async = false;
   document.body.append(script);
 }

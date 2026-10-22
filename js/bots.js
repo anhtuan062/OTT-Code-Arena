@@ -257,7 +257,9 @@ function updateSourceRuntimeMeta(runtimeId) {
   if (help) help.textContent = `${runtimeLabel} · UTF-8 · Tối đa 64 KiB`;
   if (sourceFile) {
     sourceFile.accept = isPython ? '.py,text/x-python' : '.cpp,text/x-c++';
-    sourceFile.disabled = typeof state !== 'undefined' && state.botWorkspaceReadOnly === true;
+    // Uploading from an immutable revision creates an editable draft; the
+    // persisted revision itself remains read-only and unchanged.
+    sourceFile.disabled = false;
   }
 }
 
@@ -269,11 +271,6 @@ async function importBotSourceFile(event) {
   const extension = runtimeId === 'python3' ? '.py' : '.cpp';
   const runtimeLabel = runtimeId === 'python3' ? 'Python 3' : 'C++17';
   const resetInput = () => { if (input) input.value = ''; };
-  if (state.botWorkspaceReadOnly) {
-    setSourceError('Hãy tạo bản nháp trước khi tải file mã nguồn.');
-    resetInput();
-    return;
-  }
   if (!file.name.toLowerCase().endsWith(extension)) {
     setSourceError(`File không khớp với ngôn ngữ ${runtimeLabel}. Hãy chọn file ${extension}.`);
     resetInput();
@@ -285,6 +282,15 @@ async function importBotSourceFile(event) {
     return;
   }
   try {
+    if (state.botWorkspaceReadOnly && state.botWorkspaceMode !== 'create') {
+      const revision = currentPracticeRevision();
+      if (revision) await loadRevisionSource(revision, 'draft', false);
+      else {
+        state.botWorkspaceReadOnly = false;
+        $('#bot-source-editor').readOnly = false;
+        state.botWorkspaceDraftBase = null;
+      }
+    }
     let source;
     try {
       source = new TextDecoder('utf-8', { fatal: true }).decode(await file.arrayBuffer());
@@ -617,7 +623,6 @@ async function loadRevisionSource(revision, mode = 'view', confirmBeforeReplace 
     updateSourceModeMeta(revision.executionMode, revision.sdkVersion);
     state.sourceExecutionMode = revision.executionMode || 'raw';
     state.botWorkspaceReadOnly = mode !== 'draft';
-    const sourceFile = $('#bot-source-file'); if (sourceFile) sourceFile.disabled = state.botWorkspaceReadOnly;
     state.botWorkspaceDraftBase = mode === 'draft' ? revision.revisionId : null;
     $('#bot-source-editor').readOnly = state.botWorkspaceReadOnly;
     setWorkspaceStatus(state.botWorkspaceReadOnly ? 'Chỉ đọc · Phiên bản bất biến' : 'Bản nháp từ phiên bản đã lưu');
@@ -636,6 +641,8 @@ async function loadBotRevisions(bot) {
     $('#bot-source-editor').value = STRATEGY_TEMPLATES.cpp;
     $('#bot-source-editor').readOnly = false;
     state.botWorkspaceReadOnly = false;
+    const sourceFile = $('#bot-source-file');
+    if (sourceFile) sourceFile.disabled = false;
     state.sourceExecutionMode = 'strategy';
     updateSourceModeMeta('strategy', '1.0.0');
     setWorkspaceStatus('Bản nháp mới');
@@ -836,7 +843,7 @@ function botSourceInput() {
   return { runtimeId, source };
 }
 
-async function saveGitHubRevision(bot, sourceInput) {
+async function resolveGitHubSource(sourceInput) {
   const parsed = parseClientGithubUrl(sourceInput.githubUrl);
   const candidates = await clientGithubCandidates(parsed, sourceInput.runtimeId);
   const compatible = candidates.filter(item => item.filename === (sourceInput.runtimeId === 'cpp' ? 'main.cpp' : 'main.py'));
@@ -847,12 +854,37 @@ async function saveGitHubRevision(bot, sourceInput) {
   if (!source.trim()) throw new Error('File mã nguồn GitHub đang trống.');
   const syntaxError = sourceSyntaxCheck(source, sourceInput.runtimeId);
   if (syntaxError) throw new Error(syntaxError);
-  const body = { source, runtimeId: sourceInput.runtimeId, executionMode: state.sourceExecutionMode };
   const commitSha = /^[0-9a-f]{40}$/i.test(selected.ref) ? selected.ref.toLowerCase() : null;
+  return { source, selected, commitSha };
+}
+
+async function saveGitHubRevision(bot, sourceInput) {
+  const { source, selected, commitSha } = await resolveGitHubSource(sourceInput);
+  const body = { source, runtimeId: sourceInput.runtimeId, executionMode: state.sourceExecutionMode };
   if (selected.repositoryUrl && commitSha) Object.assign(body, { githubRepositoryUrl: selected.repositoryUrl, githubCommitSha: commitSha });
   const revision = await api(`/bots/${bot.id}/revisions`, { method: 'POST', body: JSON.stringify(body) });
   await api(`/bots/${bot.id}/revisions/${revision.revisionId}/select`, { method: 'POST', body: JSON.stringify({}) });
   return { ...revision, githubCommitSha: commitSha };
+}
+
+async function loadGitHubSourceIntoEditor() {
+  const sourceInput = botSourceInput();
+  if (sourceInput.error) return showBotFormError(sourceInput.error, sourceInput.field);
+  const button = $('#load-github-source');
+  await runPending('load-github-source', button, async () => {
+    if (state.botWorkspaceReadOnly && state.botWorkspaceMode !== 'create') {
+      const revision = currentPracticeRevision();
+      if (revision) await loadRevisionSource(revision, 'draft', false);
+    }
+    const { source, selected } = await resolveGitHubSource(sourceInput);
+    $('#bot-source-editor').value = source;
+    setSourceError('');
+    setSourceDirty(true);
+    updateEditorMetrics();
+    syncSourceEditorTools();
+    setWorkspaceStatus(`Đã nạp ${selected.filename} từ GitHub · Chưa lưu`);
+    showToast('Đã nạp mã nguồn vào editor. Hãy kiểm tra trước khi lưu.', 'success');
+  });
 }
 
 function openBotDialog(bot = null) {

@@ -151,7 +151,7 @@ export async function buildStaticReplayPreview({ exportDir, outputDir = path.joi
 
   await writeAtomic(path.join(output, 'index.html'), (await fs.readFile(path.join(projectRoot, 'index.html'), 'utf8'))
     .replace('<head>', '<head><link rel="icon" href="data:,">')
-    .replace('<script src="/js/page-loader.js?v=fragment-loader-3"></script>', '<script src="./static-preview-loader.js"></script><script src="./static-preview-bootstrap.js"></script>'));
+    .replace('<script src="/js/page-loader.js?v=fragment-loader-4"></script>', '<script src="./static-preview-loader.js"></script><script src="./static-preview-bootstrap.js"></script>'));
   await writeAtomic(path.join(output, 'static-preview-loader.js'), staticLoader);
   await writeAtomic(path.join(output, 'static-preview-bootstrap.js'), bootstrapSource(base));
   await writeAtomic(path.join(output, '_headers'), `/*\n  X-Content-Type-Options: nosniff\n  Referrer-Policy: no-referrer\n  Permissions-Policy: camera=(), microphone=(), geolocation=()\n/tournaments/:tournament/index.json\n  Cache-Control: public, max-age=60, must-revalidate\n/tournaments/:tournament/matches/:replay.json\n  Cache-Control: public, max-age=31536000, immutable\n`);

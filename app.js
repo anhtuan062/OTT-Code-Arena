@@ -50,6 +50,7 @@ const ACTION_LABELS = {
   generate_schedule: 'Tạo lịch thi đấu',
   start: 'Bắt đầu giải đấu',
   run_all: 'Chạy tất cả trận đấu',
+  stop_execution: 'Dừng trận đấu',
   cancel: 'Hủy giải đấu',
 };
 
@@ -59,6 +60,7 @@ const ACTION_SUCCESS_MESSAGES = {
   generate_schedule: 'Đã tạo lịch thi đấu.',
   start: 'Đã bắt đầu giải đấu.',
   run_all: 'Đã đưa các trận đấu vào hàng đợi.',
+  stop_execution: 'Đã dừng thực thi trận đấu.',
   cancel: 'Đã hủy giải đấu.',
 };
 
@@ -1664,7 +1666,9 @@ function updateSourceRuntimeMeta(runtimeId) {
   if (help) help.textContent = `${runtimeLabel} · UTF-8 · Tối đa 64 KiB`;
   if (sourceFile) {
     sourceFile.accept = isPython ? '.py,text/x-python' : '.cpp,text/x-c++';
-    sourceFile.disabled = typeof state !== 'undefined' && state.botWorkspaceReadOnly === true;
+    // Uploading from an immutable revision creates an editable draft; the
+    // persisted revision itself remains read-only and unchanged.
+    sourceFile.disabled = false;
   }
 }
 
@@ -1676,11 +1680,6 @@ async function importBotSourceFile(event) {
   const extension = runtimeId === 'python3' ? '.py' : '.cpp';
   const runtimeLabel = runtimeId === 'python3' ? 'Python 3' : 'C++17';
   const resetInput = () => { if (input) input.value = ''; };
-  if (state.botWorkspaceReadOnly) {
-    setSourceError('Hãy tạo bản nháp trước khi tải file mã nguồn.');
-    resetInput();
-    return;
-  }
   if (!file.name.toLowerCase().endsWith(extension)) {
     setSourceError(`File không khớp với ngôn ngữ ${runtimeLabel}. Hãy chọn file ${extension}.`);
     resetInput();
@@ -1692,6 +1691,15 @@ async function importBotSourceFile(event) {
     return;
   }
   try {
+    if (state.botWorkspaceReadOnly && state.botWorkspaceMode !== 'create') {
+      const revision = currentPracticeRevision();
+      if (revision) await loadRevisionSource(revision, 'draft', false);
+      else {
+        state.botWorkspaceReadOnly = false;
+        $('#bot-source-editor').readOnly = false;
+        state.botWorkspaceDraftBase = null;
+      }
+    }
     let source;
     try {
       source = new TextDecoder('utf-8', { fatal: true }).decode(await file.arrayBuffer());
@@ -2024,7 +2032,6 @@ async function loadRevisionSource(revision, mode = 'view', confirmBeforeReplace 
     updateSourceModeMeta(revision.executionMode, revision.sdkVersion);
     state.sourceExecutionMode = revision.executionMode || 'raw';
     state.botWorkspaceReadOnly = mode !== 'draft';
-    const sourceFile = $('#bot-source-file'); if (sourceFile) sourceFile.disabled = state.botWorkspaceReadOnly;
     state.botWorkspaceDraftBase = mode === 'draft' ? revision.revisionId : null;
     $('#bot-source-editor').readOnly = state.botWorkspaceReadOnly;
     setWorkspaceStatus(state.botWorkspaceReadOnly ? 'Chỉ đọc · Phiên bản bất biến' : 'Bản nháp từ phiên bản đã lưu');
@@ -2043,6 +2050,8 @@ async function loadBotRevisions(bot) {
     $('#bot-source-editor').value = STRATEGY_TEMPLATES.cpp;
     $('#bot-source-editor').readOnly = false;
     state.botWorkspaceReadOnly = false;
+    const sourceFile = $('#bot-source-file');
+    if (sourceFile) sourceFile.disabled = false;
     state.sourceExecutionMode = 'strategy';
     updateSourceModeMeta('strategy', '1.0.0');
     setWorkspaceStatus('Bản nháp mới');
@@ -2243,7 +2252,7 @@ function botSourceInput() {
   return { runtimeId, source };
 }
 
-async function saveGitHubRevision(bot, sourceInput) {
+async function resolveGitHubSource(sourceInput) {
   const parsed = parseClientGithubUrl(sourceInput.githubUrl);
   const candidates = await clientGithubCandidates(parsed, sourceInput.runtimeId);
   const compatible = candidates.filter(item => item.filename === (sourceInput.runtimeId === 'cpp' ? 'main.cpp' : 'main.py'));
@@ -2254,12 +2263,37 @@ async function saveGitHubRevision(bot, sourceInput) {
   if (!source.trim()) throw new Error('File mã nguồn GitHub đang trống.');
   const syntaxError = sourceSyntaxCheck(source, sourceInput.runtimeId);
   if (syntaxError) throw new Error(syntaxError);
-  const body = { source, runtimeId: sourceInput.runtimeId, executionMode: state.sourceExecutionMode };
   const commitSha = /^[0-9a-f]{40}$/i.test(selected.ref) ? selected.ref.toLowerCase() : null;
+  return { source, selected, commitSha };
+}
+
+async function saveGitHubRevision(bot, sourceInput) {
+  const { source, selected, commitSha } = await resolveGitHubSource(sourceInput);
+  const body = { source, runtimeId: sourceInput.runtimeId, executionMode: state.sourceExecutionMode };
   if (selected.repositoryUrl && commitSha) Object.assign(body, { githubRepositoryUrl: selected.repositoryUrl, githubCommitSha: commitSha });
   const revision = await api(`/bots/${bot.id}/revisions`, { method: 'POST', body: JSON.stringify(body) });
   await api(`/bots/${bot.id}/revisions/${revision.revisionId}/select`, { method: 'POST', body: JSON.stringify({}) });
   return { ...revision, githubCommitSha: commitSha };
+}
+
+async function loadGitHubSourceIntoEditor() {
+  const sourceInput = botSourceInput();
+  if (sourceInput.error) return showBotFormError(sourceInput.error, sourceInput.field);
+  const button = $('#load-github-source');
+  await runPending('load-github-source', button, async () => {
+    if (state.botWorkspaceReadOnly && state.botWorkspaceMode !== 'create') {
+      const revision = currentPracticeRevision();
+      if (revision) await loadRevisionSource(revision, 'draft', false);
+    }
+    const { source, selected } = await resolveGitHubSource(sourceInput);
+    $('#bot-source-editor').value = source;
+    setSourceError('');
+    setSourceDirty(true);
+    updateEditorMetrics();
+    syncSourceEditorTools();
+    setWorkspaceStatus(`Đã nạp ${selected.filename} từ GitHub · Chưa lưu`);
+    showToast('Đã nạp mã nguồn vào editor. Hãy kiểm tra trước khi lưu.', 'success');
+  });
 }
 
 function openBotDialog(bot = null) {
@@ -3408,7 +3442,11 @@ function registrationSubmissionStatusText(requestItem) {
   const preflight = requestItem?.preflight || { status: 'not_started' };
   const diagnostic = preflight.diagnostic && typeof preflight.diagnostic === 'object' ? preflight.diagnostic : {};
   const stage = diagnostic.stage ? ` · ${diagnostic.stage}` : '';
-  if (preflight.status === 'passed') return 'Bot đã được kiểm tra thành công và đang chờ Ban tổ chức duyệt.';
+  if (preflight.status === 'passed') {
+    if (requestItem?.status === 'approved') return 'Bot đã được kiểm tra thành công và yêu cầu đã được Ban tổ chức duyệt.';
+    if (requestItem?.status === 'rejected') return 'Bot đã được kiểm tra thành công nhưng yêu cầu tham gia đã bị từ chối.';
+    return 'Bot đã được kiểm tra thành công; yêu cầu chưa phải là tham gia chính thức và đang chờ Ban tổ chức duyệt.';
+  }
   if (preflight.status === 'failed' || preflight.status === 'expired') return `Kiểm tra chưa đạt${preflight.errorCode ? ` · ${preflight.errorCode}` : ''}. Hãy chờ Ban tổ chức kiểm tra lại revision này.${stage}`;
   if (preflight.status === 'pending') return `Đang kiểm tra revision${stage}…`;
   return 'Yêu cầu đã được tiếp nhận và đang chờ đưa vào hàng đợi kiểm tra.';
@@ -3786,7 +3824,7 @@ async function viewTournament(id) {
 function appendTournamentAction(container, tournamentId, authRevision, viewRevision, label, action, confirmation = false, tournamentName = '') {
   const buttonClass = action === 'cancel' || action === 'delete' ? 'secondary-btn tournament-action tournament-action-danger' : 'primary-btn tournament-action';
   const button = actionButton(label, () => confirmation ? confirmTournamentAction(tournamentId, authRevision, viewRevision, action, label, tournamentName) : tournamentAction(tournamentId, authRevision, viewRevision, action), `tournament:${tournamentId}:${action}`, buttonClass);
-  const actionIcon = action === 'cancel' || action === 'delete' ? 'td-icon-circle-x' : action === 'open_registration' ? 'td-icon-user-round-plus' : action === 'run_all' ? 'td-icon-play' : null;
+  const actionIcon = action === 'cancel' || action === 'delete' || action === 'stop_execution' ? 'td-icon-circle-x' : action === 'open_registration' ? 'td-icon-user-round-plus' : action === 'run_all' ? 'td-icon-play' : null;
   if (actionIcon) {
     const labelNode = button.firstChild;
     button.insertBefore(icon(actionIcon), labelNode);
@@ -6912,18 +6950,17 @@ function renderMultiStageActions(tournamentId, authRevision, viewRevision, progr
   const running = Number(execution.running) || 0;
   const activePairings = Number(execution.inProgress) || running;
   const failed = Number(execution.failed) || 0;
-  if (pending <= 0) return;
+  if (pending <= 0 && activePairings <= 0) return;
 
+  const action = activePairings > 0 ? 'stop_execution' : 'run_all';
   const label = activePairings > 0
-    ? 'Đang chạy trận đấu'
+    ? actionLabel('stop_execution')
     : failed > 0
       ? 'Chạy lại giải đấu'
       : actionLabel('run_all');
-  const runButton = appendTournamentAction(actions, tournamentId, authRevision, viewRevision, label, 'run_all', true);
+  const runButton = appendTournamentAction(actions, tournamentId, authRevision, viewRevision, label, action, true, progress.name || 'giải đấu');
   if (activePairings > 0) {
-    runButton.disabled = true;
-    runButton.setAttribute('aria-busy', 'true');
-    runButton.title = 'Các trận đấu đang được xử lý.';
+    runButton.title = 'Dừng thực thi các trận đấu đang xử lý.';
   }
 }
 
@@ -9148,6 +9185,11 @@ function confirmTournamentAction(tournamentId, authRevision, viewRevision, actio
     copy.textContent = `Bạn có chắc muốn mở đăng ký cho giải đấu “${tournamentName}” không?`;
     support.textContent = 'Sau khi mở, người chơi có thể gửi yêu cầu đăng ký Bot theo thể lệ của giải đấu.';
     $('#confirm-tournament-action').textContent = 'Mở đăng ký';
+  } else if (action === 'stop_execution') {
+    title.textContent = 'Dừng trận đấu';
+    copy.textContent = 'Bạn có chắc muốn dừng thực thi các trận đấu đang chạy không?';
+    support.textContent = 'Các kết quả đã commit được giữ nguyên; trận chưa hoàn tất có thể chạy lại sau.';
+    $('#confirm-tournament-action').textContent = 'Dừng trận đấu';
   } else {
     title.textContent = label;
     copy.textContent = 'Đưa tất cả trận đấu còn lại vào hàng đợi?';
@@ -9266,7 +9308,7 @@ async function submitTournamentRegistration() {
     $('#reg-part-name').value = '';
     $('#reg-part-name').removeAttribute('aria-invalid');
     $('#reg-bot-select').removeAttribute('aria-invalid');
-    showToast('Yêu cầu đã được tiếp nhận. Đang kiểm tra Bot.', 'success');
+    showToast('Đã gửi Bot đi kiểm tra. Chưa tham gia chính thức; hãy chờ Ban tổ chức duyệt.', 'success');
     startRegistrationSubmissionPolling(tournamentId, result.requestId);
     if (sourceView === 'tournament-detail') await refreshTournamentDetail();
     else if (sourceView === 'dashboard') await loadDashboard();
@@ -10845,6 +10887,15 @@ function updatePlaygroundCodeStats() {
   const chars = code.length;
   const lines = code ? code.split('\n').length : 1;
   stats.textContent = `${chars.toLocaleString()} ký tự · ${lines} dòng`;
+  syncPlaygroundCodeHighlight();
+}
+
+function syncPlaygroundCodeHighlight() {
+  const codeArea = $('#playground-code');
+  const highlight = $('#playground-code-highlight');
+  if (!codeArea || !highlight || typeof renderSourceHighlight !== 'function') return;
+  renderSourceHighlight(highlight, codeArea.value);
+  highlight.style.transform = `translate(${-codeArea.scrollLeft}px, ${-codeArea.scrollTop}px)`;
 }
 
 function renderPlaygroundBoard() {
@@ -11351,6 +11402,7 @@ function setupPlaygroundEvents() {
   });
 
   $('#playground-code')?.addEventListener('input', updatePlaygroundCodeStats);
+  $('#playground-code')?.addEventListener('scroll', syncPlaygroundCodeHighlight, { passive: true });
 
   $('#playground-bot-selector')?.addEventListener('change', async (e) => {
     const botId = e.target.value;
@@ -11540,6 +11592,12 @@ function bindEvents() {
   on('#bot-source-file', 'change', event => void importBotSourceFile(event), { feature: 'bot-source-file-upload' });
   on('#bot-source-editor', 'input', () => setSourceDirty(true));
   on('#bot-github-url', 'input', () => setSourceDirty(true));
+  on('#bot-github-url', 'keydown', event => {
+    if (event.key !== 'Enter' || event.isComposing) return;
+    event.preventDefault();
+    void loadGitHubSourceIntoEditor();
+  }, { feature: 'bot-github-source-enter' });
+  on('#load-github-source', 'click', () => void loadGitHubSourceIntoEditor(), { feature: 'bot-github-source-load' });
   on('#bot-source-editor', 'keydown', event => {
     if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Home', 'End', 'PageUp', 'PageDown'].includes(event.key)) event.stopPropagation();
     if (event.key === 'Enter' && !event.shiftKey && !event.ctrlKey && !event.metaKey && !event.target.readOnly) {

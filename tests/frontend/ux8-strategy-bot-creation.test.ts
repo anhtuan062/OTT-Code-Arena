@@ -28,11 +28,18 @@ describe('UX.8 Strategy SDK-only Bot creation', () => {
   it('offers a runtime-matched UTF-8 source file upload without changing the revision API', async () => {
     const [app, page] = await Promise.all([source('app.js'), source('views/pages/bot-workspace.html')]);
     expect(page).toContain('id="bot-source-file"');
+    expect(page).toContain('id="load-github-source"');
+    expect(page).toContain('>Nạp mã</button>');
+    expect(page).toContain('>GitHub URL <small>');
     expect(page).toContain('accept=".cpp,text/x-c++"');
     expect(app).toContain('function importBotSourceFile(event)');
     expect(app).toContain("new TextDecoder('utf-8', { fatal: true })");
     expect(app).toContain("file.size > 64 * 1024");
     expect(app).toContain("on('#bot-source-file', 'change'");
+    expect(app).toContain('function loadGitHubSourceIntoEditor()');
+    expect(app).toContain("on('#bot-github-url', 'keydown'");
+    expect(app).toContain('sourceFile.disabled = false');
+    expect(app).toContain("loadRevisionSource(revision, 'draft', false)");
     expect(app).toContain('body: JSON.stringify({ source, runtimeId, executionMode: state.sourceExecutionMode })');
   });
 

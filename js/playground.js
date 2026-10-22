@@ -137,6 +137,15 @@ function updatePlaygroundCodeStats() {
   const chars = code.length;
   const lines = code ? code.split('\n').length : 1;
   stats.textContent = `${chars.toLocaleString()} ký tự · ${lines} dòng`;
+  syncPlaygroundCodeHighlight();
+}
+
+function syncPlaygroundCodeHighlight() {
+  const codeArea = $('#playground-code');
+  const highlight = $('#playground-code-highlight');
+  if (!codeArea || !highlight || typeof renderSourceHighlight !== 'function') return;
+  renderSourceHighlight(highlight, codeArea.value);
+  highlight.style.transform = `translate(${-codeArea.scrollLeft}px, ${-codeArea.scrollTop}px)`;
 }
 
 function renderPlaygroundBoard() {
@@ -643,6 +652,7 @@ function setupPlaygroundEvents() {
   });
 
   $('#playground-code')?.addEventListener('input', updatePlaygroundCodeStats);
+  $('#playground-code')?.addEventListener('scroll', syncPlaygroundCodeHighlight, { passive: true });
 
   $('#playground-bot-selector')?.addEventListener('change', async (e) => {
     const botId = e.target.value;

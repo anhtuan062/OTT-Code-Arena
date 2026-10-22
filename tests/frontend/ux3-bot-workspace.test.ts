@@ -44,4 +44,12 @@ describe('UX.3 Bot management and strategy workspace', () => {
     expect(css).toMatch(/\.bot-revision-item\s*\{[\s\S]*?width:\s*100%;[\s\S]*?min-width:\s*0;[\s\S]*?max-width:\s*100%;[\s\S]*?box-sizing:\s*border-box/);
     expect(css).toMatch(/\.bot-revision-meta\s*\{[\s\S]*?min-width:\s*0/);
   });
+  it('applies compact layout and dark background to the bot source editor', async () => {
+    const css = await source('styles/components/app-shell.css');
+    // Dark/black background for code editor instead of green
+    expect(css).toMatch(/\.bot-workspace-page\s+\.source-code-layer[\s\S]*?background:\s*#1e1e1e/);
+    expect(css).toMatch(/\.bot-workspace-page\s+\.source-highlight[\s\S]*?background:\s*#1e1e1e/);
+    // Compact 4-column grid for bot workspace info row
+    expect(css).toMatch(/\.bot-workspace-page\s+\.bot-workspace-info-row[\s\S]*?grid-template-columns/);
+  });
 });

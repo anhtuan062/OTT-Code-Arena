@@ -45,6 +45,7 @@ const ACTION_LABELS = {
   generate_schedule: 'Tạo lịch thi đấu',
   start: 'Bắt đầu giải đấu',
   run_all: 'Chạy tất cả trận đấu',
+  stop_execution: 'Dừng trận đấu',
   cancel: 'Hủy giải đấu',
 };
 
@@ -54,6 +55,7 @@ const ACTION_SUCCESS_MESSAGES = {
   generate_schedule: 'Đã tạo lịch thi đấu.',
   start: 'Đã bắt đầu giải đấu.',
   run_all: 'Đã đưa các trận đấu vào hàng đợi.',
+  stop_execution: 'Đã dừng thực thi trận đấu.',
   cancel: 'Đã hủy giải đấu.',
 };
 

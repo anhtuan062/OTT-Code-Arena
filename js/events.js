@@ -108,6 +108,12 @@ function bindEvents() {
   on('#bot-source-file', 'change', event => void importBotSourceFile(event), { feature: 'bot-source-file-upload' });
   on('#bot-source-editor', 'input', () => setSourceDirty(true));
   on('#bot-github-url', 'input', () => setSourceDirty(true));
+  on('#bot-github-url', 'keydown', event => {
+    if (event.key !== 'Enter' || event.isComposing) return;
+    event.preventDefault();
+    void loadGitHubSourceIntoEditor();
+  }, { feature: 'bot-github-source-enter' });
+  on('#load-github-source', 'click', () => void loadGitHubSourceIntoEditor(), { feature: 'bot-github-source-load' });
   on('#bot-source-editor', 'keydown', event => {
     if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Home', 'End', 'PageUp', 'PageDown'].includes(event.key)) event.stopPropagation();
     if (event.key === 'Enter' && !event.shiftKey && !event.ctrlKey && !event.metaKey && !event.target.readOnly) {

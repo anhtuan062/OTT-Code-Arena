@@ -225,17 +225,17 @@ describe('Multi-stage frontend foundation', () => {
     expect(app).toContain('function renderMultiStageActions(tournamentId, authRevision, viewRevision, progress, tournament = null)');
     expect(app).toContain("if (state.user?.role !== 'organizer') return;");
     expect(app).toContain("if (status !== 'running') return;");
-    expect(app).toContain("if (pending <= 0) return;");
-    expect(app).toContain("appendTournamentAction(actions, tournamentId, authRevision, viewRevision, label, 'run_all', true)");
+    expect(app).toContain("if (pending <= 0 && activePairings <= 0) return;");
+    expect(app).toContain("appendTournamentAction(actions, tournamentId, authRevision, viewRevision, label, action, true");
     expect(app).toContain('renderMultiStageActions(tournamentId, authRevision, viewRevision, progress, tournament);');
   });
 
   it('keeps the multi-stage run-all action guarded while matches are already running', async () => {
     const app = await source('app.js');
     expect(app).toContain("const running = Number(execution.running) || 0;");
-    expect(app).toContain("runButton.disabled = true;");
-    expect(app).toContain("runButton.setAttribute('aria-busy', 'true');");
-    expect(app).toContain("actionLabel('run_all')");
+    expect(app).toContain("const action = activePairings > 0 ? 'stop_execution' : 'run_all';");
+    expect(app).toContain("actionLabel('stop_execution')");
+    expect(app).toContain("appendTournamentAction(actions, tournamentId, authRevision, viewRevision, label, action, true");
     expect(app).toContain("method: 'POST', body: action === 'publish' ? undefined : JSON.stringify({ action, ...payload })");
   });
 

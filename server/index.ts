@@ -2440,6 +2440,17 @@ app.post('/api/tournaments/:id/action', requireAuth, requireRole('organizer'), r
         activeTournamentRuns.delete(tournamentId);
         result = await manager.cancelTournament(tournamentId);
         break;
+      case 'stop_execution': {
+        const executionTaskId = `run_all_${tournamentId}`;
+        const taskStatus = executionQueue.getStatus(executionTaskId);
+        if (taskStatus !== 'queued' && taskStatus !== 'active') {
+          return res.status(409).json({ error: 'Tournament execution is not active' });
+        }
+        executionQueue.cancel(executionTaskId);
+        activeTournamentRuns.delete(tournamentId);
+        tournamentRunOwners.delete(executionTaskId);
+        return res.json({ message: 'Match execution stopped' });
+      }
       default:
         return res.status(400).json({ error: 'Invalid action' });
     }

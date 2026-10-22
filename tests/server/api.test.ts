@@ -191,6 +191,23 @@ describe('Server API Security', () => {
       expect(statuses).toContain(409);
     });
 
+    it('stops only an active execution task without cancelling the tournament', async () => {
+      const createRes = await organizerAgent
+        .post('/api/tournaments')
+        .set('x-csrf-token', organizerCsrf)
+        .send({ name: 'Stop execution validation' });
+      const tournamentId = createRes.body.tournamentId as string;
+
+      const response = await organizerAgent
+        .post(`/api/tournaments/${tournamentId}/action`)
+        .set('x-csrf-token', organizerCsrf)
+        .send({ action: 'stop_execution' });
+
+      expect(response.status).toBe(409);
+      expect(response.body.error).toBe('Tournament execution is not active');
+      expect((await organizerAgent.get(`/api/tournaments/${tournamentId}`)).body.status).toBe('draft');
+    });
+
     it('restricts result publication to the owning organizer and completed tournaments', async () => {
       const created = await organizerAgent.post('/api/tournaments')
         .set('x-csrf-token', organizerCsrf)

@@ -156,11 +156,11 @@ describe('Phase 5 Tournament Live Operations Workspace', () => {
     // Header actions
     expect(tournaments).toContain("if (status !== 'running') return;");
     expect(tournaments).toContain('const activePairings = Number(execution.inProgress) || running;');
-    expect(tournaments).toContain("'Đang chạy trận đấu'");
+    expect(tournaments).toContain("actionLabel('stop_execution')");
+    expect(tournaments).toContain("const action = activePairings > 0 ? 'stop_execution' : 'run_all';");
     expect(tournaments).toContain("'Chạy lại giải đấu'");
     expect(tournaments).toContain("actionLabel('run_all')");
-    expect(tournaments).toContain('runButton.disabled = true;');
-    expect(tournaments).toContain("runButton.setAttribute('aria-busy', 'true');");
+    expect(tournaments).toContain("runButton.title = 'Dừng thực thi các trận đấu đang xử lý.';");
 
     // Execution status text in status row
     expect(tournaments).toContain("'Giải đang diễn ra · Scheduler sẵn sàng'");

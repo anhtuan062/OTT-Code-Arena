@@ -28,9 +28,10 @@
             <option value="cpp">C++17</option>
             <option value="python3">Python 3</option>
           </select></label>
-        <label class="github-source-picker" for="bot-github-url"><span>GitHub repository URL <small>(tùy chọn)</small></span><input
+        <label class="github-source-picker" for="bot-github-url"><span>GitHub URL <small>(tùy chọn)</small></span><input
             id="bot-github-url" class="input-shell" type="url" inputmode="url" autocomplete="url"
-            placeholder="https://github.com/owner/repository" aria-describedby="bot-source-error"></label>
+            placeholder="https://github.com/owner/repository" aria-describedby="bot-source-error"><button id="load-github-source"
+            class="secondary-btn github-source-load" type="button">Nạp mã</button></label>
         <label class="source-file-picker" for="bot-source-file"><span>Tải file mã nguồn <small>(.cpp hoặc .py)</small></span><input
             id="bot-source-file" class="input-shell" type="file" accept=".cpp,text/x-c++" aria-describedby="bot-source-error"></label>
       </div>

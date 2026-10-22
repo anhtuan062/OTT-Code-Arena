@@ -328,6 +328,8 @@ describe('Phase 2 Registration Management Workspace', () => {
     expect(start).toBeGreaterThanOrEqual(0);
     expect(end).toBeGreaterThan(start);
     expect(submissionStatus).toContain('preflight.status');
+    expect(submissionStatus).toContain('requestItem?.status === \'approved\'');
+    expect(submissionStatus).toContain('chưa phải là tham gia chính thức');
     expect(submissionStatus).toContain('diagnostic.stage');
     expect(submissionStatus).toContain('preflightDiagnosticText(preflight)');
     expect(submissionStatus).not.toMatch(/queue\s*(position|length)|queue position|\b\d+%/i);

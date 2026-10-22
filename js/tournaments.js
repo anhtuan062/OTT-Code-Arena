@@ -423,7 +423,11 @@ function registrationSubmissionStatusText(requestItem) {
   const preflight = requestItem?.preflight || { status: 'not_started' };
   const diagnostic = preflight.diagnostic && typeof preflight.diagnostic === 'object' ? preflight.diagnostic : {};
   const stage = diagnostic.stage ? ` · ${diagnostic.stage}` : '';
-  if (preflight.status === 'passed') return 'Bot đã được kiểm tra thành công và đang chờ Ban tổ chức duyệt.';
+  if (preflight.status === 'passed') {
+    if (requestItem?.status === 'approved') return 'Bot đã được kiểm tra thành công và yêu cầu đã được Ban tổ chức duyệt.';
+    if (requestItem?.status === 'rejected') return 'Bot đã được kiểm tra thành công nhưng yêu cầu tham gia đã bị từ chối.';
+    return 'Bot đã được kiểm tra thành công; yêu cầu chưa phải là tham gia chính thức và đang chờ Ban tổ chức duyệt.';
+  }
   if (preflight.status === 'failed' || preflight.status === 'expired') return `Kiểm tra chưa đạt${preflight.errorCode ? ` · ${preflight.errorCode}` : ''}. Hãy chờ Ban tổ chức kiểm tra lại revision này.${stage}`;
   if (preflight.status === 'pending') return `Đang kiểm tra revision${stage}…`;
   return 'Yêu cầu đã được tiếp nhận và đang chờ đưa vào hàng đợi kiểm tra.';
@@ -801,7 +805,7 @@ async function viewTournament(id) {
 function appendTournamentAction(container, tournamentId, authRevision, viewRevision, label, action, confirmation = false, tournamentName = '') {
   const buttonClass = action === 'cancel' || action === 'delete' ? 'secondary-btn tournament-action tournament-action-danger' : 'primary-btn tournament-action';
   const button = actionButton(label, () => confirmation ? confirmTournamentAction(tournamentId, authRevision, viewRevision, action, label, tournamentName) : tournamentAction(tournamentId, authRevision, viewRevision, action), `tournament:${tournamentId}:${action}`, buttonClass);
-  const actionIcon = action === 'cancel' || action === 'delete' ? 'td-icon-circle-x' : action === 'open_registration' ? 'td-icon-user-round-plus' : action === 'run_all' ? 'td-icon-play' : null;
+  const actionIcon = action === 'cancel' || action === 'delete' || action === 'stop_execution' ? 'td-icon-circle-x' : action === 'open_registration' ? 'td-icon-user-round-plus' : action === 'run_all' ? 'td-icon-play' : null;
   if (actionIcon) {
     const labelNode = button.firstChild;
     button.insertBefore(icon(actionIcon), labelNode);
@@ -3927,18 +3931,17 @@ function renderMultiStageActions(tournamentId, authRevision, viewRevision, progr
   const running = Number(execution.running) || 0;
   const activePairings = Number(execution.inProgress) || running;
   const failed = Number(execution.failed) || 0;
-  if (pending <= 0) return;
+  if (pending <= 0 && activePairings <= 0) return;
 
+  const action = activePairings > 0 ? 'stop_execution' : 'run_all';
   const label = activePairings > 0
-    ? 'Đang chạy trận đấu'
+    ? actionLabel('stop_execution')
     : failed > 0
       ? 'Chạy lại giải đấu'
       : actionLabel('run_all');
-  const runButton = appendTournamentAction(actions, tournamentId, authRevision, viewRevision, label, 'run_all', true);
+  const runButton = appendTournamentAction(actions, tournamentId, authRevision, viewRevision, label, action, true, progress.name || 'giải đấu');
   if (activePairings > 0) {
-    runButton.disabled = true;
-    runButton.setAttribute('aria-busy', 'true');
-    runButton.title = 'Các trận đấu đang được xử lý.';
+    runButton.title = 'Dừng thực thi các trận đấu đang xử lý.';
   }
 }
 
@@ -6163,6 +6166,11 @@ function confirmTournamentAction(tournamentId, authRevision, viewRevision, actio
     copy.textContent = `Bạn có chắc muốn mở đăng ký cho giải đấu “${tournamentName}” không?`;
     support.textContent = 'Sau khi mở, người chơi có thể gửi yêu cầu đăng ký Bot theo thể lệ của giải đấu.';
     $('#confirm-tournament-action').textContent = 'Mở đăng ký';
+  } else if (action === 'stop_execution') {
+    title.textContent = 'Dừng trận đấu';
+    copy.textContent = 'Bạn có chắc muốn dừng thực thi các trận đấu đang chạy không?';
+    support.textContent = 'Các kết quả đã commit được giữ nguyên; trận chưa hoàn tất có thể chạy lại sau.';
+    $('#confirm-tournament-action').textContent = 'Dừng trận đấu';
   } else {
     title.textContent = label;
     copy.textContent = 'Đưa tất cả trận đấu còn lại vào hàng đợi?';
@@ -6281,7 +6289,7 @@ async function submitTournamentRegistration() {
     $('#reg-part-name').value = '';
     $('#reg-part-name').removeAttribute('aria-invalid');
     $('#reg-bot-select').removeAttribute('aria-invalid');
-    showToast('Yêu cầu đã được tiếp nhận. Đang kiểm tra Bot.', 'success');
+    showToast('Đã gửi Bot đi kiểm tra. Chưa tham gia chính thức; hãy chờ Ban tổ chức duyệt.', 'success');
     startRegistrationSubmissionPolling(tournamentId, result.requestId);
     if (sourceView === 'tournament-detail') await refreshTournamentDetail();
     else if (sourceView === 'dashboard') await loadDashboard();

@@ -67,11 +67,15 @@ globalThis.createElement = create;`, context);
 
     // HTML specifies readonly for playground code textarea and disabled for runtime selector
     expect(html).toMatch(/<textarea\s+id="playground-code"[^>]*readonly/);
+    expect(html).toContain('id="playground-code-highlight"');
     expect(html).toMatch(/<select\s+id="playground-runtime-selector"[^>]*disabled/);
     expect(html).toContain('playground-readonly-badge');
 
     // CSS provides readonly viewer styling
     expect(css).toMatch(/\.playground-code-area\[readonly\][\s\S]*?cursor:\s*default/);
+    expect(css).toMatch(/\.playground-editor-wrap[\s\S]*?background:\s*#1e1e1e/);
+    expect(css).toMatch(/\.playground-code-highlight[\s\S]*?background:\s*#1e1e1e/);
+    expect(css).toMatch(/\.playground-code-area\[readonly\][\s\S]*?color:\s*transparent/);
   });
 
   it('keeps the selected runtime available to Playground test success and error paths', async () => {
@@ -80,5 +84,6 @@ globalThis.createElement = create;`, context);
     expect(source).toMatch(/const runtimeId = \$\('\#playground-runtime-selector'\)\?\.value \|\| 'cpp';/);
     expect(source).toContain('runtimeId,');
     expect(source).toContain("runtimeId === 'cpp' ? 'C++17' : 'Python 3'");
+    expect(source).toContain('syncPlaygroundCodeHighlight');
   });
 });
