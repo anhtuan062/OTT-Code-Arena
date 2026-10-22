@@ -105,6 +105,7 @@ function bindEvents() {
   });
    on('#bot-source-runtime', 'change', event => switchSourceRuntime(event.target.value));
   on('#bot-source-runtime', 'change', event => updateSourceRuntimeMeta(event.target.value), { feature: 'bot-source-runtime-meta' });
+  on('#bot-source-file', 'change', event => void importBotSourceFile(event), { feature: 'bot-source-file-upload' });
   on('#bot-source-editor', 'input', () => setSourceDirty(true));
   on('#bot-github-url', 'input', () => setSourceDirty(true));
   on('#bot-source-editor', 'keydown', event => {

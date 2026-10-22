@@ -5,6 +5,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { appExport, closeServer, getTournamentManager, initServer } from '../../server/index.js';
 import { createControlledAccount } from '../../server/admin/role-bootstrap.js';
+import { createMultiStageTournament } from '../../tournament/multi-stage.js';
 
 describe('multi-stage conditional polling responses', () => {
   let dir: string;
@@ -72,16 +73,24 @@ describe('multi-stage conditional polling responses', () => {
   });
 
   it('keeps conditional validators correct for a populated multi-stage tournament', async () => {
-    const sourceId = 't-3ef92d17-eea6-4296-be69-61100f9dde4c';
     const populatedId = 'populated-conditional-multi-stage';
-    const sourceDir = path.join(process.cwd(), 'data', 'tournaments', sourceId);
-    const fixtureDir = path.join(dir, populatedId);
-    await fs.cp(sourceDir, fixtureDir, { recursive: true });
-    const tournamentPath = path.join(fixtureDir, 'tournament.json');
-    const tournament = JSON.parse(await fs.readFile(tournamentPath, 'utf8'));
-    tournament.tournamentId = populatedId;
-    tournament.metadata = { ...(tournament.metadata || {}), ownerId: ownerAccount.id };
-    await fs.writeFile(tournamentPath, JSON.stringify(tournament));
+    const created = (await (getTournamentManager() as any).loadTournament(tournamentId)).data;
+    const participants = Array.from({ length: 202 }, (_, index) => ({
+      participantId: `participant-${index + 1}`,
+      name: `Populated Bot ${index + 1}`,
+      bot: { botId: `bot-${index + 1}`, command: 'node', args: [] },
+      registeredAt: new Date(0).toISOString(),
+    }));
+    const tournament = createMultiStageTournament({
+      tournamentId: populatedId,
+      name: 'Populated conditional multi-stage',
+      participants,
+      matchConfig: created.matchConfig,
+      scoringConfig: created.scoringConfig,
+      metadata: { ownerId: ownerAccount.id },
+    });
+    tournament.status = 'running';
+    await (getTournamentManager() as any).repository.save(tournament);
 
     const progressUrl = `/api/tournaments/${populatedId}/progress`;
     const stagesUrl = `/api/tournaments/${populatedId}/stages?compact=true`;
@@ -101,8 +110,8 @@ describe('multi-stage conditional polling responses', () => {
     const login = await competitor.post('/api/auth/login').send({ username: competitorAccount.username, password: 'correct horse battery staple' });
     expect(login.status).toBe(200);
     const competitorRead = await competitor.get(progressUrl).set('if-none-match', firstProgress.headers.etag);
-    expect(competitorRead.status).toBe(200);
-    expect(competitorRead.headers.etag).toBeTruthy();
-    expect(competitorRead.body.status).toBe('running');
+    expect(competitorRead.status).toBe(304);
+    expect(competitorRead.headers.etag).toBe(firstProgress.headers.etag);
+    expect(competitorRead.text).toBe('');
   });
 });

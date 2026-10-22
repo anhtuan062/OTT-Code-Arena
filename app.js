@@ -1659,8 +1659,59 @@ function updateSourceRuntimeMeta(runtimeId) {
   const runtimeLabel = isLegacy ? 'JavaScript phiên bản cũ' : isPython ? 'Python 3' : 'C++17';
   const filename = $('#bot-source-filename');
   const help = $('#bot-source-help');
+  const sourceFile = $('#bot-source-file');
   if (filename) filename.textContent = isLegacy ? 'main.js' : isPython ? 'main.py' : 'main.cpp';
   if (help) help.textContent = `${runtimeLabel} · UTF-8 · Tối đa 64 KiB`;
+  if (sourceFile) {
+    sourceFile.accept = isPython ? '.py,text/x-python' : '.cpp,text/x-c++';
+    sourceFile.disabled = typeof state !== 'undefined' && state.botWorkspaceReadOnly === true;
+  }
+}
+
+async function importBotSourceFile(event) {
+  const input = event?.target || $('#bot-source-file');
+  const file = input?.files?.[0];
+  if (!file) return;
+  const runtimeId = $('#bot-source-runtime')?.value;
+  const extension = runtimeId === 'python3' ? '.py' : '.cpp';
+  const runtimeLabel = runtimeId === 'python3' ? 'Python 3' : 'C++17';
+  const resetInput = () => { if (input) input.value = ''; };
+  if (state.botWorkspaceReadOnly) {
+    setSourceError('Hãy tạo bản nháp trước khi tải file mã nguồn.');
+    resetInput();
+    return;
+  }
+  if (!file.name.toLowerCase().endsWith(extension)) {
+    setSourceError(`File không khớp với ngôn ngữ ${runtimeLabel}. Hãy chọn file ${extension}.`);
+    resetInput();
+    return;
+  }
+  if (file.size > 64 * 1024) {
+    setSourceError('Mã nguồn không được vượt quá 64 KiB.');
+    resetInput();
+    return;
+  }
+  try {
+    let source;
+    try {
+      source = new TextDecoder('utf-8', { fatal: true }).decode(await file.arrayBuffer());
+    } catch {
+      throw new Error('File phải được mã hóa UTF-8.');
+    }
+    if (!source.trim()) throw new Error('File mã nguồn không được để trống.');
+    $('#bot-source-editor').value = source;
+    const github = $('#bot-github-url');
+    if (github) github.value = '';
+    setSourceError('');
+    setSourceDirty(true);
+    updateEditorMetrics();
+    syncSourceEditorTools();
+    setWorkspaceStatus(`Đã tải ${file.name}`);
+  } catch (error) {
+    setSourceError(error?.message || 'Không thể đọc file mã nguồn.');
+  } finally {
+    resetInput();
+  }
 }
 
 function switchSourceRuntime(runtimeId) {
@@ -1973,6 +2024,7 @@ async function loadRevisionSource(revision, mode = 'view', confirmBeforeReplace 
     updateSourceModeMeta(revision.executionMode, revision.sdkVersion);
     state.sourceExecutionMode = revision.executionMode || 'raw';
     state.botWorkspaceReadOnly = mode !== 'draft';
+    const sourceFile = $('#bot-source-file'); if (sourceFile) sourceFile.disabled = state.botWorkspaceReadOnly;
     state.botWorkspaceDraftBase = mode === 'draft' ? revision.revisionId : null;
     $('#bot-source-editor').readOnly = state.botWorkspaceReadOnly;
     setWorkspaceStatus(state.botWorkspaceReadOnly ? 'Chỉ đọc · Phiên bản bất biến' : 'Bản nháp từ phiên bản đã lưu');
@@ -2073,6 +2125,7 @@ async function openBotWorkspace(bot = null) {
   state.sourceInitialSource = $('#bot-source-editor').value;
   updateEditorMetrics();
   $('#bot-source-editor').readOnly = false;
+  const sourceFile = $('#bot-source-file'); if (sourceFile) sourceFile.disabled = false;
   setWorkspaceStatus(bot ? 'Đang chuẩn bị bản nháp' : 'Bản nháp mới');
   // A new workspace starts with a built-in template. Loading that template is
   // not a user change, so leaving immediately must not show an unsaved warning.
@@ -2151,7 +2204,7 @@ function showBotFormError(message, field = null) {
   const error = field === 'bot-workspace-name' ? $('#bot-name-error') : $('#bot-source-error');
   const nameError = $('#bot-name-error');
   const sourceError = $('#bot-source-error');
-  ['bot-workspace-name', 'bot-source-runtime', 'bot-source-editor', 'bot-github-url'].forEach(id => document.getElementById(id)?.removeAttribute('aria-invalid'));
+  ['bot-workspace-name', 'bot-source-runtime', 'bot-source-editor', 'bot-github-url', 'bot-source-file'].forEach(id => document.getElementById(id)?.removeAttribute('aria-invalid'));
   if (field) document.getElementById(field)?.setAttribute('aria-invalid', 'true');
   if (nameError && nameError !== error) { nameError.textContent = ''; nameError.hidden = true; }
   if (sourceError && sourceError !== error) { sourceError.textContent = ''; sourceError.hidden = true; }
@@ -2161,7 +2214,7 @@ function showBotFormError(message, field = null) {
 function clearBotFormError() {
   const error = $('#bot-source-error');
   const nameError = $('#bot-name-error');
-  ['bot-workspace-name', 'bot-source-runtime', 'bot-source-editor', 'bot-github-url'].forEach(id => document.getElementById(id)?.removeAttribute('aria-invalid'));
+  ['bot-workspace-name', 'bot-source-runtime', 'bot-source-editor', 'bot-github-url', 'bot-source-file'].forEach(id => document.getElementById(id)?.removeAttribute('aria-invalid'));
   error.textContent = '';
   error.hidden = true;
   if (nameError) { nameError.textContent = ''; nameError.hidden = true; }
@@ -11484,6 +11537,7 @@ function bindEvents() {
   });
    on('#bot-source-runtime', 'change', event => switchSourceRuntime(event.target.value));
   on('#bot-source-runtime', 'change', event => updateSourceRuntimeMeta(event.target.value), { feature: 'bot-source-runtime-meta' });
+  on('#bot-source-file', 'change', event => void importBotSourceFile(event), { feature: 'bot-source-file-upload' });
   on('#bot-source-editor', 'input', () => setSourceDirty(true));
   on('#bot-github-url', 'input', () => setSourceDirty(true));
   on('#bot-source-editor', 'keydown', event => {
