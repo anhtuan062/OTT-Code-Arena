@@ -315,6 +315,7 @@ const create = (tag, options = {}) => {
   if (options.className) element.className = options.className;
   if (options.text !== undefined) element.textContent = String(options.text);
   if (options.type) element.type = options.type;
+  if (options.value !== undefined) element.value = String(options.value);
   if (options.attrs) Object.entries(options.attrs).forEach(([name, value]) => element.setAttribute(name, String(value)));
   if (Array.isArray(options.children)) element.append(...options.children.filter(Boolean));
   return element;
