@@ -89,7 +89,7 @@ async function loadPlaygroundBotsList(botsList = null) {
   }
 
   const currentVal = select.value;
-  select.replaceChildren(create('option', { value: '', text: 'Bản nháp tự do (hoặc mã hiện tại)' }));
+  select.replaceChildren(create('option', { value: '', text: '-- Chọn Bot để kiểm thử --' }));
 
   bots.forEach(bot => {
     select.appendChild(create('option', {
@@ -100,6 +100,12 @@ async function loadPlaygroundBotsList(botsList = null) {
 
   if (currentVal && bots.some(b => b.id === currentVal)) {
     select.value = currentVal;
+  } else if (!currentVal && bots.length > 0) {
+    const targetBot = (state.currentBot && bots.some(b => b.id === state.currentBot.id))
+      ? state.currentBot
+      : bots[0];
+    select.value = targetBot.id;
+    select.dispatchEvent(new Event('change'));
   }
 }
 
@@ -108,15 +114,15 @@ function setupPlaygroundCode() {
   const runtimeSelect = $('#playground-runtime-selector');
   if (!codeArea || !runtimeSelect) return;
 
+  codeArea.readOnly = true;
+  runtimeSelect.disabled = true;
+
   // Nếu người dùng vừa từ workspace sang và có draft
-  if (state.practiceDraft?.source && !codeArea.value.trim()) {
+  if (state.practiceDraft?.source) {
     codeArea.value = state.practiceDraft.source;
     if (state.practiceDraft.runtimeId) {
       runtimeSelect.value = state.practiceDraft.runtimeId;
     }
-  } else if (!codeArea.value.trim()) {
-    const runtime = runtimeSelect.value || 'cpp';
-    codeArea.value = PLAYGROUND_STARTER_CODE[runtime] || PLAYGROUND_STARTER_CODE.cpp;
   }
 
   updatePlaygroundCodeStats();
@@ -143,8 +149,8 @@ function renderPlaygroundBoard() {
   clear(columns);
   clear(rows);
 
-  'abcdefghi'.split('').forEach(col => columns.appendChild(create('span', { text: col })));
-  for (let r = 0; r < 9; r += 1) rows.appendChild(create('span', { text: String(r + 1) }));
+  'abcdefghi'.split('').forEach(col => columns.appendChild(create('span', { className: 'coord', text: col, attrs: { 'aria-hidden': 'true' } })));
+  for (let r = 0; r < 9; r += 1) rows.appendChild(create('span', { className: 'coord', text: String(r + 1), attrs: { 'aria-hidden': 'true' } }));
 
   for (let r = 0; r < 9; r += 1) {
     for (let c = 0; c < 9; c += 1) {
@@ -336,17 +342,16 @@ async function runPlaygroundSingleTest() {
     return;
   }
 
-  const codeArea = $('#playground-code');
-  const source = codeArea?.value || '';
-  if (!source.trim()) {
-    setPlaygroundToast('Hãy nhập mã nguồn Bot trước khi kiểm thử.', 'error');
-    return;
-  }
-
-  const runtimeSelect = $('#playground-runtime-selector');
-  const runtimeId = runtimeSelect?.value || 'cpp';
   const botSelect = $('#playground-bot-selector');
   const selectedBotId = botSelect?.value || '';
+
+  const codeArea = $('#playground-code');
+  const source = codeArea?.value || '';
+  const runtimeId = $('#playground-runtime-selector')?.value || 'cpp';
+  if (!selectedBotId || !source.trim()) {
+    setPlaygroundToast('Vui lòng chọn Bot từ danh sách trước khi kiểm thử.', 'error');
+    return;
+  }
 
   const runButton = $('#playground-run-test');
   const resultCard = $('#playground-result-card');
@@ -641,7 +646,18 @@ function setupPlaygroundEvents() {
 
   $('#playground-bot-selector')?.addEventListener('change', async (e) => {
     const botId = e.target.value;
-    if (!botId) return;
+    const codeArea = $('#playground-code');
+    const runtimeSelect = $('#playground-runtime-selector');
+
+    if (!botId) {
+      if (codeArea) {
+        codeArea.value = '';
+        codeArea.readOnly = true;
+        updatePlaygroundCodeStats();
+      }
+      if (runtimeSelect) runtimeSelect.disabled = true;
+      return;
+    }
 
     try {
       let bot = (state.bots || []).find(b => b.id === botId);
@@ -676,14 +692,14 @@ function setupPlaygroundEvents() {
 
       if (revisionId) {
         const revData = await api(`/bots/${botId}/revisions/${revisionId}`);
-        if (revData?.runtimeId) {
-          const runtimeSelect = $('#playground-runtime-selector');
-          if (runtimeSelect) runtimeSelect.value = revData.runtimeId;
+        if (revData?.runtimeId && runtimeSelect) {
+          runtimeSelect.value = revData.runtimeId;
+          runtimeSelect.disabled = true;
         }
         if (typeof revData?.source === 'string') {
-          const codeArea = $('#playground-code');
           if (codeArea) {
             codeArea.value = revData.source;
+            codeArea.readOnly = true;
             updatePlaygroundCodeStats();
           }
         }

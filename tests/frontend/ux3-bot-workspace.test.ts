@@ -33,4 +33,15 @@ describe('UX.3 Bot management and strategy workspace', () => {
     expect(app).toContain("navigate('bots')");
     expect(page).toContain('class="bot-revision-list"');
   });
+  it('keeps revision action buttons on a single row without wrapping', async () => {
+    const css = await source('styles/components/app-shell.css');
+    expect(css).toMatch(/\.bot-workspace-page\s+\.bot-revision-actions[\s\S]*?flex-wrap:\s*nowrap/);
+    expect(css).toMatch(/\.bot-workspace-page\s+\.bot-revision-actions\s+\.bot-action[\s\S]*?white-space:\s*nowrap/);
+  });
+  it('constrains selected revision cards inside the revision list when the workspace shrinks', async () => {
+    const css = await source('styles/components/app-shell.css');
+    expect(css).toMatch(/\.bot-revision-list\s*\{[\s\S]*?min-width:\s*0/);
+    expect(css).toMatch(/\.bot-revision-item\s*\{[\s\S]*?width:\s*100%;[\s\S]*?min-width:\s*0;[\s\S]*?max-width:\s*100%;[\s\S]*?box-sizing:\s*border-box/);
+    expect(css).toMatch(/\.bot-revision-meta\s*\{[\s\S]*?min-width:\s*0/);
+  });
 });

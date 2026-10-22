@@ -2405,6 +2405,7 @@
       margin-top: 14px;
       max-height: 360px;
       overflow-y: auto;
+      min-width: 0;
     }
 
     .bot-revision-item {
@@ -2414,6 +2415,11 @@
       border: 1px solid var(--border-light);
       border-radius: 9px;
       background: #fbfdfb;
+      width: 100%;
+      min-width: 0;
+      max-width: 100%;
+      box-sizing: border-box;
+      overflow: hidden;
     }
 
     .bot-revision-item.selected {
@@ -2426,11 +2432,13 @@
       align-items: center;
       justify-content: space-between;
       gap: 8px;
+      min-width: 0;
       color: var(--text-secondary);
       font-size: .75rem;
     }
 
     .bot-revision-digest {
+      min-width: 0;
       overflow: hidden;
       color: var(--text-faint);
       font: .67rem ui-monospace, SFMono-Regular, Consolas, monospace;
@@ -2440,8 +2448,10 @@
 
     .bot-revision-actions {
       display: flex;
-      gap: 8px;
-      flex-wrap: wrap;
+      gap: 6px;
+      flex-wrap: nowrap;
+      align-items: center;
+      width: 100%;
     }
 
     .bot-card-footer {
@@ -3776,27 +3786,64 @@
       margin: 18px auto 22px;
     }
 
-    .coord-header {
+    .coord-header,
+    .replay-coordinates.replay-columns {
       display: grid;
-      grid-template-columns: repeat(9, 1fr);
+      grid-template-columns: repeat(9, minmax(0, 1fr));
+      width: calc(100% - 26px);
       margin-left: 26px;
+      box-sizing: border-box;
+      padding-inline: 2px;
+      height: 24px;
+      line-height: 24px;
+      margin-bottom: 4px;
       color: var(--text-faint);
       font-size: .7rem;
       text-align: center;
+      user-select: none;
+    }
+
+    .coord-header span,
+    .coord-header .coord,
+    .replay-coordinates.replay-columns span,
+    .replay-coordinates.replay-columns .coord {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 0;
     }
 
     .replay-board-row {
       display: grid;
       grid-template-columns: 26px minmax(0, 1fr);
+      width: 100%;
+      align-items: stretch;
     }
 
-    .coord-side {
+    .coord-side,
+    .replay-coordinates.replay-rows {
       display: grid;
-      grid-template-rows: repeat(9, 1fr);
+      grid-template-rows: repeat(9, minmax(0, 1fr));
+      width: 26px;
+      height: 100%;
+      box-sizing: border-box;
+      padding-block: 2px;
       color: var(--text-faint);
       font-size: .7rem;
       text-align: center;
       align-items: center;
+      user-select: none;
+    }
+
+    .coord-side span,
+    .coord-side .coord,
+    .replay-coordinates.replay-rows span,
+    .replay-coordinates.replay-rows .coord {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 0;
+      height: 100%;
     }
 
     .replay-board {
@@ -4882,6 +4929,11 @@
       gap: 18px;
       margin-top: 18px;
       align-items: start;
+    }
+
+    .practice-output.practice-output--validation {
+      grid-template-columns: minmax(0, 1fr);
+      grid-template-areas: 'result';
     }
 
     .practice-result {
@@ -7776,7 +7828,7 @@
     .bot-workspace-page .bot-workspace-info-row .github-source-picker { grid-column:1 / -1; grid-row:2; min-width:0; }
     .bot-workspace-page .github-source-picker { display:grid; gap:5px; color:var(--text-secondary); font-size:.75rem; font-weight:700; }
     .bot-workspace-page .github-source-picker .input-shell { min-width:0; min-height:38px; }
-    .bot-workspace-page .bot-source-grid { grid-template-columns:minmax(0,3fr) minmax(150px,1fr); gap:8px; margin-top:12px; padding-top:8px; border-top:1px solid #e4e8e5; }
+    .bot-workspace-page .bot-source-grid { grid-template-columns:minmax(0,3fr) minmax(200px,1fr); gap:8px; margin-top:12px; padding-top:8px; border-top:1px solid #e4e8e5; }
     .bot-workspace-page .bot-editor-panel { min-width:0; padding:0; }
     .bot-workspace-page .bot-editor-panel .editor-panel-head { min-height:28px; margin:0; padding:8px 8px; border:1px solid #e1e7e2; border-bottom:0; border-radius:7px 7px 0 0; background:#fff; }
     .bot-workspace-page .bot-editor-panel .editor-panel-head label { font-size:.75rem; }
@@ -7804,8 +7856,32 @@
     .bot-workspace-page .bot-revision-technical summary { font-size:.64rem; }
     .bot-workspace-page .bot-revision-technical[open] summary { margin-bottom:3px; }
     .bot-workspace-page .bot-revision-digest { font-size:.58rem; }
-    .bot-workspace-page .bot-revision-actions { align-items:center; gap:4px; }
-    .bot-workspace-page .bot-revision-actions .bot-action { min-height:26px; padding:4px 7px; border-radius:5px; font-size:.62rem; }
+    .bot-workspace-page .bot-revision-actions {
+      display: flex;
+      flex-direction: row;
+      flex-wrap: nowrap;
+      align-items: center;
+      gap: 6px;
+      width: 100%;
+    }
+    .bot-workspace-page .bot-revision-actions .bot-action {
+      min-height: 26px;
+      padding: 4px 8px;
+      border-radius: 5px;
+      font-size: .64rem;
+      white-space: nowrap;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .bot-workspace-page .bot-revision-actions .bot-action:first-child {
+      flex: 1 1 auto;
+      min-width: 0;
+    }
+    .bot-workspace-page .bot-revision-actions .bot-delete {
+      flex: 0 0 auto;
+      min-width: auto;
+    }
     @media (max-width:680px) {
       .bot-workspace-page .bot-source-grid { grid-template-columns:1fr; }
       .bot-workspace-page .bot-revision-panel { padding:12px 0 0; border-top:1px solid #e1e7e2; border-left:0; }
@@ -7843,7 +7919,7 @@
       .bot-workspace-page .bot-source-workspace { padding:52px 20px 20px; }
       .bot-workspace-page .bot-workspace-info-row { grid-template-columns:minmax(0,1fr) minmax(0,1fr); }
       .bot-workspace-page .bot-workspace-info-row .source-runtime-picker { grid-column:2; grid-row:1; }
-      .bot-workspace-page .bot-source-grid { grid-template-columns:minmax(0,3fr) minmax(150px,1fr); }
+      .bot-workspace-page .bot-source-grid { grid-template-columns:minmax(0,3fr) minmax(200px,1fr); }
       .bot-workspace-page .bot-revision-panel { padding:0 0 0 10px; border-top:0; border-left:1px solid #e1e7e2; }
       .bot-workspace-page .bot-revision-list { max-height:calc(100dvh - 365px); }
       .bot-workspace-page .source-editor { height:calc(100dvh - 365px); }

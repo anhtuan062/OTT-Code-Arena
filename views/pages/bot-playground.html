@@ -116,7 +116,10 @@
             <span class="playground-code-sub">Strategy SDK</span>
           </div>
           <div class="playground-editor-quick-actions">
-            <button id="playground-reset-code" type="button" class="secondary-btn btn-xs">Mã mẫu</button>
+            <span class="playground-readonly-badge" title="Mã nguồn chỉ xem trong chế độ sa bàn">
+              <svg class="ui-icon" aria-hidden="true"><use href="#icon-lock"></use></svg>
+              <span>Chỉ xem</span>
+            </span>
           </div>
         </div>
 
@@ -124,12 +127,12 @@
           <label class="playground-field-label" for="playground-bot-selector">
             <span>Chọn Bot</span>
             <select id="playground-bot-selector" class="input-shell">
-              <option value="">Bản nháp tự do (hoặc mã hiện tại)</option>
+              <option value="">-- Chọn Bot để kiểm thử --</option>
             </select>
           </label>
           <label class="playground-field-label" for="playground-runtime-selector">
             <span>Ngôn ngữ</span>
-            <select id="playground-runtime-selector" class="input-shell">
+            <select id="playground-runtime-selector" class="input-shell" disabled>
               <option value="cpp">C++17</option>
               <option value="python3">Python 3</option>
             </select>
@@ -138,12 +141,12 @@
 
         <div class="playground-editor-wrap">
           <label for="playground-code" class="visually-hidden">Mã nguồn kiểm thử</label>
-          <textarea id="playground-code" class="source-editor playground-code-area" spellcheck="false" rows="11" placeholder="// Nhập hoặc dán mã Bot cần kiểm thử..."></textarea>
+          <textarea id="playground-code" class="source-editor playground-code-area" spellcheck="false" rows="11" placeholder="Vui lòng chọn Bot từ danh sách ở trên để hiển thị mã nguồn..." readonly></textarea>
         </div>
 
         <div class="playground-editor-footer">
-          <span id="playground-code-stats" class="field-help">0 ký tự · 1 dòng</span>
-          <span class="playground-kbd-hint"><kbd>Ctrl</kbd> + <kbd>Enter</kbd> để chạy</span>
+          <span id="playground-code-stats" class="field-help">0 ký tự · 0 dòng</span>
+          <span class="playground-readonly-note">Chỉ hiển thị mã nguồn Bot được chọn. Để sửa code, hãy vào Không gian Bot.</span>
         </div>
       </section>
 

@@ -198,7 +198,7 @@ function bindEvents() {
     }
     navigate('bot-playground');
   });
-  on('#practice-run', 'click', () => void testBotMatch());
+  on('#practice-run', 'click', () => void testBotRevision());
   on('#practice-replay-start', 'click', () => { stopPracticeReplay(); goToPracticeTurn(-1); });
   on('#practice-replay-prev', 'click', () => { stopPracticeReplay(); goToPracticeTurn(state.practiceReplayMoveIndex - 1); });
   on('#practice-replay-next', 'click', () => { stopPracticeReplay(); goToPracticeTurn(state.practiceReplayMoveIndex + 1); });

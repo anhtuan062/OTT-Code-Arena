@@ -114,7 +114,11 @@ function clearPracticeResult() {
   stopPracticeReplay();
   state.practiceReplay = null;
   state.practiceReplayMoveIndex = -1;
-  const output = $('#practice-output'); if (output) output.hidden = true;
+  const output = $('#practice-output');
+  if (output) {
+    output.hidden = true;
+    output.classList?.remove('practice-output--validation');
+  }
   const replayToolbar = $('#practice-replay-toolbar'); if (replayToolbar) replayToolbar.hidden = true;
   const result = $('#practice-result'); if (result) result.hidden = true;
   const board = $('#practice-board-frame'); if (board) board.hidden = true;
@@ -201,6 +205,42 @@ function renderPracticeResult(result) {
   $('#practice-result').hidden = false;
   renderPracticeBoard(result.state, result.move, result.capture);
   $('#practice-board-frame').hidden = false;
+}
+
+function renderPracticeValidationResult(result) {
+  const resultCard = $('#practice-result');
+  const output = $('#practice-output');
+  const board = $('#practice-board-frame');
+  const replayToolbar = $('#practice-replay-toolbar');
+  const history = document.querySelector('#practice-result .practice-move-history');
+  const details = $('#practice-result-details');
+  const valid = result?.valid === true && result?.accepted !== false;
+  const selectedMove = result?.move || result?.selectedMove || result?.response?.move;
+  const from = selectedMove?.from || result?.from;
+  const to = selectedMove?.to || result?.to;
+  const moveLabel = from && to
+    ? `${from} → ${to}`
+    : 'Không có nước đi hợp lệ';
+
+  if (output) {
+    output.hidden = false;
+    output.classList?.add('practice-output--validation');
+  }
+  if (resultCard) resultCard.hidden = false;
+  if (board) board.hidden = true;
+  if (replayToolbar) replayToolbar.hidden = true;
+  if (history) history.hidden = true;
+  if (details) clear(details);
+
+  const title = $('#practice-result-title');
+  if (title) title.textContent = valid ? 'Biên dịch thành công · Nước đi hợp lệ' : 'Kiểm tra không hợp lệ';
+  const move = $('#practice-result-move');
+  if (move) {
+    move.hidden = false;
+    move.removeAttribute?.('hidden');
+    move.style.display = 'block';
+    move.textContent = moveLabel;
+  }
 }
 
 function renderPracticeMatchResult(result) {
@@ -355,8 +395,16 @@ function openPracticeRunner(revision) {
   const scenarioSelect = $('#practice-scenario');
   if (scenarioSelect) { scenarioSelect.value = 'initial'; scenarioSelect.disabled = false; }
   if (typeof updatePracticeScenarioMeta === 'function') updatePracticeScenarioMeta('initial');
-  $('#practice-title').textContent = 'Trận đấu thử';
+  $('#practice-title').textContent = 'Kiểm tra Bot';
   const runtimeLabel = revision.runtimeId === 'cpp' ? 'C++17' : revision.runtimeId === 'python3' ? 'Python 3' : revision.runtimeId;
+  const practiceTitle = $('#practice-title');
+  if (practiceTitle) practiceTitle.textContent = 'Bot single-turn validation';
+  const checkNote = $('.practice-check-note');
+  if (checkNote) checkNote.textContent = 'Single-turn compile and move validation. The system Bot is not used.';
+  const opponent = document.querySelector('.practice-opponent');
+  if (opponent) opponent.remove();
+  const validationStage = document.querySelector('[data-progress-stage="match"]');
+  if (validationStage) validationStage.textContent = 'Validate move';
   const modeLabel = revision.executionMode === 'strategy' ? 'Strategy SDK' : revision.executionMode === 'raw' ? 'Mã nguồn trực tiếp' : '';
   const revisionMeta = $('#practice-revision-meta');
   if (revisionMeta) {
@@ -364,7 +412,7 @@ function openPracticeRunner(revision) {
     const revisionId = revision.revisionId.startsWith('draft-') ? '' : ` · Phiên bản ${revision.revisionId.slice(0, 12)}`;
     revisionMeta.textContent = `Đang chạy: ${revisionLabel} · ${runtimeLabel}${modeLabel ? ` · ${modeLabel}` : ''} · ${state.sourceWorkspaceBot?.name || 'Bot của bạn'}${revisionId}`;
   }
-  $('#practice-status').textContent = 'Sẵn sàng chạy thử.';
+  $('#practice-status').textContent = 'Sẵn sàng kiểm tra một lượt.';
   if (typeof clearPracticeResult === 'function') clearPracticeResult();
   else {
     const output = $('#practice-output'); if (output) output.hidden = true;
@@ -374,7 +422,7 @@ function openPracticeRunner(revision) {
   }
   const board = $('#practice-board'); if (board) clear(board);
   openModal('practice-modal');
-  if (autoRun) setTimeout(() => void testBotMatch(), 0);
+  if (autoRun) setTimeout(() => void testBotRevision(), 0);
   else $('#practice-run').focus();
 }
 
@@ -445,13 +493,15 @@ async function testBotRevision() {
   runButton.disabled = true;
   const scenarioSelect = $('#practice-scenario'); if (scenarioSelect) scenarioSelect.disabled = true;
   try {
-    const result = await request(`/bots/${revision.botId}/revisions/${revision.revisionId}/test`, {
-      method: 'POST', body: JSON.stringify({ scenarioId }),
+    const isDraft = Boolean(state.practiceDraft);
+    const result = await request(isDraft ? '/bots/draft/test' : `/bots/${revision.botId}/revisions/${revision.revisionId}/test`, {
+      method: 'POST',
+      body: JSON.stringify(isDraft ? { ...state.practiceDraft, scenarioId } : { scenarioId }),
     });
     if (token !== state.practiceRequestToken || state.practiceRevision?.revisionId !== revision.revisionId) return;
     if (typeof finishPracticeProgress === 'function') finishPracticeProgress(true);
-    renderPracticeResult(result);
-    $('#practice-status').textContent = result.valid === true && result.accepted !== false ? 'Chạy thử thành công · Engine đã chấp nhận nước đi.' : 'Chạy thử hoàn tất.';
+    renderPracticeValidationResult(result);
+    $('#practice-status').textContent = result.valid === true && result.accepted !== false ? 'Kiểm tra thành công · Nước đi hợp lệ.' : 'Kiểm tra hoàn tất.';
   } catch (error) {
     if (token !== state.practiceRequestToken || state.practiceRevision?.revisionId !== revision.revisionId) return;
     if (typeof finishPracticeProgress === 'function') finishPracticeProgress(false);

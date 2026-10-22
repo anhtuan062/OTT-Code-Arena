@@ -255,7 +255,10 @@ export async function initServer(storageDir?: string) {
       // bot itself is fast. Keep the per-turn runtime budget at 2s, but give
       // the one-time match-scoped compilation enough time to finish.
       defaultCompileTimeoutMs: Math.max(30_000, Number(process.env.BOT_CPP_COMPILE_TIMEOUT_MS ?? 120_000)),
-      defaultPreparationTimeoutMs: 10000,
+      // Docker Desktop cold volume/container startup can exceed 10s even
+      // when the Bot itself is healthy. Keep this separate from the 2s
+      // per-turn runtime budget and allow operators to tune preparation only.
+      defaultPreparationTimeoutMs: Math.max(10_000, Number(process.env.BOT_DOCKER_PREPARATION_TIMEOUT_MS ?? 20_000)),
       cppCompilationBackend,
       dockerVolumeStaging: process.env.BOT_DOCKER_VOLUME_STAGING?.trim().toLowerCase() === 'true',
       ...compiledArtifactCacheConfig,

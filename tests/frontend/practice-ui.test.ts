@@ -16,6 +16,7 @@ class TestElement {
       else this.classes.delete(value);
     },
   };
+  style: Record<string, string> = {};
   textContent = '';
   hidden = true;
   isConnected = true;
@@ -32,6 +33,7 @@ class TestElement {
   prepend(...children: TestElement[]) { this.children.unshift(...children); }
   querySelector(selector: string) { return selector === 'svg' ? this.children.find(child => child.tag === 'svg') ?? null : null; }
   setAttribute(name: string, value: string) { this.attributes[name] = value; }
+  removeAttribute(name: string) { delete this.attributes[name]; }
   focus() { this.onFocus?.(); }
 }
 
@@ -130,6 +132,35 @@ describe('Practice view runtime behavior', () => {
     expect(details.map(node => node.textContent)).toEqual(expect.arrayContaining(['Người chơi', 'A', 'Từ', move.from, 'Đến', move.to, 'Ngôn ngữ', 'C++17', 'SDK chiến thuật', '1.0.0']));
     expect(details.find(node => node.textContent === 'Kết quả ăn quân')?.tag).toBe('dt');
     expect(view.nodes['#practice-result'].hidden).toBe(false);
+  });
+
+  it('renders single-turn validation without board, replay or system-opponent details', async () => {
+    const nodes: Record<string, TestElement> = {
+      '#practice-output': new TestElement('section'),
+      '#practice-result': new TestElement('section'),
+      '#practice-result-title': new TestElement('h5'),
+      '#practice-result-move': new TestElement('p'),
+      '#practice-result-details': new TestElement('dl'),
+      '#practice-board-frame': new TestElement('section'),
+      '#practice-replay-toolbar': new TestElement('div'),
+    };
+    const history = new TestElement('section');
+    const { renderPracticeValidationResult } = await actualFunctions(['renderPracticeValidationResult'], {
+      $: (selector: string) => nodes[selector],
+      clear: (node: TestElement) => { node.children = []; },
+      document: { querySelector: (selector: string) => selector === '#practice-result .practice-move-history' ? history : null },
+    });
+
+    renderPracticeValidationResult({ valid: true, accepted: true, move: { piece_id: 'A-keo-3', from: 'e3', to: 'd4' } });
+
+    expect(nodes['#practice-result-title'].textContent).toBe('Biên dịch thành công · Nước đi hợp lệ');
+    expect(nodes['#practice-result-move'].textContent).toBe('e3 → d4');
+    expect(nodes['#practice-result-move'].style.display).toBe('block');
+    expect(nodes['#practice-output'].classes.has('practice-output--validation')).toBe(true);
+    expect(nodes['#practice-board-frame'].hidden).toBe(true);
+    expect(nodes['#practice-replay-toolbar'].hidden).toBe(true);
+    expect(history.hidden).toBe(true);
+    expect(nodes['#practice-result-details'].children).toHaveLength(0);
   });
 
   it('preserves separate unsaved drafts across C++17 and Python 3 switches', async () => {
@@ -302,5 +333,37 @@ describe('Practice view runtime behavior', () => {
     expect(nodes['#practice-status'].textContent).not.toBe('Đang chạy trận thử với Bot hệ thống…');
     expect(nodes['#practice-run'].disabled).toBe(false);
     expect(nodes['#practice-run'].textContent).toBe('Chạy thử');
+  });
+
+  it('uses the single-turn revision test instead of the fixed-opponent match', async () => {
+    const nodes: Record<string, TestElement> = {
+      '#practice-run': new TestElement('button'),
+      '#practice-output': new TestElement('section'),
+      '#practice-status': new TestElement('p'),
+      '#practice-scenario': new TestElement('select'),
+    };
+    nodes['#practice-scenario'].value = 'initial';
+    const state = {
+      practiceRevision: { botId: 'bot-1', revisionId: 'rev-1', runtimeId: 'cpp' },
+      practiceDraft: null,
+      practiceAbortController: null as { abort: () => void } | null,
+      practiceRequestToken: 0,
+    };
+    const calls: string[] = [];
+    const functions = await actualFunctions(['testBotRevision'], {
+      state,
+      AbortController: class { abort() {} },
+      $: (selector: string) => nodes[selector],
+      clearPracticeResult: () => {},
+      startPracticeProgress: () => {},
+      finishPracticeProgress: () => {},
+      renderPracticeValidationResult: () => {},
+      request: async (route: string) => { calls.push(route); return { valid: true, accepted: true }; },
+    });
+
+    await functions.testBotRevision();
+
+    expect(calls).toEqual(['/bots/bot-1/revisions/rev-1/test']);
+    expect(nodes['#practice-run'].disabled).toBe(false);
   });
 });

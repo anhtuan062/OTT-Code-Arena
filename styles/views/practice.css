@@ -349,8 +349,10 @@
 
     .bot-revision-actions {
       display: flex;
-      gap: 8px;
-      flex-wrap: wrap;
+      gap: 6px;
+      flex-wrap: nowrap;
+      align-items: center;
+      width: 100%;
     }
 
     .bot-card-footer {
@@ -453,6 +455,14 @@
       border-radius: 14px;
       background: rgba(255, 255, 255, .78);
     }
+
+    .practice-dialog .practice-check-note {
+      margin: 0;
+      color: var(--text-faint);
+      font-size: .75rem;
+      line-height: 1.4;
+    }
+    .practice-dialog .practice-opponent { display: none !important; }
     .practice-dialog .practice-opponent {
       display: flex;
       align-items: flex-start;

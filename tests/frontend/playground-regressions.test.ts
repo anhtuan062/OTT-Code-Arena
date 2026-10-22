@@ -45,4 +45,40 @@ globalThis.createElement = create;`, context);
 
     expect(cardRule).toContain('min-width: 0;');
   });
+
+  it('aligns playground board coordinates to 9-column and 9-row grid tracks', async () => {
+    const css = await readSource('styles/views/playground.css');
+
+    // Columns: repeat(9, minmax(0, 1fr)) with 26px offset to align with row side
+    expect(css).toMatch(/\.playground-board-wrap\s+\.replay-columns[\s\S]*?grid-template-columns:\s*repeat\(9,\s*minmax\(0,\s*1fr\)\)/);
+    expect(css).toMatch(/\.playground-board-wrap\s+\.replay-columns[\s\S]*?margin-left:\s*26px/);
+
+    // Rows: repeat(9, minmax(0, 1fr)) in 26px width track
+    expect(css).toMatch(/\.playground-board-wrap\s+\.replay-rows[\s\S]*?grid-template-rows:\s*repeat\(9,\s*minmax\(0,\s*1fr\)\)/);
+    expect(css).toMatch(/\.playground-board-wrap\s+\.replay-rows[\s\S]*?width:\s*26px/);
+
+    // Board row 2-column grid: 26px for row coords, minmax(0, 1fr) for board
+    expect(css).toMatch(/\.playground-board-wrap\s+\.replay-board-row[\s\S]*?grid-template-columns:\s*26px\s+minmax\(0,\s*1fr\)/);
+  });
+
+  it('keeps playground bot source code viewer in readonly mode', async () => {
+    const html = await readSource('views/pages/bot-playground.html');
+    const css = await readSource('styles/views/playground.css');
+
+    // HTML specifies readonly for playground code textarea and disabled for runtime selector
+    expect(html).toMatch(/<textarea\s+id="playground-code"[^>]*readonly/);
+    expect(html).toMatch(/<select\s+id="playground-runtime-selector"[^>]*disabled/);
+    expect(html).toContain('playground-readonly-badge');
+
+    // CSS provides readonly viewer styling
+    expect(css).toMatch(/\.playground-code-area\[readonly\][\s\S]*?cursor:\s*default/);
+  });
+
+  it('keeps the selected runtime available to Playground test success and error paths', async () => {
+    const source = await readSource('js/playground.js');
+
+    expect(source).toMatch(/const runtimeId = \$\('\#playground-runtime-selector'\)\?\.value \|\| 'cpp';/);
+    expect(source).toContain('runtimeId,');
+    expect(source).toContain("runtimeId === 'cpp' ? 'C++17' : 'Python 3'");
+  });
 });
