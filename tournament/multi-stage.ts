@@ -265,11 +265,45 @@ export function getCurrentStage(tournament: Tournament): TournamentStage | null 
 }
 
 /**
+ * Explicitly activate the next stage after the current stage is complete.
+ *
+ * Stage completion and stage activation are intentionally separate durable
+ * transitions. This prevents the scheduler from crossing a stage boundary
+ * without an organizer decision.
+ */
+export function activateNextStage(tournament: Tournament): {
+  activated: boolean;
+  stage?: TournamentStage;
+  error?: string;
+} {
+  const stages = getTournamentStages(tournament);
+  const pendingIndex = stages.findIndex(stage => stage.status === 'pending');
+  if (pendingIndex < 0) {
+    return { activated: false, error: 'No pending stage is available to start' };
+  }
+
+  const previousStages = stages.slice(0, pendingIndex);
+  if (previousStages.some(stage => stage.status !== 'completed')) {
+    return { activated: false, error: 'The previous stage is not complete' };
+  }
+
+  const stage = stages[pendingIndex]!;
+  stage.status = 'in_progress';
+  for (const region of stage.regions ?? []) {
+    if (region.status === 'pending') region.status = 'in_progress';
+  }
+  for (const group of stage.groups ?? []) {
+    if (group.status === 'pending') group.status = 'in_progress';
+  }
+  return { activated: true, stage };
+}
+
+/**
  * Retrieve all currently executable pairings in the tournament.
  */
 export function getExecutablePairings(tournament: Tournament): TournamentPairing[] {
   const currentStage = getCurrentStage(tournament);
-  if (!currentStage || currentStage.status === 'completed') {
+  if (!currentStage || currentStage.status !== 'in_progress') {
     return [];
   }
 
@@ -1003,10 +1037,10 @@ export function commitMatchResultAndResolveSlots(
           stage.advancement.isComplete = true;
           stage.advancement.advancingParticipantIds = stage.regions.flatMap(r => r.advancingParticipantIds);
 
-          // Transition Group Stage to 'in_progress' and resolve slots
+          // Resolve Group Stage slots, but keep the stage pending until the
+          // organizer explicitly starts it.
           const groupStage = tournament.stages!.find(s => s.stageType === 'group_stage');
           if (groupStage) {
-            groupStage.status = 'in_progress';
             const groupPairings = (groupStage.groups || []).flatMap(g => g.rounds.flatMap(r => r.pairings));
 
             for (const reg of stage.regions) {
@@ -1047,7 +1081,6 @@ export function commitMatchResultAndResolveSlots(
             }
 
             for (const g of groupStage.groups || []) {
-              g.status = 'in_progress';
               const groupBots = new Set<string>();
               for (const r of g.rounds) {
                 for (const p of r.pairings) {
@@ -1084,14 +1117,8 @@ export function commitMatchResultAndResolveSlots(
           }
           stage.advancement.advancingParticipantIds = advancing;
 
-          // Transition Group Stage to 'in_progress'
+          // Keep Group Stage pending until the organizer explicitly starts it.
           const groupStage = tournament.stages!.find(s => s.stageType === 'group_stage');
-          if (groupStage) {
-            groupStage.status = 'in_progress';
-            for (const g of groupStage.groups || []) {
-              g.status = 'in_progress';
-            }
-          }
         }
       }
     }
@@ -1136,7 +1163,6 @@ export function commitMatchResultAndResolveSlots(
           // Resolve Knockout Round 1 slots for each group
           const knockoutStage = tournament.stages!.find(s => s.stageType === 'knockout');
           if (knockoutStage) {
-            knockoutStage.status = 'in_progress';
             const knockoutPairings = (knockoutStage.rounds || []).flatMap(r => r.pairings);
 
             for (const g of stage.groups!) {

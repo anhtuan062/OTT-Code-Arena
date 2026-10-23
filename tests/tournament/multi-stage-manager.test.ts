@@ -311,6 +311,17 @@ describe('Tournament Manager - Multi-Stage Integration (Phase 2C)', () => {
       expect(runRes.success).toBe(true);
       expect(runRes.data?.length).toBeGreaterThan(0);
 
+      const afterGroup = (await manager.loadTournament('tourney-8bot')).data!;
+      expect(afterGroup.status).toBe('running');
+      expect(afterGroup.stages!.find(s => s.stageType === 'group_stage')?.status).toBe('completed');
+      expect(afterGroup.stages!.find(s => s.stageType === 'knockout')?.status).toBe('pending');
+      const blockedRun = await manager.runAllMatches('tourney-8bot');
+      expect(blockedRun.success).toBe(false);
+      expect(blockedRun.error).toContain('waiting for the organizer');
+      expect((await manager.startNextStage('tourney-8bot')).success).toBe(true);
+      const knockoutRun = await manager.runAllMatches('tourney-8bot');
+      expect(knockoutRun.success).toBe(true);
+
       // Verify tournament completed
       const finalRes = await manager.loadTournament('tourney-8bot');
       expect(finalRes.success).toBe(true);
@@ -384,9 +395,21 @@ describe('Tournament Manager - Multi-Stage Integration (Phase 2C)', () => {
       expect(initialExec.length).toBeGreaterThan(0);
       expect(initialExec.every(p => p.stageId === 'stage-preliminary')).toBe(true);
 
-      // Complete all matches across all stages
+      // Complete the current stage only; the next stage requires an explicit
+      // organizer transition.
       const runResult = await manager.runAllMatches('regional-tourney');
       expect(runResult.success).toBe(true);
+
+      const afterPreliminary = (await manager.loadTournament('regional-tourney')).data!;
+      expect(afterPreliminary.status).toBe('running');
+      expect(afterPreliminary.stages!.find(s => s.stageType === 'group_stage')?.status).toBe('pending');
+      expect((await manager.startNextStage('regional-tourney')).success).toBe(true);
+      expect((await manager.runAllMatches('regional-tourney')).success).toBe(true);
+
+      const afterGroups = (await manager.loadTournament('regional-tourney')).data!;
+      expect(afterGroups.stages!.find(s => s.stageType === 'knockout')?.status).toBe('pending');
+      expect((await manager.startNextStage('regional-tourney')).success).toBe(true);
+      expect((await manager.runAllMatches('regional-tourney')).success).toBe(true);
 
       const finished = (await manager.loadTournament('regional-tourney')).data!;
       expect(finished.status).toBe('completed');

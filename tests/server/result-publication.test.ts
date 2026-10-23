@@ -79,7 +79,7 @@ describe('published tournament result access', () => {
     await fs.rm(dir, { recursive: true, force: true });
   });
 
-  it('allows competitors to read only published public results and strips Bot metadata', async () => {
+  it('allows competitors to read available public results before and after publication', async () => {
     const detail = await competitor.get('/api/tournaments/public-published');
     expect(detail.status).toBe(200);
     expect(detail.body.resultsPublishedAt).toBeTruthy();
@@ -108,12 +108,12 @@ describe('published tournament result access', () => {
     expect(replay.body.participantIdentities.A).not.toHaveProperty('botId');
     expect(replay.body.participantIdentities.B).not.toHaveProperty('botId');
     expect((await competitor.get('/api/tournaments/public-unpublished')).status).toBe(200);
-    expect((await competitor.get('/api/tournaments/public-unpublished/standings')).status).toBe(403);
+    expect((await competitor.get('/api/tournaments/public-unpublished/standings')).status).toBe(200);
     expect((await competitor.get('/api/tournaments/private-published')).status).toBe(200);
     expect((await competitor.get('/api/tournaments/private-published/replays/m-public-results')).status).toBe(200);
   });
 
-  it('keeps unpublished results available to the owning organizer only', async () => {
+  it('keeps publication as an organizer workflow without blocking competitor reads', async () => {
     expect((await organizer.get('/api/tournaments/public-unpublished')).status).toBe(200);
     expect((await organizer.get('/api/tournaments/public-unpublished/standings')).status).toBe(200);
     expect((await organizer.get('/api/tournaments/public-unpublished/replays/m-public-results')).status).toBe(200);

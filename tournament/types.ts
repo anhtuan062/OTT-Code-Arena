@@ -17,6 +17,7 @@ export type TournamentFormat = 'single_round_robin' | 'multi_stage';
 export const CURRENT_TOURNAMENT_CONFIGURATION_VERSION = 2 as const;
 export const NEW_TOURNAMENT_FORMAT: TournamentFormat = 'multi_stage';
 export const NEW_TOURNAMENT_BEST_OF = 3 as const;
+export const NEW_TOURNAMENT_TURN_TIMEOUT_MS = 5000;
 
 /**
  * Tournament status lifecycle

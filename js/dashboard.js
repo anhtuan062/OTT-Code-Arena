@@ -19,6 +19,7 @@ async function loadDashboard() {
   void refreshQueueStats();
   try {
     const competitor = state.user?.role === 'competitor';
+    syncTournamentStatusFilters();
     const dashboard = $('#dashboard');
     dashboard?.classList.toggle('player-dashboard', competitor);
     dashboard?.classList.toggle('organizer-dashboard', !competitor);
@@ -53,9 +54,15 @@ async function loadDashboard() {
     }
     if (activityTitle) activityTitle.textContent = competitor ? 'Giải đấu dành cho bạn' : 'Danh sách giải đấu quản lý';
     if (activityCopy) activityCopy.textContent = competitor
-      ? 'Các giải đấu bạn có thể gửi yêu cầu tham gia.'
+      ? 'Mở chi tiết để xem thông tin, lịch đấu và đăng ký Bot khi còn thời hạn.'
       : 'Theo dõi các giải đấu gần đây và quản lý hoạt động thi đấu.';
     if (secondaryColumn) secondaryColumn.textContent = competitor ? 'Trạng thái tham gia' : 'Thể thức';
+    const statusColumn = $('#dashboard-status-column');
+    if (statusColumn) statusColumn.textContent = competitor ? 'Trạng thái giải' : 'Trạng thái';
+    const openColumn = $('#dashboard-open-column');
+    const closeColumn = $('#dashboard-close-column');
+    if (openColumn) openColumn.textContent = 'Mở đăng ký';
+    if (closeColumn) closeColumn.textContent = 'Đóng đăng ký';
     if (botLabel) botLabel.textContent = competitor ? 'Bot của tôi' : 'Giải mở đăng ký';
     if (tournamentLabel) tournamentLabel.textContent = competitor ? 'Đang tham gia' : 'Giải đấu quản lý';
     const botDetail = $('#dash-bot-detail');
@@ -76,7 +83,7 @@ async function loadDashboard() {
     ]);
     if (!isCurrentView('dashboard', authRevision, viewRevision)) return;
     const tournaments = competitor
-      ? tournamentResponse.filter(tournament => tournament.status === 'registration_open')
+      ? tournamentResponse.filter(tournament => ['draft', 'registration_open', 'running'].includes(tournament.status))
       : tournamentResponse;
     if (competitor) state.bots = bots;
     const openCount = tournaments.filter(tournament => tournament.status === 'registration_open').length;
@@ -178,25 +185,28 @@ async function loadDashboard() {
       const myStatus = tournament.myRequestStatus
         ? ({ pending: 'Chờ duyệt', approved: 'Đã duyệt', rejected: 'Đã từ chối' }[tournament.myRequestStatus] || tournament.myRequestStatus)
         : 'Chưa đăng ký';
-      row.append(textCell(tournament.name), textCell(competitor ? myStatus : tournamentFormatLabel(tournament.format)), (() => { const cell = create('td'); cell.appendChild(statusBadge(tournament.status)); return cell; })(), textCell(tournament.participants?.length ?? tournament.participantCount ?? 0));
+      const nameCell = textCell(tournament.name);
+      nameCell.classList.add('dashboard-tournament-name-cell');
+      nameCell.dataset.label = 'Giải đấu';
+      const secondaryCell = textCell(competitor ? myStatus : tournamentFormatLabel(tournament.format));
+      secondaryCell.dataset.label = competitor ? 'Trạng thái tham gia' : 'Thể thức';
+      const statusCell = create('td');
+      statusCell.dataset.label = competitor ? 'Trạng thái giải' : 'Trạng thái';
+      const displayStatus = competitor && tournament.status === 'draft'
+        ? 'registration_not_open'
+        : tournament.status;
+      statusCell.appendChild(statusBadge(displayStatus));
+      const schedule = tournament.schedule || {};
+      const openCell = textCell(formatDashboardTournamentDate(schedule.registrationOpensAt || tournament.registrationOpenedAt));
+      openCell.dataset.label = 'Mở đăng ký';
+      const closeCell = textCell(formatDashboardTournamentDate(schedule.registrationClosesAt || tournament.registrationClosedAt));
+      closeCell.dataset.label = 'Đóng đăng ký';
+      const participantCell = textCell(`${tournament.participants?.length ?? tournament.participantCount ?? 0} Bot`);
+      participantCell.dataset.label = 'Người tham gia';
+      row.append(nameCell, secondaryCell, statusCell, openCell, closeCell, participantCell);
       const action = create('td');
-      if (competitor) action.appendChild(actionButton('Đăng ký Bot', () => {
-        state.tournamentId = tournament.tournamentId;
-        state.tournamentRegistrationContext = { name: tournament.name, status: tournament.status };
-        openRegistrationDialog();
-        void populateBotSelect();
-      }, `request:${tournament.tournamentId}`));
-      else action.appendChild(actionButton('Xem', () => viewTournament(tournament.tournamentId), `view:${tournament.tournamentId}`));
-      if (competitor && tournament.myRequestStatus) {
-        clear(action);
-        if (tournament.myRequestStatus === 'approved') {
-          action.appendChild(actionButton('Xem giải đấu', () => viewTournament(tournament.tournamentId), `view:${tournament.tournamentId}`));
-        } else {
-          const statusAction = actionButton(tournament.myRequestStatus === 'pending' ? 'Chờ duyệt' : 'Đã từ chối', () => {}, `request:${tournament.tournamentId}`);
-          statusAction.disabled = true;
-          action.appendChild(statusAction);
-        }
-      }
+      action.dataset.label = 'Mở giải đấu';
+      action.appendChild(actionButton(competitor ? 'Xem chi tiết' : 'Xem', () => viewTournament(tournament.tournamentId), `view:${tournament.tournamentId}`));
       row.appendChild(action);
       table.appendChild(row);
     });
@@ -212,5 +222,16 @@ async function loadDashboard() {
     }
   }
   finally { state.loading.delete('dashboard'); }
+}
+
+function formatDashboardTournamentDate(value) {
+  if (!value) return 'Chưa thiết lập';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return 'Chưa thiết lập';
+  return new Intl.DateTimeFormat('vi-VN', {
+    day: '2-digit', month: '2-digit', year: 'numeric',
+    hour: '2-digit', minute: '2-digit', hour12: false,
+    timeZoneName: 'short',
+  }).format(date);
 }
 

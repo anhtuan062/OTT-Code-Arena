@@ -63,22 +63,26 @@ describe('Tournament settings Phase 2', () => {
     expect(modern.data?.format).toBe('multi_stage');
     expect(modern.data?.configurationVersion).toBe(2);
     expect(modern.data?.matchConfig.bestOf).toBe(3);
+    expect(modern.data?.matchConfig.turnTimeoutMs).toBe(5000);
     expect(modern.data?.scoringConfig).toMatchObject({ winPoints: 3, drawPoints: 1, lossPoints: 0 });
 
     const configuredA = await manager.updateTournamentDetails('modern-bo3', {
-      matchConfig: { maxTurns: 80, turnTimeoutMs: 2000 },
-      botLimits: { memoryLimitMb: 128, maxBotsPerCompetitor: 2 },
+      matchConfig: { maxTurns: 80, turnTimeoutMs: 5000 },
     });
     expect(configuredA.success).toBe(true);
+    const botLimitsLocked = await manager.updateTournamentDetails('modern-bo3', { botLimits: { memoryLimitMb: 128 } });
+    expect(botLimitsLocked.success).toBe(false);
+    expect(botLimitsLocked.error).toContain('managed');
     const openedA = await manager.openRegistration('modern-bo3');
     expect(openedA.data?.rulesetSnapshot?.matchConfig.maxTurns).toBe(80);
-    expect(openedA.data?.rulesetSnapshot?.botLimits.memoryLimitMb).toBe(128);
-    expect(openedA.data?.rulesetSnapshot?.botLimits.maxBotsPerCompetitor).toBe(2);
+    expect(openedA.data?.rulesetSnapshot?.matchConfig.turnTimeoutMs).toBe(5000);
+    expect(openedA.data?.rulesetSnapshot?.botLimits.memoryLimitMb).toBe(256);
+    expect(openedA.data?.rulesetSnapshot?.botLimits.maxBotsPerCompetitor).toBe(1);
     const scoringLocked = await manager.updateTournamentDetails('modern-bo3', { scoringConfig: { winPoints: 5 } });
     expect(scoringLocked.success).toBe(false);
 
     const modernB = await manager.createTournament('modern-bo3-b', 'Modern B');
-    await manager.updateTournamentDetails('modern-bo3-b', { matchConfig: { maxTurns: 160 }, botLimits: { memoryLimitMb: 256 } });
+    await manager.updateTournamentDetails('modern-bo3-b', { matchConfig: { maxTurns: 160 } });
     const openedB = await manager.openRegistration('modern-bo3-b');
     expect(openedB.data?.rulesetSnapshot?.matchConfig.maxTurns).toBe(160);
     expect(openedB.data?.rulesetSnapshot?.matchConfig.maxTurns).not.toBe(openedA.data?.rulesetSnapshot?.matchConfig.maxTurns);

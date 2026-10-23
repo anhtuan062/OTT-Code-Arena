@@ -21,7 +21,7 @@ import { validateDockerImage } from './image-config.js';
 import type { ExecutionPolicy } from './types.js';
 import type { RuntimeImageRegistry } from './runtime-image-registry.js';
 import { createRuntimeImageRegistry } from './runtime-image-registry.js';
-import { CPP_STRATEGY_WRAPPER_DIGEST, getStrategySdkIdentity, materializeStrategySdk, wrapCppStrategySource } from './strategy-sdk.js';
+import { CPP_STRATEGY_WRAPPER_DIGEST, getStrategySdkIdentity, isTrustedStrategySdkDigest, materializeStrategySdk, wrapCppStrategySource } from './strategy-sdk.js';
 import { DockerExecutionLimiter, globalDockerExecutionLimiter } from './docker-execution-limiter.js';
 import {
   CompiledArtifactCache,
@@ -807,7 +807,7 @@ export class RevisionDockerExecutor {
       const strategy = revision.execution.executionMode === 'strategy';
       if (strategy) {
         const expectedSdk = await getStrategySdkIdentity(revision.execution.runtimeId);
-        if (revision.execution.sdkVersion !== expectedSdk.version || revision.execution.sdkDigest !== expectedSdk.digest) {
+        if (revision.execution.sdkVersion !== expectedSdk.version || !isTrustedStrategySdkDigest(revision.execution.runtimeId, revision.execution.sdkDigest ?? '', expectedSdk.digest)) {
           return this.error('SECURITY_VIOLATION', 'Pinned strategy SDK identity is unavailable or mismatched', null, '', '', false, 'sdk_resolution');
         }
         await materializeStrategySdk(revision.execution.runtimeId, sdkDir);

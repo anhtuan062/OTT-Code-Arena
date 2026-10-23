@@ -21,6 +21,7 @@ import {
   DEFAULT_TOURNAMENT_MATCH_CONFIG,
   CURRENT_TOURNAMENT_CONFIGURATION_VERSION,
   NEW_TOURNAMENT_BEST_OF,
+  NEW_TOURNAMENT_TURN_TIMEOUT_MS,
   DEFAULT_SCORING_CONFIG,
   DEFAULT_TOURNAMENT_SCHEDULE,
   DEFAULT_TOURNAMENT_RULES,
@@ -724,7 +725,7 @@ export function createTournament(
     matchConfig: {
       ...DEFAULT_TOURNAMENT_MATCH_CONFIG,
       ...matchConfig,
-      ...(isCurrentMultiStage ? { bestOf: NEW_TOURNAMENT_BEST_OF } : {}),
+      ...(isCurrentMultiStage ? { bestOf: NEW_TOURNAMENT_BEST_OF, turnTimeoutMs: matchConfig.turnTimeoutMs ?? NEW_TOURNAMENT_TURN_TIMEOUT_MS } : {}),
     },
     scoringConfig: { ...DEFAULT_SCORING_CONFIG, ...scoringConfig },
     schedule: { ...DEFAULT_TOURNAMENT_SCHEDULE },
@@ -753,7 +754,7 @@ export function normalizeTournament(raw: Partial<Tournament>): Tournament {
   return {
     ...raw,
     matchConfig: raw.configurationVersion === 2
-      ? { ...DEFAULT_TOURNAMENT_MATCH_CONFIG, ...(raw.matchConfig ?? {}), bestOf: NEW_TOURNAMENT_BEST_OF }
+      ? { ...DEFAULT_TOURNAMENT_MATCH_CONFIG, ...(raw.matchConfig ?? {}), bestOf: NEW_TOURNAMENT_BEST_OF, turnTimeoutMs: raw.matchConfig?.turnTimeoutMs ?? NEW_TOURNAMENT_TURN_TIMEOUT_MS }
       : { ...DEFAULT_TOURNAMENT_MATCH_CONFIG, ...(raw.matchConfig ?? {}) },
     scoringConfig: raw.configurationVersion === 2
       ? { ...NEW_TOURNAMENT_SCORING_CONFIG }

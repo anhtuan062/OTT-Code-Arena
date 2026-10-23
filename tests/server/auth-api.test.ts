@@ -173,7 +173,7 @@ describe('authentication and ownership API', () => {
     expect((await other.agent.get(`/api/tournaments/${tournamentId}/replays/not-owned`)).status).toBe(403);
   });
 
-  it('rechecks replay authorization when publication changes despite a cached payload', async () => {
+  it('keeps replay authorization independent from publication state', async () => {
     const organizer = await createControlledAccount(path.join(dir, 'arena.sqlite'), 'cacheowner', 'correct horse battery staple', 'organizer');
     const ownerAgent = request.agent(appExport);
     const ownerLogin = await ownerAgent.post('/api/auth/login').send({ username: organizer.username, password: 'correct horse battery staple' });
@@ -198,7 +198,7 @@ describe('authentication and ownership API', () => {
     await repository.save(tournament);
 
     expect((await ownerAgent.get(`/api/tournaments/${tournamentId}/replays/${matchId}`)).status).toBe(200);
-    expect((await other.agent.get(`/api/tournaments/${tournamentId}/replays/${matchId}`)).status).toBe(403);
+    expect((await other.agent.get(`/api/tournaments/${tournamentId}/replays/${matchId}`)).status).toBe(200);
 
     tournament.resultsPublishedAt = new Date().toISOString();
     await repository.save(tournament);
@@ -206,6 +206,6 @@ describe('authentication and ownership API', () => {
 
     tournament.resultsPublishedAt = null;
     await repository.save(tournament);
-    expect((await other.agent.get(`/api/tournaments/${tournamentId}/replays/${matchId}`)).status).toBe(403);
+    expect((await other.agent.get(`/api/tournaments/${tournamentId}/replays/${matchId}`)).status).toBe(200);
   });
 });

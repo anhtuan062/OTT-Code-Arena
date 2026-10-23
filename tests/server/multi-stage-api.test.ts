@@ -137,7 +137,7 @@ describe('Multi-Stage Tournament API (Phase 3A)', () => {
       expect(update.status).toBe(200);
       expect(update.body.description).toBe('Updated intro');
       expect(update.body.matchConfig.maxTurns).toBe(300);
-      expect(update.body.matchConfig.turnTimeoutMs).toBe(2000);
+      expect(update.body.matchConfig.turnTimeoutMs).toBe(5000);
       expect(update.body.schedule.visibleAt).toBe('2026-11-01T00:00:00.000Z');
 
       const fixedFormat = await organizerAgent.patch(`/api/tournaments/${id}`).set('x-csrf-token', organizerCsrf).send({ format: 'single_round_robin' });
@@ -178,6 +178,40 @@ describe('Multi-Stage Tournament API (Phase 3A)', () => {
       expect((await competitorAgent.get('/api/tournaments/discoverable')).body.some((item: { tournamentId: string }) => item.tournamentId === tournamentId)).toBe(false);
       expect((await competitorAgent.get(`/api/tournaments/${tournamentId}`)).status).toBe(403);
       expect((await organizerAgent.get(`/api/tournaments/${tournamentId}`)).status).toBe(200);
+    });
+
+    it('exposes a visible draft as public information without opening registration', async () => {
+      const created = await organizerAgent.post('/api/tournaments').set('x-csrf-token', organizerCsrf).send({ name: 'Visible Draft' });
+      const tournamentId = created.body.tournamentId;
+      const patched = await organizerAgent.patch(`/api/tournaments/${tournamentId}`).set('x-csrf-token', organizerCsrf).send({
+        schedule: { visibleAt: new Date(Date.now() - 1_000).toISOString() },
+      });
+      expect(patched.status).toBe(200);
+
+      const discovery = await competitorAgent.get('/api/tournaments/discoverable');
+      expect(discovery.body).toEqual(expect.arrayContaining([
+        expect.objectContaining({ tournamentId, status: 'draft' }),
+      ]));
+      const detail = await competitorAgent.get(`/api/tournaments/${tournamentId}`);
+      expect(detail.status).toBe(200);
+      expect(detail.body.status).toBe('draft');
+      expect((await competitorAgent.post(`/api/tournaments/${tournamentId}/participation-requests`).set('x-csrf-token', competitorCsrf).send({})).status).not.toBe(201);
+    });
+
+    it('keeps a draft without visibleAt private', async () => {
+      const created = await organizerAgent.post('/api/tournaments')
+        .set('x-csrf-token', organizerCsrf)
+        .send({ name: 'Unscheduled Draft' });
+      expect(created.status).toBe(201);
+      const tournamentId = created.body.tournamentId;
+
+      const response = await competitorAgent.get('/api/tournaments/discoverable');
+
+      expect(response.status).toBe(200);
+      expect(response.body.some((item: { tournamentId: string }) => item.tournamentId === tournamentId)).toBe(false);
+
+      const detail = await competitorAgent.get(`/api/tournaments/${tournamentId}`);
+      expect(detail.status).toBe(403);
     });
 
     it('catches up scheduled open and close on API reads without a browser refresh', async () => {

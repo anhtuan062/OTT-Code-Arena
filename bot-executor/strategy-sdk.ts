@@ -62,6 +62,21 @@ export async function getStrategySdkIdentity(runtimeId: SourceRuntimeId): Promis
   return { version, digest };
 }
 
+const TRUSTED_LEGACY_SDK_DIGESTS: Record<SourceRuntimeId, string[]> = {
+  cpp: [
+    'df273bb091450d2937cc0ac880c2c27a74c621389d4dd2bb10e8ce6fed772448',
+    '2c0f3b77071d633b7b3e9a8d1531e6d5733dc4e055b9696cd07cc3379a77fc00',
+  ],
+  python3: [
+    '61ff35c78497710ceaa1affa82af92fe38127eb2e00f075d58fd5c4e7d770dc9',
+  ],
+};
+
+export function isTrustedStrategySdkDigest(runtimeId: SourceRuntimeId, digest: string, currentDigest: string): boolean {
+  if (digest === currentDigest) return true;
+  return (TRUSTED_LEGACY_SDK_DIGESTS[runtimeId] || []).includes(digest);
+}
+
 export async function materializeStrategySdk(runtimeId: SourceRuntimeId, targetRoot: string): Promise<void> {
   const root = sdkRoot();
   // The SDK is bind-mounted read-only into the non-root runtime container.

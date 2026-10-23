@@ -5673,8 +5673,8 @@
     }
 
     #register-bot-tourney-modal .registration-tournament-icon {
-      width: 20px;
-      height: 20px;
+      width: 25px;
+      height: 25px;
       flex: 0 0 auto;
       color: #176B50;
       fill: none;
@@ -5713,8 +5713,8 @@
     }
 
     #register-bot-tourney-modal #submit-registration .ui-icon {
-      width: 16px;
-      height: 16px;
+      width: 25px;
+      height: 25px;
       fill: none;
       stroke: currentColor;
       stroke-width: 2;

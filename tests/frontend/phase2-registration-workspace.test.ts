@@ -55,6 +55,14 @@ describe('Phase 2 Registration Management Workspace', () => {
     expect(tournaments.slice(start, end)).toContain("const isOrganizer = state.user?.role === 'organizer';");
   });
 
+  it('renders the participant name as the primary identity in organizer requests', async () => {
+    const tournaments = await source('js/tournaments.js');
+
+    expect(tournaments).toContain("text: req.participantName || req.botName || req.bot?.name");
+    expect(tournaments).toContain('const botLabel = req.botName || req.bot?.name;');
+    expect(tournaments).toContain('Bot: ${botLabel}');
+  });
+
   it('implements dedicated Registration Management Workspace structure in Phase 2', async () => {
     const [app, tournaments, markup] = await Promise.all([
       source('app.js'),
@@ -117,6 +125,8 @@ describe('Phase 2 Registration Management Workspace', () => {
     expect(tournaments).toContain('Hoàn tác tất cả');
     expect(tournaments).toContain('runBulkUndo');
     expect(tournaments).toContain('let bulkProcessing = false');
+    expect(tournaments).toContain('const BULK_OPERATION_DELAY_MS = 150;');
+    expect(tournaments).toContain('waitBetweenBulkOperations(index, requestIds.length);');
     expect(tournaments).toContain('setBulkProcessing(true)');
     expect(tournaments).toContain('req-approve-btn');
     expect(tournaments).toContain('req-reject-btn');
@@ -126,7 +136,7 @@ describe('Phase 2 Registration Management Workspace', () => {
     expect(tournaments).toContain('Từ chối tất cả');
     expect(tournaments).toContain('Duyệt đã chọn');
     expect(tournaments).toContain('Từ chối đã chọn');
-    expect(tournaments).toContain('for (const requestId of requestIds)');
+    expect(tournaments).toContain('for (const [index, requestId] of requestIds.entries())');
     expect(tournaments).toContain("bulkToolbar.addEventListener('click'");
     expect(tournaments).toContain("bulkSelectAll.dispatchEvent(new Event('change'");
     expect(tournaments).toContain("item.addEventListener('click'");
@@ -262,6 +272,7 @@ describe('Phase 2 Registration Management Workspace', () => {
     expect(tournaments).toContain('activeItems.slice((page - 1) * pageSize, page * pageSize)');
     expect(tournaments).toContain('Trang ${page} / ${pageCount}');
     expect(tournaments).toContain('await refreshTournamentDetail();');
+    expect(tournaments).toContain('await refreshTournamentDetail({ force: true });');
     expect(tournaments).toContain('/requests/${req.requestId}/approve');
     expect(tournaments).toContain('/requests/${req.requestId}/reject');
   });

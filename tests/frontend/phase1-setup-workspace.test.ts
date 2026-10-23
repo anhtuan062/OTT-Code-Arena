@@ -59,6 +59,8 @@ describe('Phase 1 Tournament Setup Workspace', () => {
     expect(tournaments).toContain("id: 'edit-t-rules'");
     expect(tournaments).toContain("id: 'edit-t-policy'");
     expect(tournaments).toContain("phase1Date('edit-t-visibleAt'");
+    expect(tournaments).toContain('function phase1DisplayDate(value)');
+    expect(tournaments).toContain("phase1DisplayDate(phase1Schedule(tournament).visibleAt)");
     expect(tournaments).toContain("phase1Date('edit-t-registrationOpensAt'");
     expect(tournaments).toContain("phase1Date('edit-t-registrationClosesAt'");
     expect(tournaments).toContain("phase1Select('edit-t-ruleset'");
@@ -71,6 +73,9 @@ describe('Phase 1 Tournament Setup Workspace', () => {
     expect(tournaments).toContain("text: 'Conversion'");
     expect(tournaments).toContain("phase1Number('edit-t-maxTurns'");
     expect(tournaments).toContain("phase1Number('edit-t-maxSourceBytes'");
+    expect(tournaments).toContain("phase1Number('edit-t-maxSourceBytes', draft.botLimits.maxSourceBytes, 1, 65536, 1, true)");
+    expect(tournaments).toContain("phase1Number('edit-t-turnTimeoutMs', draft.matchConfig.turnTimeoutMs, 5000");
+    expect(tournaments).toContain("value: '2'");
 
     // Input validation
     expect(tournaments).toContain('Tên giải đấu phải từ 1 đến 100 ký tự.');

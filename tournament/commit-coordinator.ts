@@ -43,6 +43,7 @@ import {
   isMultiStageTournament,
   findPairingInTournament,
   commitMatchResultAndResolveSlots,
+  isTournamentComplete,
   isSlotPlaceholder,
   canPairingExecute,
   getAllTournamentPairings,
@@ -1114,10 +1115,15 @@ export class TournamentCommitCoordinator extends EventEmitter {
         }
       }
 
-      // 5. Update standings if round-robin
-      if (!isMultiStageTournament(tournament) || isScheduleComplete(tournament.rounds)) {
+      // 5. Update standings if round-robin or the entire multi-stage
+      // tournament is complete. `rounds` is intentionally empty for modern
+      // tournaments, so it must never be used as their completion signal.
+      const scheduleComplete = isMultiStageTournament(tournament)
+        ? isTournamentComplete(tournament)
+        : isScheduleComplete(tournament.rounds);
+      if (scheduleComplete) {
         tournament.standings = computeStandings(tournament.participants, pairingRecords, tournament.scoringConfig);
-        if (isScheduleComplete(tournament.rounds)) {
+        if (scheduleComplete) {
           tournament.status = 'completed';
           tournament.completedAt = new Date().toISOString();
         }

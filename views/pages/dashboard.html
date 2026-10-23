@@ -91,7 +91,7 @@
       <div class="section-header" id="dashboard-activity-header">
         <div>
           <div class="dashboard-section-title"><svg class="ui-icon" aria-hidden="true"><use href="#icon-trophy"></use></svg><h3 id="recent-tournaments-title">Giải đấu đang mở đăng ký</h3></div>
-          <p class="section-description" id="dashboard-activity-copy">Các giải đấu bạn có thể gửi yêu cầu tham gia.</p>
+          <p class="section-description" id="dashboard-activity-copy">Mở chi tiết để xem thông tin, lịch đấu và đăng ký Bot khi còn thời hạn.</p>
         </div>
         <button class="text-button dashboard-section-link" id="dashboard-open-tournaments" type="button">Xem tất cả <svg class="ui-icon" aria-hidden="true"><use href="#icon-arrow-right"></use></svg></button>
       </div>
@@ -116,11 +116,13 @@
         <table class="data-table" id="dash-recent-tourneys">
           <thead>
             <tr>
-              <th>Tên</th>
+              <th>Tên giải đấu</th>
               <th id="dashboard-secondary-column">Thể thức</th>
-              <th>Trạng thái</th>
+              <th id="dashboard-status-column">Trạng thái giải</th>
+              <th id="dashboard-open-column">Mở đăng ký</th>
+              <th id="dashboard-close-column">Đóng đăng ký</th>
               <th>Người tham gia</th>
-              <th><span class="visually-hidden">Thao tác</span></th>
+              <th id="dashboard-action-column"><span class="visually-hidden">Thao tác</span></th>
             </tr>
           </thead>
           <tbody></tbody>

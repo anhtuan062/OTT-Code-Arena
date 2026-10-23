@@ -1024,6 +1024,31 @@
     #dashboard.dashboard-page .data-table th { padding: 12px 15px; background: #f7faf7; color: #7b8980; font-size: .64rem; letter-spacing: .06em; }
     #dashboard.dashboard-page .data-table td { padding: 14px 15px; color: #314039; font-size: .78rem; }
 
+    #dashboard.player-dashboard #dash-recent-table {
+      overflow: hidden;
+      border-color: #d9e7de;
+      border-radius: 12px;
+      background: #fff;
+    }
+    #dashboard.player-dashboard #dash-recent-tourneys { table-layout: fixed; }
+    #dashboard.player-dashboard #dash-recent-tourneys th:nth-child(1) { width: 24%; }
+    #dashboard.player-dashboard #dash-recent-tourneys th:nth-child(2) { width: 16%; }
+    #dashboard.player-dashboard #dash-recent-tourneys th:nth-child(3) { width: 14%; }
+    #dashboard.player-dashboard #dash-recent-tourneys th:nth-child(4),
+    #dashboard.player-dashboard #dash-recent-tourneys th:nth-child(5) { width: 15%; }
+    #dashboard.player-dashboard #dash-recent-tourneys th:nth-child(6) { width: 8%; }
+    #dashboard.player-dashboard #dash-recent-tourneys th:nth-child(7) { width: 12%; }
+    #dashboard.player-dashboard #dash-recent-tourneys td:nth-child(4),
+    #dashboard.player-dashboard #dash-recent-tourneys td:nth-child(5) { color: #52675a; font-size: .72rem; white-space: nowrap; }
+    #dashboard.player-dashboard #dash-recent-tourneys tbody tr { transition: background-color .16s ease; }
+    #dashboard.player-dashboard #dash-recent-tourneys tbody tr:hover { background: #f7fbf8; }
+    #dashboard.player-dashboard #dash-recent-tourneys td { vertical-align: middle; }
+    #dashboard.player-dashboard .dashboard-tournament-name-cell { color: #183b2a; font-weight: 700; }
+    #dashboard.player-dashboard #dash-recent-tourneys td:last-child { text-align: right; }
+    #dashboard.player-dashboard #dash-recent-tourneys td:last-child .secondary-btn { min-height: 34px; padding: 7px 12px; border-color: #a9cdb5; color: #176b50; background: #f4faf6; font-weight: 700; }
+    #dashboard.player-dashboard #dash-recent-tourneys td:last-child .secondary-btn:hover,
+    #dashboard.player-dashboard #dash-recent-tourneys td:last-child .secondary-btn:focus-visible { border-color: #176b50; background: #e7f4eb; }
+
     #dashboard.dashboard-page .organizer-monitor-section { padding: 18px 20px 20px; border: 1px solid var(--dash-line); border-radius: 9px; background: #eef5ef; box-shadow: none; }
     #dashboard.dashboard-page .organizer-monitor-grid { gap: 0; margin-top: 14px; }
     #dashboard.dashboard-page .monitor-card { min-height: 68px; padding: 12px 15px; border: 0; border-right: 1px solid #d5e3d8; border-radius: 0; background: transparent; box-shadow: none; }
@@ -1058,6 +1083,18 @@
       #dashboard.organizer-dashboard .summary-grid, #dashboard.player-dashboard .summary-grid { grid-template-columns: 1fr; }
       #dashboard.dashboard-page .summary-card, #dashboard.dashboard-page .summary-card:nth-child(n+3) { border-top: 0; border-right: 0; border-bottom: 1px solid var(--dash-line); }
       #dashboard.dashboard-page .summary-card:last-child { border-bottom: 0; }
+      #dashboard.player-dashboard #dash-recent-table { overflow: visible; border: 0; background: transparent; }
+      #dashboard.player-dashboard #dash-recent-tourneys,
+      #dashboard.player-dashboard #dash-recent-tourneys tbody { display: block; width: 100%; }
+      #dashboard.player-dashboard #dash-recent-tourneys thead { display: none; }
+      #dashboard.player-dashboard #dash-recent-tourneys tbody { display: grid; gap: 10px; }
+      #dashboard.player-dashboard #dash-recent-tourneys tr { display: grid; grid-template-columns: 1fr auto; gap: 0 12px; padding: 14px; border: 1px solid #d9e7de; border-radius: 10px; background: #fff; }
+      #dashboard.player-dashboard #dash-recent-tourneys td { display: flex; align-items: center; min-height: 30px; padding: 5px 0; border: 0; font-size: .78rem; }
+      #dashboard.player-dashboard #dash-recent-tourneys td::before { content: attr(data-label); margin-right: 8px; color: #738379; font-size: .68rem; font-weight: 600; }
+      #dashboard.player-dashboard #dash-recent-tourneys td:first-child { grid-column: 1 / -1; padding-bottom: 8px; font-size: .9rem; }
+      #dashboard.player-dashboard #dash-recent-tourneys td:first-child::before { display: none; }
+      #dashboard.player-dashboard #dash-recent-tourneys td:last-child { grid-column: 1 / -1; justify-content: flex-end; padding-top: 9px; margin-top: 4px; border-top: 1px solid #edf3ef; }
+      #dashboard.player-dashboard #dash-recent-tourneys td:last-child::before { display: none; }
       #dashboard.dashboard-page .organizer-monitor-grid { grid-template-columns: 1fr; }
       #dashboard.dashboard-page .monitor-card { border-right: 0; border-bottom: 1px solid #d5e3d8; }
       #dashboard.dashboard-page .monitor-card:last-child { border-bottom: 0; }

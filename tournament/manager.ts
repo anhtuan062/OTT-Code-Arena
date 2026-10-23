@@ -25,6 +25,7 @@ import {
   TerminationReason,
   Player,
   DEFAULT_TOURNAMENT_MATCH_CONFIG,
+  NEW_TOURNAMENT_TURN_TIMEOUT_MS,
   NEW_TOURNAMENT_BEST_OF,
   NEW_TOURNAMENT_FORMAT,
   DEFAULT_SCORING_CONFIG,
@@ -86,6 +87,7 @@ import { gameWinnerForParticipants, getSeriesSides, seriesScore, seriesWinner } 
 import {
   isMultiStageTournament,
   createMultiStageTournament,
+  activateNextStage,
   commitMatchResultAndResolveSlots,
   canPairingExecute,
   getCurrentStage,
@@ -196,6 +198,12 @@ function validateTournamentSettingsUpdate(
     if (update.scoringConfig && Object.keys(update.scoringConfig).some(key => ['winPoints', 'drawPoints', 'lossPoints', 'byePoints'].includes(key))) {
       return { valid: false, error: 'New tournaments use fixed scoring: win 3, draw 1, loss 0' };
     }
+    if (update.botLimits && Object.keys(update.botLimits).length > 0) {
+      return { valid: false, error: 'New tournament Bot limits are managed by the platform and cannot be edited' };
+    }
+    if (update.matchConfig && Object.keys(update.matchConfig).some(key => !['maxTurns', 'turnTimeoutMs'].includes(key))) {
+      return { valid: false, error: 'New tournaments only allow maxTurns and turnTimeoutMs to be edited' };
+    }
   }
   const locked = tournament.status !== 'draft' || Boolean(tournament.rulesetSnapshot);
   if (settingsChanged && locked) {
@@ -223,6 +231,9 @@ function validateTournamentSettingsUpdate(
     if (match.bestOf !== undefined && ![1, 2, 3].includes(match.bestOf)) return { valid: false, error: 'bestOf must be 1, 2 or 3' };
     const positive = ['maxTurns', 'turnTimeoutMs', 'maxStdoutBytes', 'maxStderrBytes', 'maxRetries'] as const;
     for (const key of positive) if (match[key] !== undefined && (!Number.isInteger(match[key]) || match[key] < 0)) return { valid: false, error: `Invalid matchConfig.${key}` };
+    if (tournament.configurationVersion === 2 && match.turnTimeoutMs !== undefined && match.turnTimeoutMs < NEW_TOURNAMENT_TURN_TIMEOUT_MS) {
+      return { valid: false, error: `New tournament turnTimeoutMs must be at least ${NEW_TOURNAMENT_TURN_TIMEOUT_MS}ms` };
+    }
     if (match.maxTurns !== undefined && match.maxTurns > 10000 || match.turnTimeoutMs !== undefined && match.turnTimeoutMs > 120000) return { valid: false, error: 'Match technical limit is outside the supported range' };
   }
   const score = update.scoringConfig;
@@ -681,7 +692,7 @@ export class TournamentManager {
   private getNextPairing(tournament: Tournament): TournamentPairing | null {
     if (isMultiStageTournament(tournament)) {
       const currentStage = getCurrentStage(tournament);
-      if (!currentStage || currentStage.status === 'completed') {
+      if (!currentStage || currentStage.status !== 'in_progress') {
         return null;
       }
       if (currentStage.regions) {
@@ -722,7 +733,7 @@ export class TournamentManager {
   private getNextFairPairing(tournament: Tournament): TournamentPairing | null {
     if (!isMultiStageTournament(tournament)) return this.getNextPairing(tournament);
     const currentStage = getCurrentStage(tournament);
-    if (!currentStage || currentStage.status === 'completed') return null;
+    if (!currentStage || currentStage.status !== 'in_progress') return null;
     const regions = currentStage.regions ?? [];
     if (regions.length === 0) return this.getNextPairing(tournament);
 
@@ -787,6 +798,7 @@ export class TournamentManager {
     if (tournament.configurationVersion === 2) {
       tournament.format = NEW_TOURNAMENT_FORMAT;
       tournament.matchConfig.bestOf = NEW_TOURNAMENT_BEST_OF;
+      if (matchConfig?.turnTimeoutMs === undefined) tournament.matchConfig.turnTimeoutMs = NEW_TOURNAMENT_TURN_TIMEOUT_MS;
     }
 
     if (tournament.configurationVersion === 2) {
@@ -1103,6 +1115,21 @@ export class TournamentManager {
       const requests = tournament.participationRequests ?? (tournament.participationRequests = []);
       const runtimeConfig = executionConfiguration(tournament);
       const sourceExecution = request.botSnapshot?.execution?.kind === 'source-revision' ? request.botSnapshot.execution : null;
+      const requestedName = request.participantName.trim();
+      const normalizedName = requestedName.toLocaleLowerCase();
+      const activeRequests = requests.filter(item => item.status === 'pending' || item.status === 'approved');
+      const ownName = tournament.participants.find(participant => participant.bot?.execution?.kind === 'source-revision'
+        && (participant.bot.execution as { competitorId?: string }).competitorId === request.competitorId)?.name
+        || activeRequests.find(item => item.competitorId === request.competitorId)?.participantName;
+      if (ownName && ownName.trim().toLocaleLowerCase() !== normalizedName) {
+        return { success: false, error: 'Each competitor must use one consistent tournament display name' };
+      }
+      const nameInUse = tournament.participants.some(participant => participant.name?.trim().toLocaleLowerCase() === normalizedName
+        && (participant.bot?.execution?.kind !== 'source-revision'
+          || (participant.bot.execution as { competitorId?: string }).competitorId !== request.competitorId))
+        || activeRequests.some(item => item.participantName.trim().toLocaleLowerCase() === normalizedName
+          && item.competitorId !== request.competitorId);
+      if (nameInUse) return { success: false, error: 'Tournament display name is already in use' };
       if (sourceExecution && !['cpp', 'python3'].includes(sourceExecution.runtimeId)) {
         return { success: false, error: 'This source runtime is not allowed for tournament execution' };
       }
@@ -1118,6 +1145,7 @@ export class TournamentManager {
       }
       const created: ParticipationRequest = {
         ...request,
+        participantName: requestedName,
         requestId: `pr-${randomUUID()}`,
         status: 'pending',
         requestedAt: new Date().toISOString(),
@@ -1243,6 +1271,38 @@ export class TournamentManager {
   }
 
   /**
+   * Start the next multi-stage stage after the organizer explicitly confirms
+   * the transition. This only changes the persisted stage gate; execution is
+   * still performed by the normal run_all action.
+   */
+  async startNextStage(tournamentId: string): Promise<TournamentOperationResult<Tournament>> {
+    return this.mutateTournament(tournamentId, async tournament => {
+      if (!isMultiStageTournament(tournament)) {
+        return { success: false, error: 'Stage-by-stage execution is only available for multi_stage tournaments' };
+      }
+      if (tournament.status !== 'running') {
+        return { success: false, error: `Tournament not running (status: ${tournament.status})` };
+      }
+      const pendingTiebreakers = this.getAllPairings(tournament).filter(
+        pairing => pairing.status === 'pending_tiebreaker' || pairing.tiebreakerStatus === 'pending'
+      );
+      if (pendingTiebreakers.length > 0) {
+        return { success: false, error: `${pendingTiebreakers.length} match(es) require tiebreaker resolution` };
+      }
+      const currentStage = getCurrentStage(tournament);
+      if (currentStage?.status === 'in_progress') {
+        return { success: false, error: 'The current stage is still in progress' };
+      }
+      const activation = activateNextStage(tournament);
+      if (!activation.activated || !activation.stage) {
+        return { success: false, error: activation.error ?? 'No stage is ready to start' };
+      }
+      await this.saveTournament(tournament);
+      return { success: true, data: tournament };
+    });
+  }
+
+  /**
    * Run the next eligible match
    */
   async runNextMatch(tournamentId: string, signal?: AbortSignal): Promise<TournamentOperationResult<ExecutedMatchResult>> {
@@ -1256,6 +1316,10 @@ export class TournamentManager {
 
     if (tournament.status !== 'running') {
       return { success: false, error: `Tournament not running (status: ${tournament.status})` };
+    }
+
+    if (isMultiStageTournament(tournament) && getCurrentStage(tournament)?.status !== 'in_progress') {
+      return { success: false, error: 'The next stage is waiting for the organizer to start it' };
     }
 
     const pairing = this.getNextPairing(tournament);
@@ -1279,6 +1343,9 @@ export class TournamentManager {
 
     if (tournament.status !== 'running') {
       return { success: false, error: `Tournament not running (status: ${tournament.status})` };
+    }
+    if (isMultiStageTournament(tournament) && getCurrentStage(tournament)?.status !== 'in_progress') {
+      return { success: false, error: 'The next stage is waiting for the organizer to start it' };
     }
     if (signal?.aborted || this.cancelledTournaments.has(tournamentId)) {
       return { success: false, error: 'Tournament execution cancelled' };
@@ -1723,6 +1790,11 @@ export class TournamentManager {
     }
 
     if (isMultiStageTournament(tournament)) {
+      const currentStage = getCurrentStage(tournament);
+      const pairingStage = findPairingInTournament(tournament, pairingId)?.stage;
+      if (!currentStage || currentStage.status !== 'in_progress' || pairingStage?.stageId !== currentStage.stageId) {
+        return { success: false, error: 'Pairing belongs to a stage that has not been started' };
+      }
       if (!canPairingExecute(pairing)) {
         return { success: false, error: `Pairing not in scheduled state (current: ${pairing.status})` };
       }

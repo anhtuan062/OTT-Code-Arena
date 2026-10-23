@@ -45,6 +45,11 @@ describe('Phase 4 Tournament Schedule Preview Workspace', () => {
     expect(tournaments).toContain('phase4-group-title');
     expect(tournaments).toContain('phase4-group-bots');
     expect(tournaments).toContain('phase4-group-desc');
+    expect(tournaments).toContain('phase4-participant-table');
+    expect(tournaments).toContain('Danh sách Bot · ${title}');
+    expect(tournaments).toContain('Tên thi đấu');
+    expect(tournaments).toContain('Chưa có kết quả để xếp hạng');
+    expect(tournaments).toContain('phase4-participant-name-cell');
 
     // 3. Schedule Explorer
     expect(tournaments).toContain('phase4-schedule-explorer');
@@ -241,14 +246,17 @@ describe('Phase 4 Tournament Schedule Preview Workspace', () => {
     expect(css).toContain('.status-badge.status-pending');
   });
 
-  it('suppresses #multi-stage-workspace and #td-next-step in Phase 4 and keeps a single CTA in header', async () => {
+  it('shows the public schedule workspace in Phase 4 while keeping organizer controls hidden', async () => {
     const tournaments = await source('js/tournaments.js');
 
-    // Suppression in refreshTournamentDetail
+    // Public competitors may inspect a generated schedule in Phase 4.
     expect(tournaments).toContain('const currentLifecyclePhase = getTournamentLifecyclePhase(tournament);');
+    expect(tournaments).toContain("const canShowPublicSchedule = state.user?.role === 'competitor'");
     expect(tournaments).toContain("if (tournament.status === 'draft' || tournament.status === 'registration_open' || isRosterFinalPhase(tournament))");
-    expect(tournaments).toContain('else if (currentLifecyclePhase < 5)');
+    expect(tournaments).toContain('else if (currentLifecyclePhase < 5 && !canShowPublicSchedule)');
     expect(tournaments).toContain('if (workspace) { workspace.hidden = true; clear(workspace); }');
+    expect(tournaments).toContain("if (currentLifecyclePhase >= 5 || canShowPublicSchedule)");
+    expect(tournaments).toContain("const isPublicSchedulePreview = state.user?.role === 'competitor' && state.detailStatus === 'registration_closed';");
 
     // Suppression in renderTournamentGuidance
     expect(tournaments).toContain('if (getTournamentLifecyclePhase(tournament) <= 4)');
@@ -272,6 +280,11 @@ describe('Phase 4 Tournament Schedule Preview Workspace', () => {
     expect(tournaments).toContain('state.phase4SearchQuery');
     expect(tournaments).toContain('state.phase4SelectedRound');
     expect(tournaments).toContain('phase4-empty-search');
+  });
+
+  it('forces a fresh detail render after organizer actions', async () => {
+    const tournaments = await source('js/tournaments.js');
+    expect(tournaments).toContain("if (action === 'delete') navigate('tournaments'); else await refreshTournamentDetail({ force: true });");
   });
 
   it('validates Phase 4 CSS design tokens and responsive layout', async () => {

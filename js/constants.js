@@ -12,6 +12,7 @@ const PRACTICE_SCENARIOS = {
 
 const STATUS_LABELS = {
   draft: 'Bản nháp',
+  registration_not_open: 'Chưa mở đăng ký',
   registration_open: 'Đang mở đăng ký',
   running: 'Đang diễn ra',
   completed: 'Đã hoàn thành',
@@ -44,6 +45,7 @@ const ACTION_LABELS = {
   close_registration: 'Đóng đăng ký',
   generate_schedule: 'Tạo lịch thi đấu',
   start: 'Bắt đầu giải đấu',
+  start_next_stage: 'Chạy giai đoạn tiếp theo',
   run_all: 'Chạy tất cả trận đấu',
   stop_execution: 'Dừng trận đấu',
   cancel: 'Hủy giải đấu',
@@ -54,6 +56,7 @@ const ACTION_SUCCESS_MESSAGES = {
   close_registration: 'Đã đóng đăng ký giải đấu.',
   generate_schedule: 'Đã tạo lịch thi đấu.',
   start: 'Đã bắt đầu giải đấu.',
+  start_next_stage: 'Đã bắt đầu giai đoạn tiếp theo.',
   run_all: 'Đã đưa các trận đấu vào hàng đợi.',
   stop_execution: 'Đã dừng thực thi trận đấu.',
   cancel: 'Đã hủy giải đấu.',

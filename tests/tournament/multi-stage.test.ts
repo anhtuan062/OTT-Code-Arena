@@ -26,6 +26,7 @@ import {
   canPairingExecute,
   getExecutablePairings,
   getCurrentStage,
+  activateNextStage,
   isTournamentComplete,
   normalizeToMultiStageView,
   commitMatchResultAndResolveSlots,
@@ -385,7 +386,8 @@ describe('Tournament Multi-Stage Model & Compatibility (Phase 2A)', () => {
 
       // Now all group matches are done -> Group stage is completed!
       expect(groupStage.status).toBe('completed');
-      expect(knockoutStage.status).toBe('in_progress');
+      expect(knockoutStage.status).toBe('pending');
+      expect(activateNextStage(tournament).activated).toBe(true);
 
       // Crucial invariant: Knockout Round 1 slots are NOW RESOLVED!
       for (const pairing of koRound1.pairings) {
@@ -520,7 +522,9 @@ describe('Tournament Multi-Stage Model & Compatibility (Phase 2A)', () => {
       expect(prelimStage.status).toBe('completed');
       expect(prelimStage.advancement.isComplete).toBe(true);
       expect(prelimStage.advancement.advancingParticipantIds).toHaveLength(128);
-      expect(groupStage.status).toBe('in_progress');
+      expect(groupStage.status).toBe('pending');
+      expect(getExecutablePairings(tournament)).toHaveLength(0);
+      expect(activateNextStage(tournament).activated).toBe(true);
 
       // Group stage pairings are now executable with real bot IDs
       const executableGroupPairings = getExecutablePairings(tournament);
@@ -620,7 +624,9 @@ describe('Tournament Multi-Stage Model & Compatibility (Phase 2A)', () => {
       expect(recPrelim.status).toBe('completed');
       expect(recPrelim.advancement.isComplete).toBe(true);
       expect(recPrelim.advancement.advancingParticipantIds).toHaveLength(101);
-      expect(recGroup.status).toBe('in_progress');
+      expect(recGroup.status).toBe('pending');
+      expect(getExecutablePairings(recovered!)).toHaveLength(0);
+      expect(activateNextStage(recovered!).activated).toBe(true);
 
       // Verify the dynamically sized groups have received their participants and matches can execute
       const executableGroup = getExecutablePairings(recovered!);

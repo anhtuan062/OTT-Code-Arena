@@ -164,6 +164,35 @@ describe('Tournament Lifecycle 7-Phase Distinct UI/UX Architecture', () => {
     expect(css).toContain('.phase-archive-row');
   });
 
+  it('renders competitors from public capabilities instead of the organizer lifecycle stepper', async () => {
+    const [app, css] = await Promise.all([readAssembledFrontendScript(), readAssembledFrontendStyles()]);
+    expect(app).toContain("if (state.user?.role === 'competitor') {");
+    expect(app).toContain('function renderCompetitorPublicTournament(container, tournament, multiStageContext)');
+    expect(app).toContain('function hasTournamentSchedule(tournament)');
+    expect(app).toContain("if (tournament.status === 'registration_open') {");
+    expect(app).toContain('if (hasTournamentSchedule(tournament))');
+    expect(app).toContain("if (tournament.status === 'running') {");
+    expect(app).toContain("tournament.status === 'completed' && tournament.resultsPublishedAt");
+    expect(app).toContain("lifecycleMobile.hidden = true");
+    expect(app).toContain("container.dataset.lifecyclePhase = 'public'");
+    expect(app).toContain("container.className = 'tournament-lifecycle-body competitor-public-workspace'");
+    expect(app).toContain('function renderCompetitorPublicLive(container, tournament)');
+    expect(app).toContain('function renderCompetitorPublicInfo(container, tournament)');
+    expect(app).toContain('competitor-public-guide-link');
+    expect(app).toContain('OTT Standard luôn được bật trong mọi trận đấu');
+    expect(app).toContain('function renderCompetitorPublicSchedule(container, tournament, multiStageContext)');
+    expect(app).toContain('function renderCompetitorPublicArchive(container, tournament, multiStageContext)');
+    expect(app).toContain("className: 'competitor-public-tabs'");
+    expect(app).toContain("['schedule', 'Lịch & nhánh đấu']");
+    expect(app).toContain("['published', 'Công bố']");
+    expect(app).toContain("text: 'Thông tin giải đấu'");
+    expect(css).toContain('.competitor-public-workspace');
+    expect(css).toContain('.competitor-public-section-head');
+    expect(css).toContain('.competitor-public-live-list');
+    expect(css).toContain('.competitor-public-tabs');
+    expect(css).toContain('.competitor-public-tab-panel');
+  });
+
   it('renders Knockout bracket and match details as two completely separate sibling section cards', async () => {
     const [app, css] = await Promise.all([readAssembledFrontendScript(), readAssembledFrontendStyles()]);
     

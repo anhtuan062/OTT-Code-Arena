@@ -17,6 +17,7 @@ const PRACTICE_SCENARIOS = {
 
 const STATUS_LABELS = {
   draft: 'Bản nháp',
+  registration_not_open: 'Chưa mở đăng ký',
   registration_open: 'Đang mở đăng ký',
   running: 'Đang diễn ra',
   completed: 'Đã hoàn thành',
@@ -49,6 +50,7 @@ const ACTION_LABELS = {
   close_registration: 'Đóng đăng ký',
   generate_schedule: 'Tạo lịch thi đấu',
   start: 'Bắt đầu giải đấu',
+  start_next_stage: 'Chạy giai đoạn tiếp theo',
   run_all: 'Chạy tất cả trận đấu',
   stop_execution: 'Dừng trận đấu',
   cancel: 'Hủy giải đấu',
@@ -59,6 +61,7 @@ const ACTION_SUCCESS_MESSAGES = {
   close_registration: 'Đã đóng đăng ký giải đấu.',
   generate_schedule: 'Đã tạo lịch thi đấu.',
   start: 'Đã bắt đầu giải đấu.',
+  start_next_stage: 'Đã bắt đầu giai đoạn tiếp theo.',
   run_all: 'Đã đưa các trận đấu vào hàng đợi.',
   stop_execution: 'Đã dừng thực thi trận đấu.',
   cancel: 'Đã hủy giải đấu.',
@@ -248,6 +251,7 @@ const state = {
   tournamentDialogRevision: 0,
   editingTournament: null,
   phase1ActiveTab: 'info',
+  publicTournamentTab: 'info',
   phase1EditMode: false,
   phase1Draft: null,
   registrationDialogRevision: 0,
@@ -1258,6 +1262,7 @@ async function loadDashboard() {
   void refreshQueueStats();
   try {
     const competitor = state.user?.role === 'competitor';
+    syncTournamentStatusFilters();
     const dashboard = $('#dashboard');
     dashboard?.classList.toggle('player-dashboard', competitor);
     dashboard?.classList.toggle('organizer-dashboard', !competitor);
@@ -1292,9 +1297,15 @@ async function loadDashboard() {
     }
     if (activityTitle) activityTitle.textContent = competitor ? 'Giải đấu dành cho bạn' : 'Danh sách giải đấu quản lý';
     if (activityCopy) activityCopy.textContent = competitor
-      ? 'Các giải đấu bạn có thể gửi yêu cầu tham gia.'
+      ? 'Mở chi tiết để xem thông tin, lịch đấu và đăng ký Bot khi còn thời hạn.'
       : 'Theo dõi các giải đấu gần đây và quản lý hoạt động thi đấu.';
     if (secondaryColumn) secondaryColumn.textContent = competitor ? 'Trạng thái tham gia' : 'Thể thức';
+    const statusColumn = $('#dashboard-status-column');
+    if (statusColumn) statusColumn.textContent = competitor ? 'Trạng thái giải' : 'Trạng thái';
+    const openColumn = $('#dashboard-open-column');
+    const closeColumn = $('#dashboard-close-column');
+    if (openColumn) openColumn.textContent = 'Mở đăng ký';
+    if (closeColumn) closeColumn.textContent = 'Đóng đăng ký';
     if (botLabel) botLabel.textContent = competitor ? 'Bot của tôi' : 'Giải mở đăng ký';
     if (tournamentLabel) tournamentLabel.textContent = competitor ? 'Đang tham gia' : 'Giải đấu quản lý';
     const botDetail = $('#dash-bot-detail');
@@ -1315,7 +1326,7 @@ async function loadDashboard() {
     ]);
     if (!isCurrentView('dashboard', authRevision, viewRevision)) return;
     const tournaments = competitor
-      ? tournamentResponse.filter(tournament => tournament.status === 'registration_open')
+      ? tournamentResponse.filter(tournament => ['draft', 'registration_open', 'running'].includes(tournament.status))
       : tournamentResponse;
     if (competitor) state.bots = bots;
     const openCount = tournaments.filter(tournament => tournament.status === 'registration_open').length;
@@ -1417,25 +1428,28 @@ async function loadDashboard() {
       const myStatus = tournament.myRequestStatus
         ? ({ pending: 'Chờ duyệt', approved: 'Đã duyệt', rejected: 'Đã từ chối' }[tournament.myRequestStatus] || tournament.myRequestStatus)
         : 'Chưa đăng ký';
-      row.append(textCell(tournament.name), textCell(competitor ? myStatus : tournamentFormatLabel(tournament.format)), (() => { const cell = create('td'); cell.appendChild(statusBadge(tournament.status)); return cell; })(), textCell(tournament.participants?.length ?? tournament.participantCount ?? 0));
+      const nameCell = textCell(tournament.name);
+      nameCell.classList.add('dashboard-tournament-name-cell');
+      nameCell.dataset.label = 'Giải đấu';
+      const secondaryCell = textCell(competitor ? myStatus : tournamentFormatLabel(tournament.format));
+      secondaryCell.dataset.label = competitor ? 'Trạng thái tham gia' : 'Thể thức';
+      const statusCell = create('td');
+      statusCell.dataset.label = competitor ? 'Trạng thái giải' : 'Trạng thái';
+      const displayStatus = competitor && tournament.status === 'draft'
+        ? 'registration_not_open'
+        : tournament.status;
+      statusCell.appendChild(statusBadge(displayStatus));
+      const schedule = tournament.schedule || {};
+      const openCell = textCell(formatDashboardTournamentDate(schedule.registrationOpensAt || tournament.registrationOpenedAt));
+      openCell.dataset.label = 'Mở đăng ký';
+      const closeCell = textCell(formatDashboardTournamentDate(schedule.registrationClosesAt || tournament.registrationClosedAt));
+      closeCell.dataset.label = 'Đóng đăng ký';
+      const participantCell = textCell(`${tournament.participants?.length ?? tournament.participantCount ?? 0} Bot`);
+      participantCell.dataset.label = 'Người tham gia';
+      row.append(nameCell, secondaryCell, statusCell, openCell, closeCell, participantCell);
       const action = create('td');
-      if (competitor) action.appendChild(actionButton('Đăng ký Bot', () => {
-        state.tournamentId = tournament.tournamentId;
-        state.tournamentRegistrationContext = { name: tournament.name, status: tournament.status };
-        openRegistrationDialog();
-        void populateBotSelect();
-      }, `request:${tournament.tournamentId}`));
-      else action.appendChild(actionButton('Xem', () => viewTournament(tournament.tournamentId), `view:${tournament.tournamentId}`));
-      if (competitor && tournament.myRequestStatus) {
-        clear(action);
-        if (tournament.myRequestStatus === 'approved') {
-          action.appendChild(actionButton('Xem giải đấu', () => viewTournament(tournament.tournamentId), `view:${tournament.tournamentId}`));
-        } else {
-          const statusAction = actionButton(tournament.myRequestStatus === 'pending' ? 'Chờ duyệt' : 'Đã từ chối', () => {}, `request:${tournament.tournamentId}`);
-          statusAction.disabled = true;
-          action.appendChild(statusAction);
-        }
-      }
+      action.dataset.label = 'Mở giải đấu';
+      action.appendChild(actionButton(competitor ? 'Xem chi tiết' : 'Xem', () => viewTournament(tournament.tournamentId), `view:${tournament.tournamentId}`));
       row.appendChild(action);
       table.appendChild(row);
     });
@@ -1451,6 +1465,17 @@ async function loadDashboard() {
     }
   }
   finally { state.loading.delete('dashboard'); }
+}
+
+function formatDashboardTournamentDate(value) {
+  if (!value) return 'Chưa thiết lập';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return 'Chưa thiết lập';
+  return new Intl.DateTimeFormat('vi-VN', {
+    day: '2-digit', month: '2-digit', year: 'numeric',
+    hour: '2-digit', minute: '2-digit', hour12: false,
+    timeZoneName: 'short',
+  }).format(date);
 }
 
 /* ==================== MODULE: bots.js ==================== */
@@ -2540,7 +2565,15 @@ async function loadTournaments() {
   const pageTitle = $('.tournaments-workspace-header h2');
   const pageDescription = $('.tournaments-workspace-header p');
   const isCompetitor = state.user?.role === 'competitor';
-  if (isCompetitor) state.tournamentScope = 'all';
+  if (isCompetitor) {
+    // The competitor view is the public discovery list. Do not carry a
+    // previous organizer/status-filter selection into it: visible drafts are
+    // intentionally discoverable before registration opens.
+    state.tournamentScope = 'all';
+    state.tournamentStatusFilter = 'all';
+    const statusFilter = $('#tournament-status-filter');
+    if (statusFilter) statusFilter.value = 'all';
+  }
   if (pageTitle) pageTitle.textContent = isCompetitor ? 'Giải đấu' : 'Quản lý giải đấu';
   if (pageDescription) pageDescription.textContent = isCompetitor
     ? 'Khám phá giải đấu đang mở và theo dõi các giải bạn đã đăng ký hoặc tham gia.'
@@ -2563,7 +2596,7 @@ async function loadTournaments() {
       const mine = Array.isArray(minePayload) ? minePayload : [];
       const merged = new Map();
       discoverable
-        .filter(tournament => tournament.status === 'registration_open' || tournament.status === 'running')
+        .filter(tournament => tournament.status === 'draft' || tournament.status === 'registration_open' || tournament.status === 'running')
         .forEach(tournament => merged.set(tournament.tournamentId, tournament));
       mine.map(item => ({
         tournamentId: item.tournamentId,
@@ -3646,6 +3679,8 @@ async function resumeRegistrationSubmission(tournamentId) {
     const latest = requests.find(item => item.requestId === trackedId) || requests.at(-1);
     if (!latest) return;
     state.registrationSubmission = { ...latest, tournamentId };
+    const participantNameInput = $('#reg-part-name');
+    if (participantNameInput && !participantNameInput.value && latest.participantName) participantNameInput.value = latest.participantName;
     renderRegistrationSubmissionStatus(latest);
     // Bot/revision loading and status restoration run concurrently when the
     // dialog is reopened. Re-apply the lock after the persisted request wins
@@ -3664,6 +3699,7 @@ function goToBotsFromRegistration() {
 
 
 function renderTournamentList() {
+  syncTournamentStatusFilters();
   const list = $('#tournaments-list');
   const pagination = $('#tournament-pagination');
   clearLoadingSkeleton(list);
@@ -3764,7 +3800,8 @@ function renderDiscoverableTournamentCards(list, tournaments) {
   tournaments.forEach(tournament => {
     const card = create('article', { className: 'tournament-card' });
     const heading = create('div');
-    heading.append(create('h3', { text: tournament.name }), statusBadge(tournament.status), tournamentParticipationBadge(tournament));
+    const publicStatus = tournament.status === 'draft' ? 'registration_not_open' : tournament.status;
+    heading.append(create('h3', { text: tournament.name }), statusBadge(publicStatus), tournamentParticipationBadge(tournament));
     card.appendChild(heading);
     const meta = create('div', { className: 'tournament-card-meta' });
     meta.append(tournamentMetaItem('icon-users', `${tournament.participantCount ?? 0} ng\u01b0\u1eddi tham gia`));
@@ -3774,37 +3811,12 @@ function renderDiscoverableTournamentCards(list, tournaments) {
     card.appendChild(participation);
     participation.hidden = true;
     const footer = create('div', { className: 'tournament-card-footer' });
-    const published = tournament.status === 'completed' && Boolean(tournament.resultsPublishedAt);
-    if (tournament.spectatorAccess) {
-      participation.textContent = tournament.status === 'running' ? 'Bạn có quyền xem trực tiếp trận đấu.' : 'Bạn có quyền xem giải đấu này.';
-      footer.appendChild(tournamentViewButton(tournament.status === 'running' ? 'Xem trực tiếp' : 'Xem giải đấu', () => viewTournament(tournament.tournamentId), `view:${tournament.tournamentId}`));
-      card.appendChild(footer);
-      list.appendChild(card);
-      return;
-    }
-    if (published) {
-      participation.textContent = 'Kết quả đã được công bố.';
-      footer.appendChild(tournamentViewButton('Xem k\u1ebft qu\u1ea3', () => viewTournament(tournament.tournamentId), `view:${tournament.tournamentId}`));
-      card.appendChild(footer);
-      list.appendChild(card);
-      return;
-    }
-    if (tournament.status !== 'registration_open') {
-      participation.textContent = tournament.status === 'running' ? 'Đang diễn ra — có thể xem trực tiếp.' : 'Xem thông tin giải đấu.';
-      footer.appendChild(tournamentViewButton('Xem giải đấu', () => viewTournament(tournament.tournamentId), `view:${tournament.tournamentId}`));
-      card.appendChild(footer);
-      list.appendChild(card);
-      return;
-    }
-    const requestButton = actionButton('G\u1eedi y\u00eau c\u1ea7u tham gia', () => {
-      state.tournamentId = tournament.tournamentId;
-      state.tournamentRegistrationContext = { name: tournament.name, status: tournament.status };
-      openRegistrationDialog();
-      void populateBotSelect();
-    }, `request:${tournament.tournamentId}`, 'secondary-btn tournament-view-btn');
-    if (tournament.myRequestStatus === 'pending') { requestButton.disabled = true; requestButton.textContent = 'Đang chờ duyệt'; }
-    else if (tournament.myRequestStatus === 'approved') { requestButton.disabled = true; requestButton.textContent = 'Đã duyệt'; }
-    footer.appendChild(requestButton);
+    participation.textContent = tournament.status === 'registration_open'
+      ? 'Mở chi tiết để xem thông tin và gửi Bot đăng ký.'
+      : tournament.status === 'running'
+        ? 'Đang diễn ra — mở chi tiết để xem lịch và trực tiếp.'
+        : 'Mở chi tiết để xem nội dung giải đấu.';
+    footer.appendChild(tournamentViewButton('Xem chi tiết', () => viewTournament(tournament.tournamentId), `view:${tournament.tournamentId}`));
     card.appendChild(footer);
     list.appendChild(card);
   });
@@ -3874,6 +3886,25 @@ function renderTournamentEmpty(title, message, showAction = true) {
   list.appendChild(empty);
 }
 
+function syncTournamentStatusFilters() {
+  const competitor = state.user?.role === 'competitor';
+  const allowed = competitor
+    ? new Set(['all', 'registration_open', 'registration_closed', 'running', 'completed'])
+    : null;
+  ['#tournament-status-filter', '#dashboard-tournament-status'].forEach(selector => {
+    const filter = $(selector);
+    if (!filter) return;
+    [...filter.options].forEach(option => {
+      option.hidden = Boolean(allowed && !allowed.has(option.value));
+    });
+    if (allowed && !allowed.has(filter.value)) {
+      filter.value = 'all';
+      if (selector === '#tournament-status-filter') state.tournamentStatusFilter = 'all';
+      if (selector === '#dashboard-tournament-status') state.dashboardTournamentStatus = 'all';
+    }
+  });
+}
+
 async function submitNewBot() {
   await submitBot();
 }
@@ -3936,7 +3967,7 @@ async function viewTournament(id) {
 function appendTournamentAction(container, tournamentId, authRevision, viewRevision, label, action, confirmation = false, tournamentName = '') {
   const buttonClass = action === 'cancel' || action === 'delete' ? 'secondary-btn tournament-action tournament-action-danger' : 'primary-btn tournament-action';
   const button = actionButton(label, () => confirmation ? confirmTournamentAction(tournamentId, authRevision, viewRevision, action, label, tournamentName) : tournamentAction(tournamentId, authRevision, viewRevision, action), `tournament:${tournamentId}:${action}`, buttonClass);
-  const actionIcon = action === 'cancel' || action === 'delete' || action === 'stop_execution' ? 'td-icon-circle-x' : action === 'open_registration' ? 'td-icon-user-round-plus' : action === 'run_all' ? 'td-icon-play' : null;
+  const actionIcon = action === 'cancel' || action === 'delete' || action === 'stop_execution' ? 'td-icon-circle-x' : action === 'open_registration' ? 'td-icon-user-round-plus' : action === 'run_all' || action === 'start_next_stage' ? 'td-icon-play' : null;
   if (actionIcon) {
     const labelNode = button.firstChild;
     button.insertBefore(icon(actionIcon), labelNode);
@@ -4105,6 +4136,20 @@ function renderTournamentLifecycle(tournament) {
   updateTournamentScheduleNotice(tournament);
   const list = $('#td-lifecycle');
   if (!list) return;
+  if (state.user?.role === 'competitor') {
+    const lifecycleMobile = $('#td-lifecycle-mobile');
+    if (lifecycleMobile) lifecycleMobile.hidden = true;
+    const nextStep = $('#td-next-step');
+    if (nextStep) {
+      nextStep.hidden = true;
+      nextStep.replaceChildren();
+    }
+    const phaseLabel = $('#td-phase-label');
+    if (phaseLabel) phaseLabel.textContent = 'Thông tin công khai';
+    return;
+  }
+  const lifecycleMobile = $('#td-lifecycle-mobile');
+  if (lifecycleMobile) lifecycleMobile.hidden = false;
   const steps = ['Tạo giải', 'Mở đăng ký', 'Chốt danh sách', 'Lập lịch', 'Thi đấu', 'Hoàn thành', 'Công bố'];
   if (tournament.status === 'cancelled') {
     const phaseLabel = $('#td-phase-label'); if (phaseLabel) phaseLabel.textContent = 'Đã hủy';
@@ -4207,8 +4252,223 @@ function phaseLayoutClass(phase) {
   return map[phase] || 'phase-layout-generic';
 }
 
+function hasTournamentSchedule(tournament) {
+  return Boolean(
+    (Array.isArray(tournament?.rounds) && tournament.rounds.length)
+    || (Array.isArray(tournament?.stages) && tournament.stages.some(stage => (
+      (stage.groups && stage.groups.length > 0) || (stage.rounds && stage.rounds.length > 0) || (stage.regions && stage.regions.length > 0)
+    )))
+  );
+}
+
+function renderCompetitorPublicLive(container, tournament) {
+  const runningPairings = getAllTournamentPairings(tournament)
+    .filter(pairing => (pairing?.status === 'in_progress' || pairing?.status === 'running') && pairing.matchId);
+  const panel = create('section', { className: 'tournament-panel phase-card competitor-public-live' });
+  const head = create('div', { className: 'competitor-public-section-head' });
+  head.append(
+    create('div', { children: [create('h3', { text: 'Đang thi đấu trực tiếp' }), create('p', { text: runningPairings.length ? 'Các trận đang chạy có thể được theo dõi trực tiếp.' : 'Hiện chưa có trận nào đang chạy.' })] }),
+    create('span', { className: 'competitor-public-access-note', text: 'Live' })
+  );
+  panel.appendChild(head);
+  if (runningPairings.length) {
+    const list = create('div', { className: 'competitor-public-live-list' });
+    runningPairings.forEach((pairing, index) => {
+      const item = create('article', { className: 'competitor-public-live-item' });
+      const names = create('strong', { text: `${resolveParticipantName(tournament, pairing.participantA, pairing.slotA)} vs ${resolveParticipantName(tournament, pairing.participantB, pairing.slotB)}` });
+      item.append(names, actionButton('Xem trực tiếp', () => openLiveMatch(tournament.tournamentId, pairing.matchId, pairing.pairingId), `competitor-live:${pairing.pairingId || index}`, 'primary-btn'));
+      list.appendChild(item);
+    });
+    panel.appendChild(list);
+  }
+  container.appendChild(panel);
+}
+
+function renderCompetitorPublicInfo(container, tournament) {
+  const schedule = phase1Schedule(tournament);
+  const rules = tournament.rulesConfig || {};
+  const matchConfig = tournament.matchConfig || {};
+  const scoringConfig = tournament.scoringConfig || {};
+  const isMultiStage = tournament.format === 'multi_stage';
+  const conversionEnabled = Boolean(rules.ruleModifiers?.conversion);
+  const publicDate = value => {
+    if (!value) return 'Chưa thiết lập';
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return String(value);
+    return new Intl.DateTimeFormat('vi-VN', {
+      day: '2-digit', month: '2-digit', year: 'numeric',
+      hour: '2-digit', minute: '2-digit', hour12: false,
+      timeZoneName: 'short',
+    }).format(date);
+  };
+  const publicRuleCard = (title, description, items) => {
+    const section = create('section', { className: 'competitor-public-rule-card' });
+    section.append(create('h4', { text: title }), create('p', { text: description }));
+    if (items?.length) {
+      const list = create('ul', { className: 'competitor-public-rule-list' });
+      items.forEach(item => list.appendChild(create('li', { children: [create('strong', { text: item[0] }), create('span', { text: item[1] })] })));
+      section.appendChild(list);
+    }
+    return section;
+  };
+  const intro = create('section', { className: 'tournament-panel phase-card competitor-public-intro' });
+  const introHead = create('div', { className: 'competitor-public-section-head' });
+  introHead.append(
+    create('div', { children: [create('h3', { text: 'Thông tin giải đấu' }), create('p', { text: 'Thông tin công khai của giải và thao tác người chơi.' })] }),
+    create('span', { className: 'competitor-public-access-note', text: 'Chế độ người chơi' })
+  );
+  intro.appendChild(introHead);
+  intro.appendChild(phase1ReadList([
+    ['Tên giải đấu', tournament.name],
+    ['Mô tả', tournament.description],
+    ['Đơn vị tổ chức', tournament.organizerInfo],
+    ['Liên hệ', tournament.contactInfo],
+    ['Thể thức', tournament.format === 'multi_stage' ? 'Nhiều giai đoạn' : tournamentFormatLabel(tournament.format)],
+    ['Luật thi đấu', 'OTT Standard'],
+    ['Luật Conversion', rules.ruleModifiers?.conversion ? 'Đã bật' : 'Không bật'],
+    ['Thời gian công khai', publicDate(schedule.visibleAt)],
+    ['Mở đăng ký', publicDate(schedule.registrationOpensAt)],
+    ['Đóng đăng ký', publicDate(schedule.registrationClosesAt)],
+  ]));
+  container.appendChild(intro);
+  const standardRuleCard = publicRuleCard('Luật bàn cờ', 'Luật gốc OTT Standard luôn được bật trong mọi trận đấu.', [
+    ['Bàn cờ', 'Bàn cờ 9×9; mỗi bên có 9 quân gồm Búa, Bao và Kéo.'],
+    ['Di chuyển', 'Mỗi lượt đi một ô theo ngang, dọc hoặc chéo; không đi ra ngoài bàn hoặc vào ô có quân cùng phe.'],
+    ['Ăn quân', 'Búa ăn Kéo, Kéo ăn Bao, Bao ăn Búa; không ăn quân cùng loại hoặc cùng phe.'],
+    ['Điều kiện thắng', 'Đưa quân tới ô đích hoặc ăn hết quân đối thủ. Hòa theo các điều kiện do Engine xác định.'],
+    ['Luật mở rộng', conversionEnabled ? 'Conversion đang bật' : 'Không bật Conversion'],
+    ...(conversionEnabled ? [
+      ['Khi ăn quân', 'Quân A di chuyển vào ô của quân B.'],
+      ['Quân bị ăn', 'Giữ nguyên loại và ID, đổi sang phe A rồi trở về ô xuất phát của quân A.'],
+      ['Chuyển phe nhiều lần', 'Một quân có thể tiếp tục đổi phe qua các lần bị ăn tiếp theo.'],
+    ] : []),
+    ['Quyền xem', 'Kết quả và replay hiển thị khi dữ liệu trận đã sẵn sàng.'],
+  ]);
+  standardRuleCard.appendChild(create('button', {
+    className: 'secondary-btn competitor-public-guide-link',
+    text: 'Xem hướng dẫn luật đầy đủ',
+    attrs: { type: 'button', 'data-guide-target': 'player-guide' },
+  }));
+  const rulesSection = create('section', { className: 'competitor-public-rules' });
+  rulesSection.append(
+    create('div', { className: 'competitor-public-section-head', children: [
+      create('div', { children: [create('h3', { text: 'Cách thi đấu' }), create('p', { text: 'Các quy tắc chính được áp dụng cho trận đấu và bảng xếp hạng.' })] }),
+    ] }),
+    create('div', { className: 'competitor-public-rule-grid', children: [
+      standardRuleCard,
+      publicRuleCard('Thể thức series', isMultiStage ? 'Cấu trúc series được cố định theo từng vòng.' : 'Giải legacy giữ nguyên cấu hình đã lưu.', isMultiStage
+        ? [['Vòng khu vực', 'BO3'], ['Vòng bảng', 'BO2'], ['Vòng loại trực tiếp', 'BO3']]
+        : [['Số ván mỗi cặp', `BO${matchConfig.bestOf || 1}`]]),
+      publicRuleCard('Tính điểm', 'Điểm dùng để xếp hạng trong bảng đấu.', [
+        ['Thắng', `${scoringConfig.winPoints ?? (isMultiStage ? 3 : 3)} điểm`],
+        ['Hòa', `${scoringConfig.drawPoints ?? (isMultiStage ? 1 : 1)} điểm`],
+        ['Thua', `${scoringConfig.lossPoints ?? 0} điểm`],
+      ]),
+      publicRuleCard('Giới hạn trận đấu', 'Các giới hạn kỹ thuật được áp dụng đồng nhất cho mọi Bot.', [
+        ['Lượt tối đa', `${matchConfig.maxTurns ?? 200} lượt`],
+        ['Timeout mỗi lượt', `${matchConfig.turnTimeoutMs ?? (tournament.configurationVersion === 2 ? 5000 : 2000)} ms (thực thi tối thiểu 5000 ms)`],
+      ]),
+    ] })
+  );
+  if (tournament.rulesNotes || tournament.policyNotes) {
+    const notes = create('section', { className: 'competitor-public-notes' });
+    notes.append(create('h3', { text: 'Điều lệ và ghi chú của ban tổ chức' }));
+    if (tournament.rulesNotes) notes.append(create('p', { children: [create('strong', { text: 'Điều lệ: ' }), create('span', { text: tournament.rulesNotes })] }));
+    if (tournament.policyNotes) notes.append(create('p', { children: [create('strong', { text: 'Chính sách tham gia: ' }), create('span', { text: tournament.policyNotes })] }));
+    rulesSection.appendChild(notes);
+  }
+  container.appendChild(rulesSection);
+  if (tournament.status === 'registration_open') renderPhase2Registration(container, tournament);
+}
+
+function setCompetitorPublicHeader() {
+  const phaseLabel = $('#td-phase-label');
+  if (phaseLabel) phaseLabel.textContent = 'Chi tiết công khai';
+}
+
+function ensureCompetitorPublicScheduleWorkspace(container) {
+  let workspace = container.querySelector('#multi-stage-workspace');
+  if (!workspace) {
+    workspace = create('div', { className: 'multi-stage-workspace', attrs: { id: 'multi-stage-workspace' } });
+    container.appendChild(workspace);
+  }
+  workspace.hidden = false;
+  return workspace;
+}
+
+function renderCompetitorPublicSchedule(container, tournament, multiStageContext) {
+  if (tournament.format === 'multi_stage' || multiStageContext) {
+    ensureCompetitorPublicScheduleWorkspace(container);
+    if (state.multiStage.progress) renderMultiStageWorkspace({ preserveFocus: true });
+  } else if (hasTournamentSchedule(tournament)) renderPhase4Scheduling(container, tournament);
+  else container.appendChild(create('section', { className: 'tournament-panel phase-card competitor-public-empty', children: [
+    create('h3', { text: 'Lịch thi đấu' }),
+    create('p', { text: 'Lịch thi đấu chưa được công bố.' }),
+  ] }));
+}
+
+function renderCompetitorPublicArchive(container, tournament, multiStageContext) {
+  if (tournament.status === 'completed') renderPhase7History(container, tournament, multiStageContext);
+  else container.appendChild(create('section', { className: 'tournament-panel phase-card competitor-public-empty', children: [
+    create('h3', { text: 'Công bố' }),
+    create('p', { text: 'Kết quả chung cuộc sẽ được tổng hợp sau khi giải đấu hoàn tất.' }),
+  ] }));
+}
+
+function renderCompetitorPublicTournament(container, tournament, multiStageContext) {
+  container.className = 'tournament-lifecycle-body competitor-public-workspace';
+  const tabDefinitions = [
+    ['info', 'Thông tin giải đấu'],
+    ['schedule', 'Lịch & nhánh đấu'],
+    ['live', 'Xem trực tiếp'],
+    ['published', 'Công bố'],
+  ];
+  const requestedTab = tabDefinitions.some(([key]) => key === state.publicTournamentTab) ? state.publicTournamentTab : 'info';
+  state.publicTournamentTab = requestedTab;
+  const nav = create('div', { className: 'competitor-public-tabs', attrs: { role: 'tablist', 'aria-label': 'Nội dung giải đấu công khai' } });
+  const panels = create('div', { className: 'competitor-public-tab-panels' });
+  const rendered = new Set();
+  const renderTab = key => {
+    if (rendered.has(key)) return;
+    const panel = panels.querySelector(`[data-public-tab-panel="${key}"]`);
+    if (!panel) return;
+    if (key === 'info') renderCompetitorPublicInfo(panel, tournament);
+    if (key === 'schedule') renderCompetitorPublicSchedule(panel, tournament, multiStageContext);
+    if (key === 'live') renderCompetitorPublicLive(panel, tournament);
+    if (key === 'published') renderCompetitorPublicArchive(panel, tournament, multiStageContext);
+    rendered.add(key);
+  };
+  tabDefinitions.forEach(([key, label]) => {
+    const tab = create('button', { className: `competitor-public-tab${key === requestedTab ? ' is-active' : ''}`, type: 'button', text: label, attrs: { role: 'tab', 'aria-selected': String(key === requestedTab), 'aria-controls': `public-tab-panel-${key}` } });
+    tab.addEventListener('click', () => {
+      state.publicTournamentTab = key;
+      nav.querySelectorAll('[role="tab"]').forEach(item => {
+        const active = item === tab;
+        item.classList.toggle('is-active', active);
+        item.setAttribute('aria-selected', String(active));
+      });
+      panels.querySelectorAll('[data-public-tab-panel]').forEach(item => { item.hidden = item.dataset.publicTabPanel !== key; });
+      renderTab(key);
+      setCompetitorPublicHeader();
+    });
+    nav.appendChild(tab);
+    panels.appendChild(create('section', { className: 'competitor-public-tab-panel', attrs: { id: `public-tab-panel-${key}`, role: 'tabpanel', 'data-public-tab-panel': key, 'aria-label': label, ...(key === requestedTab ? {} : { hidden: 'true' }) } }));
+  });
+  container.append(nav, panels);
+  renderTab(requestedTab);
+  setCompetitorPublicHeader();
+}
+
 function renderTournamentLifecycleBody(container, tournament, multiStageContext) {
   if (!container) return;
+  if (state.user?.role === 'competitor') {
+    $('#tournament-detail')?.classList.add('is-competitor-view');
+    clear(container);
+    renderCompetitorPublicTournament(container, tournament, multiStageContext);
+    container.dataset.lifecyclePhase = 'public';
+    return;
+  }
+  $('#tournament-detail')?.classList.remove('is-competitor-view');
   const phase = getTournamentLifecyclePhase(tournament);
   const existingRequestList = container.querySelector('#phase2-request-list');
   if (phase === 2 && container.dataset.lifecyclePhase === '2' && existingRequestList) {
@@ -4720,6 +4980,17 @@ function phase1IsoDateValue(value) {
   return Number.isNaN(date.getTime()) ? value : date.toISOString();
 }
 
+function phase1DisplayDate(value) {
+  if (!value) return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return new Intl.DateTimeFormat('vi-VN', {
+    day: '2-digit', month: '2-digit', year: 'numeric',
+    hour: '2-digit', minute: '2-digit', hour12: false,
+    timeZoneName: 'short',
+  }).format(date);
+}
+
 function createPhase1Draft(tournament) {
   const matchConfig = tournament.matchConfig || {};
   const scoringConfig = tournament.scoringConfig || {};
@@ -4736,7 +5007,7 @@ function createPhase1Draft(tournament) {
     matchConfig: {
       bestOf: matchConfig.bestOf ?? (tournament.configurationVersion === 2 ? 3 : 1),
       maxTurns: matchConfig.maxTurns ?? 200,
-      turnTimeoutMs: matchConfig.turnTimeoutMs ?? 2000,
+      turnTimeoutMs: matchConfig.turnTimeoutMs ?? (tournament.configurationVersion === 2 ? 5000 : 2000),
     },
     scoringConfig: {
       winPoints: scoringConfig.winPoints ?? 3,
@@ -4854,7 +5125,7 @@ function renderPhase1Creation(container, tournament) {
         const current = capturePhase1DraftFromDom(tournament);
         if (!String(current.name || '').trim() || String(current.name).trim().length > 100) { showToast('Tên giải đấu phải từ 1 đến 100 ký tự.', 'error'); $('#edit-t-name')?.focus(); return; }
         const payload = { name: String(current.name).trim(), description: String(current.description || '').trim(), organizerInfo: String(current.organizerInfo || '').trim(), contactInfo: String(current.contactInfo || '').trim(), rulesNotes: String(current.rulesNotes || '').trim(), policyNotes: String(current.policyNotes || '').trim() };
-        if (tournament.status === 'draft') Object.assign(payload, { schedule: current.schedule, rulesConfig: current.rulesConfig, matchConfig: isCurrentTournament ? { ...current.matchConfig, bestOf: undefined } : current.matchConfig, ...(isCurrentTournament ? {} : { scoringConfig: current.scoringConfig }), botLimits: current.botLimits });
+        if (tournament.status === 'draft') Object.assign(payload, { schedule: current.schedule, rulesConfig: current.rulesConfig, matchConfig: isCurrentTournament ? { ...current.matchConfig, bestOf: undefined } : current.matchConfig, ...(isCurrentTournament ? {} : { scoringConfig: current.scoringConfig, botLimits: current.botLimits }) });
         if (tournament.status === 'registration_open') {
           const originalClose = phase1Schedule(tournament).registrationClosesAt;
           if (current.schedule.registrationClosesAt !== originalClose) payload.schedule = { registrationClosesAt: current.schedule.registrationClosesAt };
@@ -4920,7 +5191,7 @@ function renderPhase1Creation(container, tournament) {
     }
     pane.appendChild(phase1RuntimeNote('OTT Standard luôn được áp dụng. Giải mới cố định vòng bảng BO2, vòng loại BO3 và tính điểm 3–1–0; Conversion chỉ được áp dụng khi bật và snapshot đã khóa.'));
   } else if (activeTab === 'time') {
-    if (!isEditing) pane.appendChild(phase1ReadList([['Công khai từ', phase1Schedule(tournament).visibleAt], ['Mở đăng ký', phase1Schedule(tournament).registrationOpensAt], ['Đóng đăng ký', phase1Schedule(tournament).registrationClosesAt]]));
+    if (!isEditing) pane.appendChild(phase1ReadList([['Công khai từ', phase1DisplayDate(phase1Schedule(tournament).visibleAt)], ['Mở đăng ký', phase1DisplayDate(phase1Schedule(tournament).registrationOpensAt)], ['Đóng đăng ký', phase1DisplayDate(phase1Schedule(tournament).registrationClosesAt)]]));
     else {
       const form = create('div', { className: 'phase-setup-form phase-settings-form' });
       const closeLocked = tournament.status === 'registration_open' && !canEditSchedule;
@@ -4933,7 +5204,7 @@ function renderPhase1Creation(container, tournament) {
     if (!isEditing) pane.appendChild(phase1ReadList([['Giới hạn lượt', draft.matchConfig.maxTurns], ['Timeout mỗi lượt', `${draft.matchConfig.turnTimeoutMs} ms (source revision thực thi tối thiểu ${Math.max(draft.matchConfig.turnTimeoutMs, 5000)} ms)`], ['Số Bot tối đa theo thể thức', phase1MaxBots(tournament.format)], ['Bot tối đa mỗi competitor', limits.maxBotsPerCompetitor ?? (isCurrentTournament ? 1 : 'Không giới hạn legacy')], ['Kích thước source tối đa', `${limits.maxSourceBytes} bytes`], ['Memory', `${limits.memoryLimitMb} MB`], ['CPU', limits.cpuLimit], ['Số process', limits.maxProcesses], ['Runtime hỗ trợ', 'C++17 và Python 3']]))
     else {
       const form = create('div', { className: 'phase-setup-form phase-settings-form' });
-      form.append(create('div', { className: 'phase-settings-grid', children: [createFormGroup('Giới hạn lượt', phase1Number('edit-t-maxTurns', draft.matchConfig.maxTurns, 1, 10000, 1, settingsLocked)), createFormGroup('Timeout mỗi lượt (ms)', phase1Number('edit-t-turnTimeoutMs', draft.matchConfig.turnTimeoutMs, 1, 120000, 1, settingsLocked))] }), create('div', { className: 'phase-settings-grid', children: [createFormGroup('Source tối đa (bytes)', phase1Number('edit-t-maxSourceBytes', draft.botLimits.maxSourceBytes, 1, 65536, 1, settingsLocked)), createFormGroup('Memory (MB)', phase1Number('edit-t-memoryLimitMb', draft.botLimits.memoryLimitMb, 64, 256, 1, settingsLocked)), createFormGroup('CPU', phase1Number('edit-t-cpuLimit', draft.botLimits.cpuLimit, 0.1, 1, 0.1, settingsLocked)), createFormGroup('Process tối đa', phase1Number('edit-t-maxProcesses', draft.botLimits.maxProcesses, 1, 64, 1, settingsLocked)), createFormGroup('Bot tối đa mỗi competitor', phase1Number('edit-t-maxBotsPerCompetitor', draft.botLimits.maxBotsPerCompetitor, 1, 64, 1, settingsLocked))] }), createFormGroup('Runtime', create('input', { className: 'dialog-input', value: 'C++17, Python 3', attrs: { id: 'edit-t-runtime', type: 'text', readonly: 'true' } }), 'Runtime được quản lý bởi Bot registration và không phải tùy chọn tự do của giải đấu.'), create('p', { className: 'phase-settings-capacity', text: `Số Bot tối đa theo thể thức hiện tại: ${phase1MaxBots(draft.format)}.` }));
+      form.append(create('div', { className: 'phase-settings-grid', children: [createFormGroup('Giới hạn lượt', phase1Number('edit-t-maxTurns', draft.matchConfig.maxTurns, 1, 10000, 1, settingsLocked)), createFormGroup('Timeout mỗi lượt (ms)', phase1Number('edit-t-turnTimeoutMs', draft.matchConfig.turnTimeoutMs, 5000, 120000, 1, settingsLocked), 'Mặc định 5000 ms; không thể thấp hơn giới hạn thực thi của source revision.')] }), create('div', { className: 'phase-settings-grid', children: [createFormGroup('Source tối đa (bytes)', phase1Number('edit-t-maxSourceBytes', draft.botLimits.maxSourceBytes, 1, 65536, 1, true)), createFormGroup('Memory (MB)', phase1Number('edit-t-memoryLimitMb', draft.botLimits.memoryLimitMb, 64, 256, 1, true)), createFormGroup('CPU', phase1Number('edit-t-cpuLimit', draft.botLimits.cpuLimit, 0.1, 1, 0.1, true)), createFormGroup('Process tối đa', phase1Number('edit-t-maxProcesses', draft.botLimits.maxProcesses, 1, 64, 1, true)), createFormGroup('Bot tối đa mỗi competitor', phase1Number('edit-t-maxBotsPerCompetitor', draft.botLimits.maxBotsPerCompetitor, 1, 64, 1, true))] }), createFormGroup('Runtime', create('input', { className: 'dialog-input', value: 'C++17, Python 3', attrs: { id: 'edit-t-runtime', type: 'text', readonly: 'true' } }), 'Runtime được quản lý bởi Bot registration và không phải tùy chọn tự do của giải đấu.'), createFormGroup('Số trận chạy đồng thời', create('input', { className: 'dialog-input', value: '2', attrs: { id: 'edit-t-concurrency', type: 'text', readonly: 'true' } }), 'Mặc định hệ thống; scheduler quản lý, không phải tùy chọn riêng của giải đấu.'), create('p', { className: 'phase-settings-capacity', text: `Số Bot tối đa theo thể thức hiện tại: ${phase1MaxBots(draft.format)}.` }));
       pane.appendChild(form);
     }
     pane.appendChild(phase1RuntimeNote('Các giới hạn Bot được lưu qua API và được áp dụng khi đăng ký, preflight và thực thi trận. Không hiển thị tùy chọn ngoài contract Backend.'));
@@ -4996,6 +5267,9 @@ function renderPhase2Registration(container, tournament) {
       );
     }
     container.appendChild(ctaCard);
+    // Competitors only need the registration CTA/status. Request review,
+    // counters and filter tabs are organizer-only workflow controls.
+    return;
   }
 
   // Registration Overview: 3 Stat Cards
@@ -5441,6 +5715,59 @@ function pairingMatchCode(tournament, pairingId) {
   return `V${fieldSize}-${matchNumber}`;
 }
 
+function renderPhase4ParticipantTable(container, tournament, selectedTab, preliminaryRegions, groups, knockoutStage) {
+  if (selectedTab === 'knockout') return;
+  const showRegions = preliminaryRegions.length > 0;
+  const selected = showRegions
+    ? preliminaryRegions.find(region => region.regionId === selectedTab)
+    : groups.find(group => group.groupId === selectedTab);
+  if (!selected) return;
+
+  const participantIds = [...new Set(Array.isArray(selected.participantIds) ? selected.participantIds : [])];
+  if (!participantIds.length) return;
+  const standingsByParticipant = new Map((selected.standings || []).map(standing => [standing.participantId, standing]));
+  const resultByParticipant = new Map((selected.participantResults || []).map(result => [result.participantId, result]));
+  const title = showRegions ? regionalDisplayName(selected) : groupDisplayName(selected);
+  const panel = create('section', { className: 'tournament-panel phase-card phase4-participant-table', attrs: { 'aria-labelledby': 'phase4-participant-table-title' } });
+  const heading = create('div', { className: 'phase4-section-header' });
+  heading.append(
+    create('div', { children: [
+      create('span', { className: 'panel-kicker', text: 'Thành phần bảng đấu' }),
+      create('h4', { className: 'phase4-section-title', attrs: { id: 'phase4-participant-table-title' }, text: `Danh sách Bot · ${title}` }),
+    ] }),
+    create('span', { className: 'phase4-section-subtitle', text: selected.standings?.length ? 'Bảng xếp hạng hiện tại' : 'Chưa có kết quả để xếp hạng' })
+  );
+  panel.appendChild(heading);
+
+  const tableScroll = create('div', { className: 'standings-table-scroll', attrs: { role: 'region', 'aria-label': `Danh sách Bot ${title}`, tabindex: '0' } });
+  const table = create('table', { className: 'data-table phase4-participant-standings-table' });
+  const head = create('thead');
+  const headRow = create('tr');
+  ['Hạng', 'Tên thi đấu', 'Điểm', 'Trạng thái'].forEach(label => headRow.appendChild(create('th', { text: label })));
+  head.appendChild(headRow);
+  const body = create('tbody');
+  participantIds.forEach((participantId, index) => {
+    const participant = (tournament.participants || []).find(item => item.participantId === participantId);
+    const standing = standingsByParticipant.get(participantId) || {};
+    const result = resultByParticipant.get(participantId);
+    const status = standing.status || result?.status;
+    const statusLabel = status === 'won' ? 'Đã thắng' : status === 'eliminated' ? 'Đã dừng' : status === 'in_progress' ? 'Đang thi đấu' : status === 'failed' ? 'Trận lỗi' : status === 'bye' ? 'Miễn đấu' : 'Chưa thi đấu';
+    const name = participant?.name || resolveParticipantName(tournament, participantId);
+    const row = create('tr');
+    row.append(
+      create('td', { text: standing.rank ? String(standing.rank) : `#${index + 1}` }),
+      create('td', { className: 'phase4-participant-name-cell', children: [create('strong', { text: name }), create('small', { text: participantId })] }),
+      create('td', { text: standing.points == null ? '—' : String(standing.points) }),
+      create('td', { text: statusLabel })
+    );
+    body.appendChild(row);
+  });
+  table.append(head, body);
+  tableScroll.appendChild(table);
+  panel.appendChild(tableScroll);
+  container.appendChild(panel);
+}
+
 function renderPhase4Scheduling(container, tournament) {
   const isOrganizer = state.user?.role === 'organizer';
 
@@ -5581,6 +5908,8 @@ function renderPhase4Scheduling(container, tournament) {
     groupsSection.appendChild(groupsGrid);
     workspace.appendChild(groupsSection);
   }
+
+  renderPhase4ParticipantTable(workspace, tournament, selectedTab, preliminaryRegions, groups, knockoutStage);
 
   // 4. Section 3: Schedule Explorer (Lịch thi đấu — Bảng / Giai đoạn được chọn)
   const explorerCard = create('section', { className: 'tournament-panel phase-card phase4-schedule-explorer phase-schedule-structure' });
@@ -6012,18 +6341,22 @@ function renderPhase5Running(container, tournament, multiStageContext) {
   } else {
     // Single round robin schedule and standings
     const rrContainer = create('div', { className: 'phase-round-robin-workspace' });
-    const execution = getTournamentExecutionSummary(tournament);
-    renderStandings(tournament.standings, execution, state.viewerParticipantIds);
-    const legacyStandings = document.querySelector('#tournament-detail .standings-panel');
-    if (legacyStandings) {
-      legacyStandings.hidden = false;
-      rrContainer.appendChild(legacyStandings);
-    }
-    const legacySchedule = document.querySelector('#tournament-detail .tournament-schedule');
-    if (legacySchedule) {
-      legacySchedule.hidden = false;
-      renderSchedule(tournament, state.viewerParticipantIds);
-      rrContainer.appendChild(legacySchedule);
+    if (isCompetitorResultsHidden(tournament)) {
+      rrContainer.appendChild(unpublishedResultsNotice());
+    } else {
+      const execution = getTournamentExecutionSummary(tournament);
+      renderStandings(tournament.standings, execution, state.viewerParticipantIds);
+      const legacyStandings = document.querySelector('#tournament-detail .standings-panel');
+      if (legacyStandings) {
+        legacyStandings.hidden = false;
+        rrContainer.appendChild(legacyStandings);
+      }
+      const legacySchedule = document.querySelector('#tournament-detail .tournament-schedule');
+      if (legacySchedule) {
+        legacySchedule.hidden = false;
+        renderSchedule(tournament, state.viewerParticipantIds);
+        rrContainer.appendChild(legacySchedule);
+      }
     }
     container.appendChild(rrContainer);
   }
@@ -6171,7 +6504,27 @@ function phase6PairingNames(tournament, pairing) {
   };
 }
 
+function isCompetitorResultsHidden(tournament) {
+  return false;
+}
+
+function isCompetitorResultsUnpublished(tournament) {
+  return false;
+}
+
+function unpublishedResultsNotice() {
+  return create('div', {
+    className: 'phase6-results-empty',
+    attrs: { role: 'status', 'aria-live': 'polite' },
+    children: [
+      create('strong', { text: 'Kết quả chưa được công bố' }),
+      create('span', { text: 'Organizer chưa công bố kết quả. Tỉ số và Replay sẽ hiển thị sau khi được công bố.' }),
+    ],
+  });
+}
+
 function phase6PairingResult(tournament, pairing) {
+  if (isCompetitorResultsHidden(tournament)) return 'Kết quả chưa được công bố.';
   const names = phase6PairingNames(tournament, pairing);
   const winner = pairing?.matchResult?.winner;
   const progress = knockoutSeriesProgress(pairing);
@@ -6185,6 +6538,12 @@ function phase6PairingResult(tournament, pairing) {
 }
 
 function renderPhase6ReplayAction(tournament, pairing, progress) {
+  if (isCompetitorResultsHidden(tournament)) {
+    return create('span', {
+      className: 'phase6-replay-unavailable',
+      text: 'Replay sẽ hiển thị sau khi công bố kết quả',
+    });
+  }
   if (!phase6PairingIsCompleted(pairing) || !pairing?.matchId) {
     return create('span', { className: 'phase6-replay-unavailable', text: 'Chưa có Replay' });
   }
@@ -6338,7 +6697,11 @@ function renderPhase6GroupResult(tournament, group) {
     };
   });
   const response = { pairings: displayPairings, pagination: { totalItems: displayPairings.filter(pairing => pairing.participantB != null).length } };
-  renderGroupStandings(detail, group, displayPairings);
+  if (!isCompetitorResultsUnpublished(state.currentTournament)) {
+    renderGroupStandings(detail, group, displayPairings);
+  } else {
+    detail.appendChild(unpublishedResultsNotice());
+  }
   renderGroupPairings(detail, response, group);
   return detail;
 }
@@ -6536,6 +6899,18 @@ function renderPhase6ResultsByStage(container, tournament, multiStageContext) {
 
 function renderPhase6Results(container, tournament) {
   const multiStageContext = arguments[2] || state.multiStage || null;
+
+  if (isCompetitorResultsHidden(tournament)) {
+    container.appendChild(create('section', {
+      className: 'tournament-panel phase-card phase6-results-empty',
+      attrs: { role: 'status', 'aria-live': 'polite' },
+      children: [
+        create('h4', { text: 'Kết quả chưa được công bố' }),
+        create('p', { text: 'Organizer chưa công bố kết quả. Tỉ số và Replay sẽ hiển thị sau khi được công bố.' }),
+      ],
+    }));
+    return;
+  }
 
   const knockoutFinal = getPhase6KnockoutFinal(tournament, multiStageContext);
   // 1. Final Match Summary (Chung kết) - shown when knockout final exists
@@ -6903,6 +7278,12 @@ async function renderPhase2Requests(tournamentId, container, countBadge, tournam
   let bulkRejectAllButton = null;
   let bulkUndoAllButton = null;
   let bulkProcessing = false;
+  const BULK_OPERATION_DELAY_MS = 150;
+
+  const waitBetweenBulkOperations = async (index, total) => {
+    if (index >= total - 1) return;
+    await new Promise(resolve => window.setTimeout(resolve, BULK_OPERATION_DELAY_MS));
+  };
 
   const setBulkProcessing = processing => {
     bulkProcessing = processing;
@@ -6941,20 +7322,21 @@ async function renderPhase2Requests(tournamentId, container, countBadge, tournam
     let successCount = 0;
     let failureCount = 0;
     try {
-      for (const requestId of requestIds) {
+      for (const [index, requestId] of requestIds.entries()) {
         try {
           await api(`/tournaments/${tournamentId}/requests/${requestId}/${decision}`, { method: 'POST' });
           successCount += 1;
         } catch (error) {
           failureCount += 1;
         }
+        await waitBetweenBulkOperations(index, requestIds.length);
       }
       if (failureCount) {
         showToast(`Đã xử lý ${successCount}/${requestIds.length} yêu cầu; ${failureCount} yêu cầu lỗi.`, 'error');
       } else {
         showToast(`Đã ${decision === 'approve' ? 'duyệt' : 'từ chối'} ${successCount} yêu cầu.`, decision === 'approve' ? 'success' : 'info');
       }
-      await refreshTournamentDetail();
+      await refreshTournamentDetail({ force: true });
     } catch (error) {
       showToast(error?.message || 'Không thể hoàn tất thao tác hàng loạt.', 'error');
     } finally {
@@ -6969,19 +7351,20 @@ async function renderPhase2Requests(tournamentId, container, countBadge, tournam
     let successCount = 0;
     let failureCount = 0;
     try {
-      for (const requestId of requestIds) {
+      for (const [index, requestId] of requestIds.entries()) {
         try {
           await api(`/tournaments/${tournamentId}/requests/${requestId}/undo`, { method: 'POST' });
           successCount += 1;
         } catch (error) {
           failureCount += 1;
         }
+        await waitBetweenBulkOperations(index, requestIds.length);
       }
       showToast(
         failureCount ? `Đã hoàn tác ${successCount}/${requestIds.length}; ${failureCount} yêu cầu lỗi.` : `Đã hoàn tác ${successCount} yêu cầu.`,
         failureCount ? 'error' : 'success'
       );
-      await refreshTournamentDetail();
+      await refreshTournamentDetail({ force: true });
     } catch (error) {
       showToast(error?.message || 'Không thể hoàn tất thao tác hoàn tác.', 'error');
     } finally {
@@ -7072,7 +7455,7 @@ async function renderPhase2Requests(tournamentId, container, countBadge, tournam
       if (isOrganizer && ['pending', 'approved', 'rejected'].includes(req.status)) {
         item.classList.add('is-selectable');
         item.tabIndex = 0;
-        item.setAttribute('aria-label', `Chọn yêu cầu ${req.botName || req.bot?.name || `Bot #${shortId(req.botId)}`}`);
+        item.setAttribute('aria-label', `Chọn yêu cầu ${req.participantName || req.botName || req.bot?.name || `Bot #${shortId(req.botId)}`}`);
         const toggleRowSelection = () => {
           const checkbox = item.querySelector('.phase-request-checkbox');
           if (!checkbox) return;
@@ -7095,7 +7478,7 @@ async function renderPhase2Requests(tournamentId, container, countBadge, tournam
         const requestCheckbox = create('input', {
           className: 'phase-request-checkbox',
           type: 'checkbox',
-          attrs: { 'aria-label': `Chọn ${req.botName || req.bot?.name || `Bot #${shortId(req.botId)}`}` },
+          attrs: { 'aria-label': `Chọn ${req.participantName || req.botName || req.bot?.name || `Bot #${shortId(req.botId)}`}` },
         });
         requestCheckbox.checked = selectedRequestIds.has(req.requestId);
         item.classList.toggle('is-selected', requestCheckbox.checked);
@@ -7116,12 +7499,13 @@ async function renderPhase2Requests(tournamentId, container, countBadge, tournam
       avatar.appendChild(botSvg);
 
       const info = create('div', { className: 'bot-row-info' });
-      const name = create('strong', { className: 'bot-row-title', text: req.botName || req.bot?.name || `Bot #${shortId(req.botId)}` });
+      const name = create('strong', { className: 'bot-row-title', text: req.participantName || req.botName || req.bot?.name || `Bot #${shortId(req.botId)}` });
 
       let metaText = '';
       if (req.status === 'pending') {
         const user = req.username || req.competitorUsername;
-        metaText = user ? `Yêu cầu đang chờ xét duyệt · ${user}` : 'Yêu cầu đang chờ xét duyệt';
+        const botLabel = req.botName || req.bot?.name;
+        metaText = [botLabel ? `Bot: ${botLabel}` : '', user ? `Yêu cầu đang chờ xét duyệt · ${user}` : 'Yêu cầu đang chờ xét duyệt'].filter(Boolean).join(' · ');
       } else if (req.status === 'approved') {
         const user = req.username || req.competitorUsername;
         const runtime = req.execution?.runtimeId === 'cpp' ? 'C++17' : req.execution?.runtimeId === 'python3' ? 'Python 3' : (req.runtime === 'cpp' ? 'C++17' : req.runtime === 'python3' ? 'Python 3' : '');
@@ -7166,7 +7550,7 @@ async function renderPhase2Requests(tournamentId, container, countBadge, tournam
               startPhase2PreflightPolling(tournamentId, container, statsRoot, countBadge, { pending: tabPending, approved: tabApproved, rejected: tabRejected }, requests);
             } else {
               showToast('Đã duyệt yêu cầu tham gia.', 'success');
-              await refreshTournamentDetail();
+              await refreshTournamentDetail({ force: true });
             }
           } catch (e) {
             showToast(e.message || 'Không thể duyệt yêu cầu.', 'error');
@@ -7177,7 +7561,7 @@ async function renderPhase2Requests(tournamentId, container, countBadge, tournam
           try {
             await api(`/tournaments/${tournamentId}/requests/${req.requestId}/reject`, { method: 'POST' });
             showToast('Đã từ chối yêu cầu.', 'info');
-            await refreshTournamentDetail();
+            await refreshTournamentDetail({ force: true });
           } catch (e) {
             showToast(e.message || 'Không thể từ chối yêu cầu.', 'error');
           }
@@ -7189,7 +7573,7 @@ async function renderPhase2Requests(tournamentId, container, countBadge, tournam
           try {
             await api(`/tournaments/${tournamentId}/requests/${req.requestId}/undo`, { method: 'POST' });
             showToast('Đã hoàn tác quyết định. Yêu cầu quay lại trạng thái chờ duyệt.', 'success');
-            await refreshTournamentDetail();
+            await refreshTournamentDetail({ force: true });
           } catch (e) {
             showToast(e.message || 'Không thể hoàn tác quyết định.', 'error');
           }
@@ -7305,7 +7689,7 @@ function multiStageName(stage) {
 function renderMultiStageActions(tournamentId, authRevision, viewRevision, progress, tournament = null) {
   const actions = $('#td-actions');
   if (!actions) return;
-  actions.replaceChildren(actionButton('Cập nhật', () => refreshTournamentDetail(), `refresh-multi-stage:${tournamentId}`, 'secondary-btn tournament-action tournament-refresh-action'));
+  actions.replaceChildren(actionButton('Cập nhật', () => refreshTournamentDetail({ force: true }), `refresh-multi-stage:${tournamentId}`, 'secondary-btn tournament-action tournament-refresh-action'));
   if (state.user?.role !== 'organizer') return;
 
   const status = progress?.status;
@@ -7348,6 +7732,21 @@ function renderMultiStageActions(tournamentId, authRevision, viewRevision, progr
     return;
   }
   if (status !== 'running') return;
+
+  const currentStage = progress?.currentStage || tournament?.stages?.find(stage => stage.status === 'pending' || stage.status === 'in_progress');
+  if (currentStage?.status === 'pending') {
+    appendTournamentAction(
+      actions,
+      tournamentId,
+      authRevision,
+      viewRevision,
+      actionLabel('start_next_stage'),
+      'start_next_stage',
+      true,
+      progress.name || 'giai đoạn tiếp theo'
+    );
+    return;
+  }
 
   const execution = progress.progress || progress || {};
   const pending = Number(execution.pending) || 0;
@@ -7581,12 +7980,45 @@ function regionalDisplayName(region) {
   return raw || `Khu vực ${region?.regionIndex ?? ''}`;
 }
 
+function syncRegionalCardsSelection(activeRegionId) {
+  const workspace = $('#multi-stage-workspace');
+  if (!workspace) return;
+  const cards = workspace.querySelectorAll('.regional-region-card');
+  cards.forEach(card => {
+    const isSelected = card.getAttribute('data-multi-stage-focus') === `region:${activeRegionId}`;
+    card.classList.toggle('is-selected', isSelected);
+    card.setAttribute('aria-pressed', String(isSelected));
+    const actionLink = card.querySelector('.regional-action-link');
+    if (actionLink) {
+      actionLink.textContent = isSelected ? '✓ Đang xem khu vực này' : 'Xem lịch và kết quả khu vực →';
+    }
+    const badges = card.querySelector('.regional-card-badges');
+    if (badges) {
+      let badge = badges.querySelector('.regional-selected-badge');
+      if (isSelected) {
+        if (!badge) {
+          badge = create('span', { className: 'regional-selected-badge', text: '✓ Đang xem' });
+          badges.prepend(badge);
+        }
+      } else if (badge) {
+        badge.remove();
+      }
+    }
+  });
+}
+
 function renderRegionalRegionCard(region, stageId, selectedRegionId) {
   const progress = multiStagePairingStats(region.progress);
   const active = region.regionId === selectedRegionId;
   const card = create('button', { className: `regional-region-card${active ? ' is-selected' : ''}`, type: 'button', attrs: { 'aria-pressed': String(active), 'data-multi-stage-focus': `region:${region.regionId}` } });
   const top = create('span', { className: 'regional-region-card-top' });
-  top.append(create('strong', { text: regionalDisplayName(region) }), create('span', { className: `stage-status stage-status-${safeStatusClass(region.status)}`, text: multiStageStatusLabel(region.status) }));
+  top.append(create('strong', { text: regionalDisplayName(region) }));
+  const badgeWrap = create('span', { className: 'regional-card-badges' });
+  if (active) {
+    badgeWrap.appendChild(create('span', { className: 'regional-selected-badge', text: '✓ Đang xem' }));
+  }
+  badgeWrap.appendChild(create('span', { className: `stage-status stage-status-${safeStatusClass(region.status)}`, text: multiStageStatusLabel(region.status) }));
+  top.appendChild(badgeWrap);
   card.appendChild(top);
   const counts = create('span', { className: 'regional-region-counts' });
   const qualifierCount = Number(region.qualifierCount) || 0;
@@ -7601,8 +8033,15 @@ function renderRegionalRegionCard(region, stageId, selectedRegionId) {
   const track = create('span', { className: 'regional-region-track', attrs: { 'aria-hidden': 'true' } });
   const fill = create('span'); fill.style.width = `${progress.total ? (progress.completed / progress.total) * 100 : 0}%`; track.appendChild(fill); card.appendChild(track);
   card.append(create('span', { className: 'regional-region-meta', text: `${multiStageNumber(progress.completed)}/${multiStageNumber(progress.total)} trận hoàn thành` }));
-  card.append(create('span', { className: 'regional-action-link', text: 'Xem lịch và kết quả khu vực →' }));
-  card.addEventListener('click', () => loadRegionalPairings(stageId, region.regionId));
+  const regionalActionLink = create('span', { className: 'regional-action-link', text: 'Xem lịch và kết quả khu vực →' });
+  if (active) regionalActionLink.textContent = '✓ Đang xem khu vực này';
+  card.append(regionalActionLink);
+  card.addEventListener('click', () => {
+    state.multiStage.activeStageId = stageId;
+    state.multiStage.activeRegionId = region.regionId;
+    syncRegionalCardsSelection(region.regionId);
+    void loadRegionalPairings(stageId, region.regionId);
+  });
   return card;
 }
 
@@ -7612,7 +8051,11 @@ function renderRegionalPairings(container, response, region) {
   const copy = create('div', { className: 'multi-stage-heading-copy' });
   copy.append(create('p', { className: 'panel-kicker', text: 'Lịch thi đấu' }), create('h3', { id: 'regional-pairings-title', text: regionalDisplayName(region) }));
   heading.append(copy, create('span', { className: 'multi-stage-pairing-count', text: `${multiStageNumber(response.pagination?.totalItems)} trận` }));
-  renderRegionalStandings(panel, region);
+  if (!isCompetitorResultsUnpublished(state.currentTournament)) {
+    renderRegionalStandings(panel, region);
+  } else {
+    panel.appendChild(unpublishedResultsNotice());
+  }
   panel.appendChild(heading);
   const pairings = (response.pairings || []).filter(pairing => pairing.participantB !== null);
   if (!pairings.length) {
@@ -7635,15 +8078,24 @@ function renderRegionalPairings(container, response, region) {
         create('strong', { className: 'group-pairing-player', text: pairing.participantNames?.B || resolveParticipantName(state.currentTournament, pairing.participantB) })
       );
       main.append(names, create('div', { className: 'group-pairing-meta', children: [create('span', { className: 'group-series-pill', text: 'BO3' })] }));
-      main.appendChild(create('span', { className: 'group-series-score', text: `Tỉ số ${progress.winsA || 0}–${progress.winsB || 0}` }));
+      main.appendChild(create('span', {
+        className: 'group-series-score',
+        text: isCompetitorResultsUnpublished(state.currentTournament) && pairing.status === 'completed'
+          ? 'Kết quả chưa được công bố.'
+          : seriesHasStarted(pairing, progress) ? `Tỉ số ${progress.winsA || 0}–${progress.winsB || 0}` : 'Chưa thi đấu',
+      }));
       const headerRight = create('div', { className: 'group-pairing-header-right' });
       headerRight.appendChild(statusBadge(pairing.status));
       const expanded = false;
       const toggle = create('button', { className: 'group-pairing-toggle secondary-btn', type: 'button', attrs: { 'aria-expanded': String(expanded), 'aria-controls': `regional-games-${pairing.pairingId}`, 'aria-label': `Chi tiết các ván cho trận ${pairing.pairingId}` } });
       toggle.append(create('span', { text: 'Chi tiết các ván' }), createChevronIcon());
-      toggle.textContent = 'Xem Replay ↗';
-      toggle.setAttribute('aria-label', 'Xem Replay');
-      headerRight.appendChild(toggle);
+      const replayGame = latestReplayGame(progress);
+      if (pairing.status === 'completed' && (replayGame || isCompetitorResultsUnpublished(state.currentTournament))) {
+        toggle.textContent = isCompetitorResultsUnpublished(state.currentTournament) ? 'Replay sau khi công bố' : 'Xem Replay ↗';
+        toggle.setAttribute('aria-label', toggle.textContent);
+        toggle.disabled = isCompetitorResultsUnpublished(state.currentTournament);
+        headerRight.appendChild(toggle);
+      }
       header.append(main, headerRight);
       card.appendChild(header);
       const details = create('div', { className: 'group-pairing-games', attrs: { id: `regional-games-${pairing.pairingId}`, ...(expanded ? {} : { hidden: 'true' }) } });
@@ -7657,10 +8109,7 @@ function renderRegionalPairings(container, response, region) {
         details.appendChild(create('p', { className: 'knockout-detail-empty', text: 'Trận này chưa có dữ liệu series.' }));
       }
       card.appendChild(details);
-      toggle.addEventListener('click', () => {
-        const replayGame = latestReplayGame(progress);
-        if (replayGame) playReplay(state.tournamentId, replayGame.matchId, pairingReplaySeriesContext(pairing, progress));
-      });
+      if (pairing.status === 'completed' && replayGame) toggle.addEventListener('click', () => playReplay(state.tournamentId, replayGame.matchId, pairingReplaySeriesContext(pairing, progress)));
       list.appendChild(card);
     });
     panel.appendChild(list);
@@ -7770,6 +8219,7 @@ async function loadRegionalPairings(stageId, regionId, page = 1) {
   multiStage.pairingController = controller;
   multiStage.activeStageId = stageId;
   multiStage.activeRegionId = regionId;
+  syncRegionalCardsSelection(regionId);
   const workspace = $('#multi-stage-workspace');
   const pairingsTarget = workspace?.querySelector('.regional-pairings-slot');
   if (!pairingsTarget) return;
@@ -7810,6 +8260,33 @@ function groupStandingsConfirmed(group) {
   return required >= 2 && group?.status === 'completed' && standings.length >= required;
 }
 
+function syncGroupCardsSelection(activeGroupId) {
+  const workspace = $('#multi-stage-workspace');
+  if (!workspace) return;
+  const cards = workspace.querySelectorAll('.group-stage-card');
+  cards.forEach(card => {
+    const isSelected = card.getAttribute('data-multi-stage-focus') === `group:${activeGroupId}`;
+    card.classList.toggle('is-selected', isSelected);
+    card.setAttribute('aria-pressed', String(isSelected));
+    const actionLink = card.querySelector('.group-stage-action-link');
+    if (actionLink) {
+      actionLink.textContent = isSelected ? '✓ Đang xem bảng đấu này' : 'Xem bảng đấu →';
+    }
+    const badges = card.querySelector('.group-card-badges');
+    if (badges) {
+      let badge = badges.querySelector('.group-selected-badge');
+      if (isSelected) {
+        if (!badge) {
+          badge = create('span', { className: 'group-selected-badge', text: '✓ Đang xem' });
+          badges.prepend(badge);
+        }
+      } else if (badge) {
+        badge.remove();
+      }
+    }
+  });
+}
+
 function renderGroupCard(group, stageId, selectedGroupId) {
   const progress = multiStagePairingStats(group.progress);
   const active = group.groupId === selectedGroupId;
@@ -7817,14 +8294,22 @@ function renderGroupCard(group, stageId, selectedGroupId) {
   const confirmed = groupStandingsConfirmed(group);
   const card = create('button', { className: `group-stage-card${active ? ' is-selected' : ''}`, type: 'button', attrs: { 'aria-pressed': String(active), 'data-multi-stage-focus': `group:${group.groupId}` } });
   const top = create('span', { className: 'group-stage-card-top' });
-  top.append(create('strong', { text: groupDisplayName(group) }), create('span', { className: `stage-status stage-status-${safeStatusClass(group.status)}`, text: multiStageStatusLabel(group.status) }));
+  top.append(create('strong', { text: groupDisplayName(group) }));
+  const badgeWrap = create('span', { className: 'group-card-badges' });
+  if (active) {
+    badgeWrap.appendChild(create('span', { className: 'group-selected-badge', text: '✓ Đang xem' }));
+  }
+  badgeWrap.appendChild(create('span', { className: `stage-status stage-status-${safeStatusClass(group.status)}`, text: multiStageStatusLabel(group.status) }));
+  top.appendChild(badgeWrap);
   card.appendChild(top);
   const details = create('span', { className: 'group-stage-card-details' });
   details.append(create('span', { text: `${multiStageNumber(group.participantCount)} Bot` }), create('span', { text: `${multiStageNumber(progress.completed)}/${multiStageNumber(expectedMatches)} trận` }));
   card.appendChild(details);
   const track = create('span', { className: 'group-stage-track', attrs: { 'aria-hidden': 'true' } });
   const fill = create('span'); fill.style.width = `${expectedMatches ? Math.min(100, (progress.completed / expectedMatches) * 100) : 0}%`; track.appendChild(fill); card.appendChild(track);
-  card.append(create('span', { className: 'group-stage-action-link', text: 'Xem bảng đấu →' }));
+  const groupActionLink = create('span', { className: 'group-stage-action-link', text: 'Xem bảng đấu →' });
+  if (active) groupActionLink.textContent = '✓ Đang xem bảng đấu này';
+  card.append(groupActionLink);
 
   card.addEventListener('click', () => {
     state.multiStage.activeStageId = stageId;
@@ -7996,7 +8481,14 @@ function latestReplayGame(progress) {
   return [...(progress?.games || [])].reverse().find(game => game?.matchId && game.replayAvailable !== false) || null;
 }
 
+function seriesHasStarted(pairing, progress) {
+  return pairing?.status === 'in_progress'
+    || pairing?.status === 'completed'
+    || (progress?.games || []).length > 0;
+}
+
 function appendSeriesViewerAction(headerRight, pairing, progress, keyPrefix) {
+  if (isCompetitorResultsUnpublished(state.currentTournament) && pairing?.status === 'completed') return;
   if (pairing?.status === 'in_progress' && pairing.matchId) {
     headerRight.appendChild(actionButton('Live ●', () => openLiveMatch(state.tournamentId, pairing.matchId, pairing.pairingId), `${keyPrefix}:live:${pairing.pairingId}`, 'group-game-action-btn secondary-btn'));
     return;
@@ -8013,6 +8505,11 @@ function renderGroupGame(pairing, gameNumber, game, progress) {
   const row = create('div', { className: `group-game-row is-${status}` });
   const info = create('div', { className: 'group-game-info' });
   info.append(create('strong', { className: 'group-game-title', text: `Ván ${gameNumber}` }));
+  if (isCompetitorResultsUnpublished(state.currentTournament) && status === 'completed') {
+    info.appendChild(create('span', { className: 'group-game-result', text: 'Kết quả chưa được công bố.' }));
+    row.appendChild(info);
+    return row;
+  }
   const sides = game?.participantNames || {
     A: knockoutSlotLabel(pairing, 'A'),
     B: knockoutSlotLabel(pairing, 'B'),
@@ -8082,7 +8579,7 @@ function renderGroupPairings(container, response, group) {
       meta.append(
         create('span', { className: 'group-series-pill', text: progress.format }),
       );
-      main.append(names, meta, create('span', { className: 'group-series-score', text: `Tỉ số ${progress.winsA || 0}–${progress.winsB || 0}` }));
+      main.append(names, meta, create('span', { className: 'group-series-score', text: seriesHasStarted(pairing, progress) ? `Tỉ số ${progress.winsA || 0}–${progress.winsB || 0}` : 'Chưa thi đấu' }));
 
       const headerRight = create('div', { className: 'group-pairing-header-right' });
       headerRight.appendChild(statusBadge(pairing.status));
@@ -8102,9 +8599,12 @@ function renderGroupPairings(container, response, group) {
         createChevronIcon()
       );
 
-      toggle.textContent = 'Xem Replay ↗';
-      toggle.setAttribute('aria-label', 'Xem Replay');
-      headerRight.appendChild(toggle);
+      const replayGame = latestReplayGame(progress);
+      if (pairing.status === 'completed' && replayGame) {
+        toggle.textContent = 'Xem Replay ↗';
+        toggle.setAttribute('aria-label', 'Xem Replay');
+        headerRight.appendChild(toggle);
+      }
       header.append(main, headerRight);
       card.appendChild(header);
 
@@ -8122,10 +8622,7 @@ function renderGroupPairings(container, response, group) {
       }
       card.appendChild(details);
 
-      toggle.addEventListener('click', () => {
-        const replayGame = latestReplayGame(progress);
-        if (replayGame) playReplay(state.tournamentId, replayGame.matchId, pairingReplaySeriesContext(pairing, progress));
-      });
+      if (pairing.status === 'completed' && replayGame) toggle.addEventListener('click', () => playReplay(state.tournamentId, replayGame.matchId, pairingReplaySeriesContext(pairing, progress)));
 
       list.appendChild(card);
     });
@@ -8151,6 +8648,7 @@ async function loadGroupPairings(stageId, groupId, page = 1) {
   multiStage.pairingController = controller;
   multiStage.activeStageId = stageId;
   multiStage.activeGroupId = groupId;
+  syncGroupCardsSelection(groupId);
   const workspace = $('#multi-stage-workspace');
   const target = workspace?.querySelector('.group-stage-detail-slot');
   if (!target) return;
@@ -8165,7 +8663,8 @@ async function loadGroupPairings(stageId, groupId, page = 1) {
     const stage = multiStage.stages?.find(item => item.stageId === stageId);
     const group = stage?.groups?.find(item => item.groupId === groupId);
     clear(target);
-    if (group) renderGroupStandings(target, group, response.pairings || []);
+    if (group && !isCompetitorResultsUnpublished(state.currentTournament)) renderGroupStandings(target, group, response.pairings || []);
+    else if (isCompetitorResultsUnpublished(state.currentTournament)) target.appendChild(unpublishedResultsNotice());
     renderGroupPairings(target, response, group);
   } catch (error) {
     if (controller.signal.aborted) return;
@@ -8927,9 +9426,15 @@ function renderMultiStageWorkspace(options = {}) {
   const multiStage = state.multiStage;
   const progress = multiStage.progress || {};
   const stages = multiStage.stages || progress.stages || [];
+  if (isCompetitorResultsHidden(state.currentTournament)) {
+    workspace.appendChild(unpublishedResultsNotice());
+    return;
+  }
   const activeStage = stages.find(stage => stage.stageId === multiStage.activeStageId) || stages.find(stage => stage.regions?.length) || stages[0];
   if (activeStage) multiStage.activeStageId = activeStage.stageId;
-  if (!activeStage?.regions?.some(region => region.regionId === multiStage.activeRegionId)) multiStage.activeRegionId = null;
+  if (!activeStage?.regions?.some(region => region.regionId === multiStage.activeRegionId)) {
+    multiStage.activeRegionId = activeStage?.regions?.[0]?.regionId || null;
+  }
   if (!activeStage?.groups?.some(group => group.groupId === multiStage.activeGroupId)) multiStage.activeGroupId = null;
   if (activeStage?.stageType !== 'knockout') {
     multiStage.activeKnockoutRound = null;
@@ -8938,7 +9443,8 @@ function renderMultiStageWorkspace(options = {}) {
   const actualStage = progress.currentStage || stages.find(stage => stage.status === 'in_progress') || stages.at(-1) || activeStage;
   const isPhase5Workspace = workspace.closest('.phase-layout-running') !== null;
   const isPhase7Workspace = workspace.closest('.phase-layout-completed-archive') !== null;
-  if (!options.hideProgressSummary && !isPhase5Workspace && !isPhase7Workspace && getTournamentLifecyclePhase(state.currentTournament) !== 5) {
+  const isCompetitorPublicWorkspace = state.user?.role === 'competitor';
+  if (!options.hideProgressSummary && !isCompetitorPublicWorkspace && !isPhase5Workspace && !isPhase7Workspace && getTournamentLifecyclePhase(state.currentTournament) !== 5) {
     renderMultiStageProgressSummary(workspace, progress.progress || progress, activeStage, actualStage);
   }
   renderMultiStageNavigation(workspace, stages, activeStage?.stageId);
@@ -8976,10 +9482,12 @@ function renderMultiStageError(error, retry) {
 
 function scheduleMultiStagePolling(tournamentId, authRevision, viewRevision) {
   const multiStage = state.multiStage;
-  if (multiStage.pollTimer || !['running', 'paused'].includes(state.detailStatus)) return;
+  const isPublicSchedulePreview = state.user?.role === 'competitor' && state.detailStatus === 'registration_closed';
+  if (multiStage.pollTimer || (!['running', 'paused'].includes(state.detailStatus) && !isPublicSchedulePreview)) return;
   if (!multiStage.visibilityHandler) {
     multiStage.visibilityHandler = () => {
-      if (document.hidden || !['running', 'paused'].includes(state.detailStatus)
+      const canRefreshPublicSchedule = state.user?.role === 'competitor' && state.detailStatus === 'registration_closed';
+      if (document.hidden || (!['running', 'paused'].includes(state.detailStatus) && !canRefreshPublicSchedule)
         || !isCurrentView('tournament-detail', authRevision, viewRevision, tournamentId)) return;
       if (multiStage.pollTimer) {
         window.clearTimeout(multiStage.pollTimer);
@@ -9075,25 +9583,41 @@ async function loadMultiStageTournamentDetail(tournamentId, authRevision, viewRe
       : tournament.status === 'completed'
         ? (tournament.resultsPublishedAt ? 'Kết quả chính thức và kho lưu trữ Replay của giải đấu.' : 'Kiểm tra và công bố kết quả chung cuộc.')
         : '';
-    $('#td-pcount').textContent = multiStageNumber(tournament.participants?.length || progress.progress?.totalParticipants || compact.participantCount || 0);
-    renderMultiStageActions(tournamentId, authRevision, viewRevision, progress, tournament);
-    renderTournamentLifecycle(tournament);
-    renderTournamentGuidance(tournament);
-    const register = $('#btn-register-bot'); if (register) register.hidden = state.user?.role !== 'competitor' || tournament.status !== 'registration_open';
-    setLegacyTournamentDetailVisibility(true);
+    if (shouldRenderWorkspace) {
+      $('#td-pcount').textContent = multiStageNumber(tournament.participants?.length || progress.progress?.totalParticipants || compact.participantCount || 0);
+      renderMultiStageActions(tournamentId, authRevision, viewRevision, progress, tournament);
+      renderTournamentLifecycle(tournament);
+      renderTournamentGuidance(tournament);
+      const register = $('#btn-register-bot'); if (register) register.hidden = state.user?.role !== 'competitor' || tournament.status !== 'registration_open';
+      setLegacyTournamentDetailVisibility(true);
+      const lifecycleBody = $('#td-lifecycle-body');
+      if (lifecycleBody) {
+        renderTournamentLifecycleBody(lifecycleBody, tournament, { progress, compact });
+      }
+    }
     const detail = $('#tournament-detail');
+    if (state.user?.role === 'competitor' && tournament.format === 'multi_stage') {
+      const publicSchedulePanel = detail?.querySelector('[data-public-tab-panel="schedule"]');
+      const existingPublicWorkspace = $('#multi-stage-workspace');
+      if (publicSchedulePanel) {
+        if (existingPublicWorkspace && !publicSchedulePanel.contains(existingPublicWorkspace)) {
+          publicSchedulePanel.appendChild(existingPublicWorkspace);
+        } else if (!existingPublicWorkspace) {
+          ensureCompetitorPublicScheduleWorkspace(publicSchedulePanel);
+        }
+      }
+    }
     let workspace = $('#multi-stage-workspace');
     if (!workspace) { workspace = create('div', { className: 'multi-stage-workspace', attrs: { id: 'multi-stage-workspace' } }); detail.querySelector('.tournament-detail-hero')?.after(workspace); }
-    const lifecycleBody = $('#td-lifecycle-body');
-    if (lifecycleBody) {
-      renderTournamentLifecycleBody(lifecycleBody, tournament, { progress, compact });
-    }
     const currentLifecyclePhase = getTournamentLifecyclePhase(tournament);
+    const canShowPublicSchedule = state.user?.role === 'competitor'
+      && currentLifecyclePhase === 4
+      && hasTournamentSchedule(tournament);
     if (tournament.status === 'draft' || tournament.status === 'registration_open' || isRosterFinalPhase(tournament)) {
       if (workspace) { workspace.hidden = true; clear(workspace); }
-    } else if (currentLifecyclePhase < 5) {
+    } else if (currentLifecyclePhase < 5 && !canShowPublicSchedule) {
       if (workspace) { workspace.hidden = true; clear(workspace); }
-    } else if (currentLifecyclePhase === 6) {
+    } else if (currentLifecyclePhase === 6 && state.user?.role !== 'competitor') {
       if (workspace) { workspace.hidden = true; clear(workspace); }
     } else {
       if (workspace) workspace.hidden = false;
@@ -9111,7 +9635,7 @@ async function loadMultiStageTournamentDetail(tournamentId, authRevision, viewRe
         }
       }
     }
-    if (currentLifecyclePhase >= 5) {
+    if (currentLifecyclePhase >= 5 || canShowPublicSchedule) {
       scheduleMultiStagePolling(tournamentId, authRevision, viewRevision);
     }
     return true;
@@ -9125,6 +9649,11 @@ async function loadMultiStageTournamentDetail(tournamentId, authRevision, viewRe
 }
 
 async function refreshTournamentDetail() {
+  const options = arguments[0] || {};
+  if (options?.force) {
+    state.multiStage.renderSignature = null;
+    state.legacyRenderSignature = null;
+  }
   if (state.user?.role === 'competitor' && state.activeView === 'tournaments') {
     await loadTournaments();
     return;
@@ -9157,9 +9686,20 @@ async function refreshTournamentDetail() {
     updateTopbarTournamentBreadcrumb(tournament.name);
     const breadcrumbName = $('#td-breadcrumb-name'); if (breadcrumbName) breadcrumbName.textContent = tournament.name;
     const badge = $('#td-status'); badge.className = `status-badge status-${safeStatusClass(tournament.status)}`; badge.textContent = localizeStatus(tournament.status);
-    renderTournamentLifecycle(tournament);
-    renderTournamentGuidance(tournament);
-    $('#td-pcount').textContent = tournament.participants.length;
+    const legacySignature = JSON.stringify({
+      status: tournament.status,
+      resultsPublishedAt: tournament.resultsPublishedAt,
+      rounds: (tournament.rounds || []).map(r => (r.pairings || []).map(p => `${p.pairingId || p.matchId}:${p.status}:${p.winner || ''}:${p.matchResult ? 1 : 0}`)),
+      participants: tournament.participants.map(p => p.participantId),
+    });
+    const isLegacyBackground = state.legacyLoadedTournamentId === tournamentId && !options?.force;
+    const shouldRenderLegacy = !isLegacyBackground || state.legacyRenderSignature !== legacySignature;
+    state.legacyLoadedTournamentId = tournamentId;
+    state.legacyRenderSignature = legacySignature;
+    if (shouldRenderLegacy) {
+      renderTournamentLifecycle(tournament);
+      renderTournamentGuidance(tournament);
+      $('#td-pcount').textContent = tournament.participants.length;
 
     const lifecycleBody = $('#td-lifecycle-body');
     if (lifecycleBody) {
@@ -9200,7 +9740,7 @@ async function refreshTournamentDetail() {
 
     const actions = $('#td-actions'); clear(actions);
     const refreshButton = actionButton('Cập nhật', async () => {
-      await refreshTournamentDetail();
+      await refreshTournamentDetail({ force: true });
       showToast('Đã cập nhật dữ liệu giải đấu.', 'success');
     }, `refresh-tournament-detail:${tournamentId}`, 'secondary-btn tournament-action tournament-refresh-action');
     const refreshIcon = icon('td-icon-refresh-cw');
@@ -9239,6 +9779,7 @@ async function refreshTournamentDetail() {
       renderStandings(tournament.standings, executionSummary, state.viewerParticipantIds);
       renderTournamentPodium(tournament);
       renderSchedule(tournament, state.viewerParticipantIds);
+    }
     }
     if (tournament.status === 'completed' || tournament.status === 'running') {
       request(`/tournaments/${tournamentId}/stats`).then(stats => {
@@ -9334,14 +9875,14 @@ async function renderParticipationRequestsV2(tournamentId, status) {
         const reject = actionButton('Từ chối', async () => {
           await lockRequestActions(async () => {
             await api(`/tournaments/${tournamentId}/requests/${participation.requestId}/reject`, { method: 'POST', body: JSON.stringify({}) });
-            await refreshTournamentDetail();
+            await refreshTournamentDetail({ force: true });
           });
         }, `reject:${participation.requestId}`, 'request-action request-action-danger');
         const rejectIcon = icon('td-icon-x'); rejectIcon.classList.add('td-icon', 'td-icon--sm'); reject.prepend(rejectIcon);
         const approve = actionButton('Duyệt', async () => {
           await lockRequestActions(async () => {
             await api(`/tournaments/${tournamentId}/requests/${participation.requestId}/approve`, { method: 'POST' });
-            await refreshTournamentDetail();
+            await refreshTournamentDetail({ force: true });
           });
         }, `approve:${participation.requestId}`, 'request-action request-action-primary');
         const approveIcon = icon('td-icon-check'); approveIcon.classList.add('td-icon', 'td-icon--sm'); approve.prepend(approveIcon);
@@ -9595,6 +10136,11 @@ function confirmTournamentAction(tournamentId, authRevision, viewRevision, actio
     copy.textContent = 'Bạn có chắc muốn dừng thực thi các trận đấu đang chạy không?';
     support.textContent = 'Các kết quả đã commit được giữ nguyên; trận chưa hoàn tất có thể chạy lại sau.';
     $('#confirm-tournament-action').textContent = 'Dừng trận đấu';
+  } else if (action === 'start_next_stage') {
+    title.textContent = 'Chạy giai đoạn tiếp theo';
+    copy.textContent = `Bắt đầu giai đoạn tiếp theo của giải “${tournamentName}”?`;
+    support.textContent = 'Sau khi xác nhận, scheduler sẽ chạy các trận của giai đoạn này theo lịch đã tạo.';
+    $('#confirm-tournament-action').textContent = 'Chạy giai đoạn tiếp theo';
   } else {
     title.textContent = label;
     copy.textContent = 'Đưa tất cả trận đấu còn lại vào hàng đợi?';
@@ -9618,7 +10164,7 @@ async function tournamentAction(tournamentId, authRevision, viewRevision, action
   }
   if (isCurrentView('tournament-detail', authRevision, viewRevision, tournamentId)) {
     showToast(action === 'delete' ? 'Đã xóa giải đấu.' : ACTION_SUCCESS_MESSAGES[action] || 'Đã cập nhật giải đấu.', 'success');
-    if (action === 'delete') navigate('tournaments'); else await refreshTournamentDetail();
+    if (action === 'delete') navigate('tournaments'); else await refreshTournamentDetail({ force: true });
   } else if (action === 'delete' && isCurrentView('tournaments', authRevision, viewRevision)) {
     showToast('Đã xóa giải đấu.', 'success');
     await loadTournaments();

@@ -151,7 +151,7 @@ describe('multi-stage API payload projections', () => {
     expect(progress.body.progress.total).toBe(381);
   });
 
-  it('keeps unpublished match results hidden from competitors', async () => {
+  it('keeps available match results visible to competitors before publication', async () => {
     const tournament = await writeMultiStageFixture('redaction-256');
     const pairing = tournament.stages?.[0]?.regions?.[0]?.rounds?.[0]?.pairings?.find(item => item.participantB !== null);
     expect(pairing).toBeDefined();
@@ -171,7 +171,7 @@ describe('multi-stage API payload projections', () => {
     expect(response.status).toBe(200);
     const hidden = response.body.pairings.find((item: any) => item.pairingId === pairing!.pairingId);
     expect(hidden).toBeDefined();
-    expect(hidden.matchResult).toBeNull();
+    expect(hidden.matchResult).toMatchObject({ winner: 'A' });
 
     const progress = await competitorAgent.get('/api/tournaments/redaction-256/progress');
     expect(progress.status).toBe(200);

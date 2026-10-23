@@ -127,7 +127,7 @@ export {
   ownershipLabels,
   parseRevisionBotResult,
 } from './revision-docker-executor.js';
-export { STRATEGY_SDK_VERSION, getStrategySdkIdentity, materializeStrategySdk, strategySdkRoot } from './strategy-sdk.js';
+export { STRATEGY_SDK_VERSION, getStrategySdkIdentity, isTrustedStrategySdkDigest, materializeStrategySdk, strategySdkRoot } from './strategy-sdk.js';
 export {
   createRuntimeImageRegistry,
   configuredRuntimeImageRegistry,

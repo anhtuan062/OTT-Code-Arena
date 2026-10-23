@@ -16,7 +16,7 @@ describe('UX.5 tournament discovery, management, and registration', () => {
     expect(page).toContain('id="tournaments-list"');
   });
 
-  it('keeps cards role-aware and uses one actionable registration path', async () => {
+  it('routes tournament cards through the public detail screen', async () => {
     const app = await readAssembledFrontendScript();
     expect(app).toContain('function renderDiscoverableTournamentCards');
     expect(app).toContain('const pageSize = 8');
@@ -25,8 +25,8 @@ describe('UX.5 tournament discovery, management, and registration', () => {
     expect(app).toContain("joined: 'Đã tham gia'");
     expect(app).toContain("state.tournamentRegistrationContext = { name: tournament.name, status: tournament.status }");
     expect(app).toContain("actionButton('Xem chi tiết'");
-    expect(app).toContain('const requestButton = actionButton');
-    expect(app).toContain('tournament.myRequestStatus === \'pending\'');
+    expect(app).not.toContain('const requestButton = actionButton');
+    expect(app).toContain("Mở chi tiết để xem thông tin và gửi Bot đăng ký.");
     expect(app).not.toContain('innerHTML =');
   });
 

@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { getStrategySdkIdentity, STRATEGY_SDK_VERSION } from '@bot-executor/strategy-sdk.js';
+import { getStrategySdkIdentity, isTrustedStrategySdkDigest, STRATEGY_SDK_VERSION } from '@bot-executor/strategy-sdk.js';
 
 const originalRoot = process.env.BOT_STRATEGY_SDK_ROOT;
 
@@ -70,5 +70,11 @@ describe('Strategy SDK identity', () => {
     await fs.writeFile(path.join(root, 'python', 'runner.py'), 'runner-fixture-changed');
     expect((await getStrategySdkIdentity('python3')).digest).not.toBe(first.digest);
     await fs.rm(root, { recursive: true, force: true });
+  });
+
+  it('recognizes trusted legacy digests for compatible v1.0.0 artifacts', () => {
+    expect(isTrustedStrategySdkDigest('cpp', 'df273bb091450d2937cc0ac880c2c27a74c621389d4dd2bb10e8ce6fed772448', 'current-digest')).toBe(true);
+    expect(isTrustedStrategySdkDigest('python3', '61ff35c78497710ceaa1affa82af92fe38127eb2e00f075d58fd5c4e7d770dc9', 'current-digest')).toBe(true);
+    expect(isTrustedStrategySdkDigest('cpp', '0'.repeat(64), 'current-digest')).toBe(false);
   });
 });

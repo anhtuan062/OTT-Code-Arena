@@ -379,7 +379,7 @@ function getCurrentStagePairings(tournament: Tournament): TournamentPairing[] {
   if (!isMultiStageTournament(tournament)) return tournament.rounds.flatMap(round => round.pairings);
 
   const stage = getCurrentStage(tournament);
-  return stage ? getStagePairings(stage) : [];
+  return stage?.status === 'in_progress' ? getStagePairings(stage) : [];
 }
 
 /** Shared eligibility predicate for external fair dispatchers. */

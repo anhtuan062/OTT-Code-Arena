@@ -226,6 +226,50 @@ describe('Phase 6: Tournament Results Review Workspace', () => {
     expect(failedState.isReadyToPublish).toBe(false);
   });
 
+  it('keeps completed results available to competitors before organizer publication', () => {
+    const extractFn = new Function(
+      "state = { user: { role: 'competitor' } }",
+      `${tournamentsJs}; return { isCompetitorResultsHidden, phase6PairingResult };`
+    );
+    const { isCompetitorResultsHidden, phase6PairingResult } = extractFn();
+    const unpublished = {
+      status: 'completed',
+      resultsPublishedAt: null,
+      participants: [
+        { participantId: 'p-a', name: 'Bot A' },
+        { participantId: 'p-b', name: 'Bot B' },
+      ],
+    };
+    const pairing = {
+      participantA: 'p-a',
+      participantB: 'p-b',
+      status: 'completed',
+      matchId: 'match-1',
+      matchResult: { winner: 'B', series: { winsA: 0, winsB: 2 } },
+    };
+
+    expect(isCompetitorResultsHidden(unpublished)).toBe(false);
+    expect(isCompetitorResultsHidden({ status: 'running', resultsPublishedAt: null })).toBe(false);
+    expect(phase6PairingResult(unpublished, pairing)).toContain('Bot B thắng');
+  });
+
+  it('keeps completed results available to organizers and after publication', () => {
+    const extractFn = new Function(
+      "state = { user: { role: 'organizer' } }",
+      `${tournamentsJs}; return { isCompetitorResultsHidden, phase6PairingResult };`
+    );
+    const { isCompetitorResultsHidden, phase6PairingResult } = extractFn();
+    const pairing = {
+      participantNames: { A: 'Bot A', B: 'Bot B' },
+      status: 'completed',
+      matchResult: { winner: 'B' },
+    };
+
+    expect(isCompetitorResultsHidden({ status: 'completed', resultsPublishedAt: null })).toBe(false);
+    expect(phase6PairingResult({ status: 'completed', resultsPublishedAt: null }, pairing)).toContain('Bot B thắng');
+    expect(isCompetitorResultsHidden({ status: 'completed', resultsPublishedAt: '2026-01-01T00:00:00.000Z' })).toBe(false);
+  });
+
   it('renders required Phase 6 UI components in markup and bundle', () => {
     // Structural presence in bundled app.js
     expect(appJs).toContain('phase-layout-results-review');
@@ -247,6 +291,12 @@ describe('Phase 6: Tournament Results Review Workspace', () => {
     expect(appJs).toContain('Thông tin trận đấu');
     expect(appJs).toContain("tabindex: '0'");
     expect(appJs).toContain('pairing.replayAvailable === false');
+    expect(appJs).toContain('Kết quả chưa được công bố');
+    expect(appJs).toContain('Replay sẽ hiển thị sau khi công bố kết quả');
+    expect(appJs).toContain('function unpublishedResultsNotice');
+    expect(appJs).toContain('function isCompetitorResultsUnpublished');
+    expect(appJs).toContain('isCompetitorResultsHidden(state.currentTournament)');
+    expect(appJs).toContain('workspace.appendChild(unpublishedResultsNotice())');
     expect(appJs).toContain('Vòng loại khu vực');
     expect(appJs).toContain('Vòng bảng');
     expect(appJs).toContain('Vòng loại trực tiếp');
@@ -268,7 +318,7 @@ describe('Phase 6: Tournament Results Review Workspace', () => {
     expect(css).toContain('.phase6-stage-standings-scroll');
 
     // Hides multi-stage workspace and stepper in Phase 6
-    expect(css).toMatch(/\.tournament-detail-redesign\.is-phase-6\s+#multi-stage-workspace/);
+    expect(css).toMatch(/\.tournament-detail-redesign\.is-phase-6:not\(\.is-competitor-view\)\s+#multi-stage-workspace/);
   });
 
   it('supports organizer publication CTA in header for completed tournaments in multi-stage actions', () => {

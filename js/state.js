@@ -67,6 +67,7 @@ const state = {
   tournamentDialogRevision: 0,
   editingTournament: null,
   phase1ActiveTab: 'info',
+  publicTournamentTab: 'info',
   phase1EditMode: false,
   phase1Draft: null,
   registrationDialogRevision: 0,

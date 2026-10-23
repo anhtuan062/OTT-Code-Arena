@@ -621,6 +621,7 @@ function waitForActivePracticeExecutions(): Promise<void> {
 
 function localizePracticeError(code: string, compilerDiagnostic: string, runtimeDiagnostic: string, exitCode: number | null): string {
   if (['EXECUTOR_ERROR', 'EXECUTOR_UNAVAILABLE', 'SANDBOX_REQUIRED'].includes(code)) return 'Không thể kết nối môi trường Docker sandbox.';
+  if (code === 'SECURITY_VIOLATION') return 'Phiên bản Strategy SDK của Bot không tương thích với máy chủ (vui lòng lưu lại phiên bản Bot mới trong trình soạn thảo).';
   if (code === 'COMPILER_ERROR') return `C++ không biên dịch được: ${compilerDiagnostic}`;
   if (code === 'COMPILATION_TIMEOUT') return 'Biên dịch C++ quá thời gian cho phép.';
   if (code === 'RUNTIME_TIMEOUT') return 'Bot thực thi quá thời gian cho phép.';
@@ -1162,6 +1163,10 @@ function enqueueParticipationPreflight(execution: SourceRevisionExecution): void
 function discoverableTournament(tournament: Awaited<ReturnType<typeof manager.loadTournament>>['data'] | null) {
   if (!tournament) return null;
   const visibleAt = tournament.schedule?.visibleAt;
+  // A draft without an explicit publication time is still private. This
+  // prevents an unfinished tournament from leaking into discovery while
+  // preserving legacy no-schedule tournaments after they are opened.
+  if (tournament.status === 'draft' && (!visibleAt || !Number.isFinite(Date.parse(visibleAt)))) return null;
   if (visibleAt && Number.isFinite(Date.parse(visibleAt)) && Date.parse(visibleAt) > Date.now()) return null;
   // Registration-open tournaments must have an owner. Older test/legacy
   // records without ownership metadata are orphaned and must not appear as
@@ -1185,6 +1190,7 @@ function discoverableTournament(tournament: Awaited<ReturnType<typeof manager.lo
 
 function isPubliclyVisibleTournament(tournament: Tournament, now = Date.now()): boolean {
   const visibleAt = tournament.schedule?.visibleAt;
+  if (tournament.status === 'draft' && (!visibleAt || !Number.isFinite(Date.parse(visibleAt)))) return false;
   return !visibleAt || !Number.isFinite(Date.parse(visibleAt)) || Date.parse(visibleAt) <= now;
 }
 
@@ -1207,6 +1213,13 @@ function startTournamentLifecycleScheduler(): void {
 
 function isPublishedTournament(tournament: Tournament): boolean {
   return tournament.status === 'completed' && Boolean(tournament.resultsPublishedAt);
+}
+
+function isPublicTournamentDataAvailable(tournament: Tournament): boolean {
+  // A visible draft is public information, but it is not registration-open.
+  // Registration authorization remains enforced by the participation API and
+  // TournamentManager status validation.
+  return tournament.status !== 'cancelled' && isPubliclyVisibleTournament(tournament);
 }
 
 function synthesizeRoundsFromStages(stages: TournamentStage[]): TournamentRound[] {
@@ -1272,9 +1285,9 @@ function safeSpectatorPairing(pairing: TournamentPairing, tournament: Tournament
       nextGame: pairing.seriesProgress.nextGame,
       winsA: pairing.seriesProgress.winsA,
       winsB: pairing.seriesProgress.winsB,
-      games: pairing.seriesProgress.games.map(game => ({ gameNumber: game.gameNumber, winner: game.winner, winnerParticipantId: game.winnerParticipantId, durationMs: isPublishedTournament(tournament) ? game.durationMs : null })),
+      games: pairing.seriesProgress.games.map(game => ({ gameNumber: game.gameNumber, winner: game.winner, winnerParticipantId: game.winnerParticipantId, durationMs: isPublicTournamentDataAvailable(tournament) ? game.durationMs : null })),
     } : null,
-    matchResult: pairing.matchResult && isPublishedTournament(tournament) ? {
+    matchResult: pairing.matchResult && isPublicTournamentDataAvailable(tournament) ? {
       winner: pairing.matchResult.winner,
       terminationReason: pairing.matchResult.terminationReason,
       durationMs: pairing.matchResult.durationMs,
@@ -1473,8 +1486,7 @@ function compactPairing(
   isOwner: boolean,
   participantName: (id: string | null) => string,
 ) {
-  const published = isPublishedTournament(tournament);
-  const canViewResults = isOwner || published;
+  const canViewResults = isOwner || isPublicTournamentDataAvailable(tournament);
   const isGroupPairing = pairing.stageId === 'stage-group' || (pairing.groupId !== null && pairing.groupId !== undefined);
   const seriesProgress = pairing.seriesProgress
     ? {
@@ -1499,7 +1511,7 @@ function compactPairing(
       })),
     }
     : null;
-  const result = pairing.matchResult && (isOwner || published)
+  const result = pairing.matchResult && canViewResults
     ? {
       winner: pairing.matchResult.winner,
       terminationReason: pairing.matchResult.terminationReason,
@@ -1706,7 +1718,7 @@ function sendVersionedJson(req: express.Request, res: express.Response, payload:
 async function canViewTournamentResults(req: express.Request, tournament: Tournament): Promise<boolean> {
   if (isQaFixturesEnabled() && getOwnedQaFixture(tournament.tournamentId, req.auth?.id ?? '')) return true;
   if (req.auth?.role === 'organizer') return tournament.metadata?.ownerId === req.auth.id;
-  return Boolean(req.auth && isPubliclyVisibleTournament(tournament) && isPublishedTournament(tournament));
+  return Boolean(req.auth && isPublicTournamentDataAvailable(tournament));
 }
 
 app.get('/api/tournaments/discoverable', requireAuth, async (req, res) => {
@@ -1757,6 +1769,10 @@ app.post('/api/tournaments/:id/participation-requests', requireAuth, requireRole
     }
     const bot = botRepository.findById(botId);
     if (!bot || bot.owner_id !== req.auth!.id) return res.status(404).json({ error: 'Bot not found' });
+    const normalizedParticipantName = participantName.trim().toLocaleLowerCase();
+    if (normalizedParticipantName === bot.name.trim().toLocaleLowerCase()) {
+      return res.status(409).json({ error: 'Tên thi đấu phải khác tên Bot' });
+    }
     const revision = botRevisionRepository.findOwned(botId, revisionId, req.auth!.id);
     if (!revision) return res.status(404).json({ error: 'Source revision not found' });
     if (!isSupportedSourceRuntime(revision.runtime_id)) return res.status(409).json({ error: 'This source revision is not supported for new participation requests' });
@@ -2119,7 +2135,7 @@ app.get('/api/tournaments/:id', requireAuth, async (req, res) => {
         async () => {
           const loaded = await manager.loadTournament(tournamentId);
           if (!loaded.success || !loaded.data) throw new PublicProjectionUnavailable(404, 'Tournament not found');
-          if (loaded.data.status === 'draft' || !isPubliclyVisibleTournament(loaded.data)) throw new PublicProjectionUnavailable(403, 'Tournament not accessible');
+          if (!isPubliclyVisibleTournament(loaded.data)) throw new PublicProjectionUnavailable(403, 'Tournament not accessible');
           return safeSpectatorTournament(loaded.data, req.auth!.id, includeRounds);
         },
       );
@@ -2144,7 +2160,7 @@ app.get('/api/tournaments/:id', requireAuth, async (req, res) => {
         rounds,
       });
     }
-    if (tournament.status === 'draft') return res.status(403).json({ error: 'Tournament not accessible' });
+    if (!isPubliclyVisibleTournament(tournament)) return res.status(403).json({ error: 'Tournament not accessible' });
     return sendVersionedJson(req, res, safeSpectatorTournament(tournament, req.auth!.id, includeRounds));
   } catch (error) {
     if (error instanceof PublicProjectionUnavailable) return res.status(error.statusCode).json({ error: error.message });
@@ -2160,7 +2176,7 @@ app.get('/api/tournaments/:id/progress', requireAuth, async (req, res) => {
       const projection = await projectionCache.getOrLoad(`tournament:${tournamentId}:public:progress`, async () => {
         const loaded = await manager.loadTournament(tournamentId);
         if (!loaded.success || !loaded.data) throw new PublicProjectionUnavailable(404, 'Tournament not found');
-        if (loaded.data.status === 'draft' || !isPubliclyVisibleTournament(loaded.data)) throw new PublicProjectionUnavailable(403, 'Tournament not accessible');
+        if (!isPubliclyVisibleTournament(loaded.data)) throw new PublicProjectionUnavailable(403, 'Tournament not accessible');
         return publicProgressProjection(loaded.data);
       });
       return sendVersionedJson(req, res, projection);
@@ -2177,7 +2193,7 @@ app.get('/api/tournaments/:id/progress', requireAuth, async (req, res) => {
     if (req.auth!.role === 'organizer' && !isOwner) {
       return res.status(404).json({ error: 'Tournament not found' });
     }
-    if (req.auth!.role !== 'organizer' && tournament.status === 'draft') {
+    if (req.auth!.role !== 'organizer' && !isPubliclyVisibleTournament(tournament)) {
       return res.status(403).json({ error: 'Tournament not accessible' });
     }
 
@@ -2224,7 +2240,7 @@ app.get('/api/tournaments/:id/pairings', requireAuth, async (req, res) => {
     if (req.auth!.role === 'organizer' && !isOwner) {
       return res.status(404).json({ error: 'Tournament not found' });
     }
-    if (req.auth!.role !== 'organizer' && tournament.status === 'draft') {
+    if (req.auth!.role !== 'organizer' && !isPubliclyVisibleTournament(tournament)) {
       return res.status(403).json({ error: 'Tournament not accessible' });
     }
 
@@ -2276,7 +2292,7 @@ app.get('/api/tournaments/:id/stages', requireAuth, async (req, res) => {
       const projection = await projectionCache.getOrLoad(`tournament:${tournamentId}:public:stages:${compact ? 'compact' : 'full'}`, async () => {
         const loaded = await manager.loadTournament(tournamentId);
         if (!loaded.success || !loaded.data) throw new PublicProjectionUnavailable(404, 'Tournament not found');
-        if (loaded.data.status === 'draft' || !isPubliclyVisibleTournament(loaded.data)) throw new PublicProjectionUnavailable(403, 'Tournament not accessible');
+        if (!isPubliclyVisibleTournament(loaded.data)) throw new PublicProjectionUnavailable(403, 'Tournament not accessible');
         return publicStagesProjection(loaded.data, compact);
       });
       return sendVersionedJson(req, res, projection);
@@ -2291,7 +2307,7 @@ app.get('/api/tournaments/:id/stages', requireAuth, async (req, res) => {
     if (req.auth!.role === 'organizer' && !isOwner) {
       return res.status(404).json({ error: 'Tournament not found' });
     }
-    if (req.auth!.role !== 'organizer' && tournament.status === 'draft') {
+    if (req.auth!.role !== 'organizer' && !isPubliclyVisibleTournament(tournament)) {
       return res.status(403).json({ error: 'Tournament not accessible' });
     }
 
@@ -2411,6 +2427,33 @@ app.post('/api/tournaments/:id/action', requireAuth, requireRole('organizer'), r
         }
         result = await manager.startTournament(tournamentId);
         break;
+      case 'start_next_stage':
+        if (activeTournamentRuns.has(tournamentId)) {
+          return res.status(409).json({ error: 'Tournament is already running' });
+        }
+        result = await manager.startNextStage(tournamentId);
+        if (!result.success) break;
+        activeTournamentRuns.add(tournamentId);
+        {
+          const nextStageTaskId = `run_next_stage_${tournamentId}`;
+          tournamentRunOwners.set(nextStageTaskId, req.auth!.id);
+          executionQueue.submit(nextStageTaskId, async signal => {
+            try {
+              const executionResult = await manager.runAllMatches(tournamentId, signal);
+              if (!executionResult.success && executionResult.error !== 'Tournament execution cancelled') {
+                throw new Error(executionResult.error ?? 'Next stage execution failed');
+              }
+            } finally {
+              activeTournamentRuns.delete(tournamentId);
+              tournamentRunOwners.delete(nextStageTaskId);
+            }
+          }).catch(error => {
+            activeTournamentRuns.delete(tournamentId);
+            tournamentRunOwners.delete(nextStageTaskId);
+            console.error(`Next stage execution queue error for ${tournamentId}:`, error);
+          });
+        }
+        return res.json({ message: 'Next tournament stage started in background', tournament: result.data });
       case 'resume':
         if (tournament.status !== 'running') {
           return res.status(409).json({ error: `Cannot resume tournament with status ${tournament.status}` });
@@ -2651,7 +2694,7 @@ app.get('/api/tournaments/:id/standings', requireAuth, async (req, res) => {
     if (req.auth!.role !== 'organizer') {
       const projection = await projectionCache.getOrLoad(`tournament:${tournamentId}:public:standings`, async () => {
         const loaded = await manager.loadTournament(tournamentId);
-        if (!loaded.success || !loaded.data || !isPublishedTournament(loaded.data)) throw new PublicProjectionUnavailable(403, 'Tournament results are not published');
+        if (!loaded.success || !loaded.data || !isPublicTournamentDataAvailable(loaded.data)) throw new PublicProjectionUnavailable(403, 'Tournament results are not available');
         const result = await manager.getStandings(tournamentId);
         if (!result.success) throw new PublicProjectionUnavailable(404, 'Tournament not found');
         return result.data;
@@ -2676,7 +2719,7 @@ app.get('/api/tournaments/:id/stats', requireAuth, async (req, res) => {
     if (req.auth!.role !== 'organizer') {
       const projection = await projectionCache.getOrLoad(`tournament:${tournamentId}:public:stats`, async () => {
         const loaded = await manager.loadTournament(tournamentId);
-        if (!loaded.success || !loaded.data || !isPublishedTournament(loaded.data)) throw new PublicProjectionUnavailable(403, 'Tournament results are not published');
+        if (!loaded.success || !loaded.data || !isPublicTournamentDataAvailable(loaded.data)) throw new PublicProjectionUnavailable(403, 'Tournament results are not available');
         const result = await manager.getStats(tournamentId);
         if (!result.success) throw new PublicProjectionUnavailable(404, 'Tournament not found');
         return result.data;
@@ -3004,7 +3047,7 @@ app.get('/api/tournaments/:id/spectator/matches/:matchId/replay', requireAuth, a
     const pairing = resolved?.pairing ?? null;
     if (!pairing || pairing.status !== 'completed') return res.status(404).json({ error: 'Replay not found' });
     const isOwner = tournament.metadata?.ownerId === req.auth!.id;
-    if (!isOwner && (!tournament.resultsPublishedAt || tournament.status !== 'completed')) {
+    if (!isOwner && !isPublicTournamentDataAvailable(tournament)) {
       return res.status(404).json({ error: 'Replay not found' });
     }
     const result = await manager.getReplay(tournamentId, resolved!.matchId);

@@ -97,6 +97,12 @@ describe('tournament participation requests', () => {
     expect(discovery.body[0]).not.toHaveProperty('participants');
     expect(discovery.body[0]).not.toHaveProperty('participationRequests');
 
+    const botNameAsParticipant = await competitor.post(`/api/tournaments/${publicId}/participation-requests`)
+      .set('x-csrf-token', competitorCsrf)
+      .send({ botId: bot.botId, revisionId: bot.revisionId, participantName: 'owned bot' });
+    expect(botNameAsParticipant.status).toBe(409);
+    expect(botNameAsParticipant.body.error).toContain('khác tên Bot');
+
     const created = await competitor.post(`/api/tournaments/${publicId}/participation-requests`)
       .set('x-csrf-token', competitorCsrf)
       .send({ botId: bot.botId, revisionId: bot.revisionId, participantName: 'Competitor One' });
@@ -110,6 +116,13 @@ describe('tournament participation requests', () => {
     });
     expect(created.body).not.toHaveProperty('competitorId');
     expect(created.body).not.toHaveProperty('botSnapshot');
+
+    const otherBot = await createBot(otherCompetitor, otherCompetitorCsrf, 'other bot');
+    const duplicateDisplayName = await otherCompetitor.post(`/api/tournaments/${publicId}/participation-requests`)
+      .set('x-csrf-token', otherCompetitorCsrf)
+      .send({ botId: otherBot.botId, revisionId: otherBot.revisionId, participantName: 'Competitor One' });
+    expect(duplicateDisplayName.status).toBe(409);
+    expect(duplicateDisplayName.body.error).toContain('already in use');
 
     const discoveryWithStatus = await competitor.get('/api/tournaments/discoverable');
     expect(discoveryWithStatus.status).toBe(200);

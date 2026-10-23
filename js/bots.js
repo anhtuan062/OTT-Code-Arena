@@ -1084,7 +1084,15 @@ async function loadTournaments() {
   const pageTitle = $('.tournaments-workspace-header h2');
   const pageDescription = $('.tournaments-workspace-header p');
   const isCompetitor = state.user?.role === 'competitor';
-  if (isCompetitor) state.tournamentScope = 'all';
+  if (isCompetitor) {
+    // The competitor view is the public discovery list. Do not carry a
+    // previous organizer/status-filter selection into it: visible drafts are
+    // intentionally discoverable before registration opens.
+    state.tournamentScope = 'all';
+    state.tournamentStatusFilter = 'all';
+    const statusFilter = $('#tournament-status-filter');
+    if (statusFilter) statusFilter.value = 'all';
+  }
   if (pageTitle) pageTitle.textContent = isCompetitor ? 'Giải đấu' : 'Quản lý giải đấu';
   if (pageDescription) pageDescription.textContent = isCompetitor
     ? 'Khám phá giải đấu đang mở và theo dõi các giải bạn đã đăng ký hoặc tham gia.'
@@ -1107,7 +1115,7 @@ async function loadTournaments() {
       const mine = Array.isArray(minePayload) ? minePayload : [];
       const merged = new Map();
       discoverable
-        .filter(tournament => tournament.status === 'registration_open' || tournament.status === 'running')
+        .filter(tournament => tournament.status === 'draft' || tournament.status === 'registration_open' || tournament.status === 'running')
         .forEach(tournament => merged.set(tournament.tournamentId, tournament));
       mine.map(item => ({
         tournamentId: item.tournamentId,
