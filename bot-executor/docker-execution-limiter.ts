@@ -8,7 +8,11 @@ import { applicationMetrics } from '../observability/metrics.js';
  * their own permit, so an execution cannot deadlock while releasing resources.
  */
 
-export const DEFAULT_DOCKER_EXECUTION_CONCURRENCY = 1;
+// The tournament scheduler admits two independent pairings by default. Keep
+// the process-wide Docker permit budget aligned with that contract; operators
+// can still lower it with OTT_DOCKER_EXECUTION_CONCURRENCY when host capacity
+// requires serial Docker execution.
+export const DEFAULT_DOCKER_EXECUTION_CONCURRENCY = 2;
 
 export type DockerPermit = () => void;
 

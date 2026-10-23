@@ -19,6 +19,10 @@ interface DispatchRun<T> {
   results: T[];
   failures: string[];
   resolve: (result: FairMatchDispatchResult<T>) => void;
+  activeQuanta: number;
+  queuedQuanta: number;
+  done: boolean;
+  resolved: boolean;
 }
 
 /**
@@ -28,19 +32,23 @@ interface DispatchRun<T> {
  */
 export class FairMatchDispatcher<T> {
   private readonly maxConcurrent: number;
+  private readonly maxConcurrentPerRun: number;
   private readonly pending: DispatchRun<T>[] = [];
-  private readonly activeKeys = new Set<string>();
-  private readonly active = new Set<DispatchRun<T>>();
+  private activeQuanta = 0;
   private readonly existing = new Map<string, Promise<FairMatchDispatchResult<T>>>();
   private pumping = false;
   private admission: ((activeDispatches: number) => boolean) | undefined;
   private dispatchStopped = false;
 
-  constructor(maxConcurrent = 2) {
+  constructor(maxConcurrent = 2, maxConcurrentPerRun = 1) {
     if (!Number.isInteger(maxConcurrent) || maxConcurrent < 1 || maxConcurrent > 2) {
       throw new RangeError('Fair match dispatcher concurrency must be between 1 and 2');
     }
+    if (!Number.isInteger(maxConcurrentPerRun) || maxConcurrentPerRun < 1 || maxConcurrentPerRun > maxConcurrent) {
+      throw new RangeError('Fair match dispatcher per-run concurrency must be between 1 and global concurrency');
+    }
     this.maxConcurrent = maxConcurrent;
+    this.maxConcurrentPerRun = maxConcurrentPerRun;
   }
 
   setAdmissionController(admission: ((activeDispatches: number) => boolean) | undefined): void {
@@ -53,7 +61,11 @@ export class FairMatchDispatcher<T> {
   /** Stop new quanta while allowing the currently executing quantum to finish. */
   stopDispatching(): void {
     this.dispatchStopped = true;
-    for (const run of [...this.pending]) this.finish(run, true);
+    for (const run of [...this.pending]) {
+      run.done = true;
+      run.queuedQuanta = 0;
+      this.finish(run, true);
+    }
     this.pending.length = 0;
   }
 
@@ -70,7 +82,18 @@ export class FairMatchDispatcher<T> {
 
     let resolve!: (result: FairMatchDispatchResult<T>) => void;
     const promise = new Promise<FairMatchDispatchResult<T>>(done => { resolve = done; });
-    const run: DispatchRun<T> = { key, quantum, signal, results: [], failures: [], resolve };
+    const run: DispatchRun<T> = {
+      key,
+      quantum,
+      signal,
+      results: [],
+      failures: [],
+      resolve,
+      activeQuanta: 0,
+      queuedQuanta: 1,
+      done: false,
+      resolved: false,
+    };
     this.existing.set(key, promise);
     this.pending.push(run);
     void this.pump();
@@ -81,13 +104,32 @@ export class FairMatchDispatcher<T> {
     if (this.pumping) return;
     this.pumping = true;
     try {
-      while (!this.dispatchStopped && this.active.size < this.maxConcurrent && this.pending.length > 0) {
-        if (this.admission && !this.admission(this.active.size)) break;
+      while (!this.dispatchStopped && this.activeQuanta < this.maxConcurrent && this.pending.length > 0) {
         const run = this.pending.shift()!;
-        if (this.activeKeys.has(run.key)) continue;
-        this.activeKeys.add(run.key);
-        this.active.add(run);
+        run.queuedQuanta = Math.max(0, run.queuedQuanta - 1);
+        if (run.done || run.signal?.aborted) {
+          run.done = true;
+          this.finish(run, Boolean(run.signal?.aborted));
+          continue;
+        }
+        if (this.admission && !this.admission(this.activeQuanta)) {
+          run.queuedQuanta += 1;
+          this.pending.unshift(run);
+          break;
+        }
+        run.activeQuanta += 1;
+        this.activeQuanta += 1;
         void this.executeQuantum(run);
+
+        // Fill the remaining global slots from the same run when it is the
+        // only runnable tournament. Requeueing here, rather than waiting for
+        // completion, is what makes two pairings within one tournament able
+        // to execute concurrently while preserving FIFO fairness between
+        // different tournament runs.
+        if (!run.done && run.activeQuanta + run.queuedQuanta < this.maxConcurrentPerRun) {
+          run.queuedQuanta += 1;
+          this.pending.push(run);
+        }
       }
     } finally {
       this.pumping = false;
@@ -109,24 +151,26 @@ export class FairMatchDispatcher<T> {
 
     if (quantum.result !== undefined) run.results.push(quantum.result);
     if (quantum.error) run.failures.push(quantum.error);
-    if (quantum.done || run.signal?.aborted || this.dispatchStopped) {
-      this.finish(run, Boolean(run.signal?.aborted));
-      return;
-    }
-
-    this.active.delete(run);
-    this.activeKeys.delete(run.key);
-    if (quantum.deferred) {
+    run.activeQuanta = Math.max(0, run.activeQuanta - 1);
+    this.activeQuanta = Math.max(0, this.activeQuanta - 1);
+    if (quantum.done || run.signal?.aborted || this.dispatchStopped) run.done = true;
+    if (!run.done && quantum.deferred) {
       const retryAfterMs = Math.max(0, Math.min(30_000, quantum.retryAfterMs ?? 250));
       await new Promise<void>(resolve => setTimeout(resolve, retryAfterMs));
     }
-    this.pending.push(run);
+    if (!run.done && run.activeQuanta + run.queuedQuanta < this.maxConcurrentPerRun) {
+      run.queuedQuanta += 1;
+      this.pending.push(run);
+    }
+    this.finish(run, Boolean(run.signal?.aborted));
     await this.pump();
   }
 
   private finish(run: DispatchRun<T>, cancelled: boolean): void {
-    this.active.delete(run);
-    this.activeKeys.delete(run.key);
+    if (!run.done && !cancelled) return;
+    if (run.activeQuanta > 0 || run.queuedQuanta > 0) return;
+    if (run.resolved) return;
+    run.resolved = true;
     this.existing.delete(run.key);
     run.resolve({ results: run.results, failures: run.failures, cancelled });
     void this.pump();

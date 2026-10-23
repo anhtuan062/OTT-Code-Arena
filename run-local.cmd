@@ -44,7 +44,7 @@ set "PORT=3000"
 set "BOT_TRUSTED_IMAGE_REGISTRIES=docker.io,ghcr.io"
 set "BOT_DOCKER_IMAGE=ghcr.io/anhtuan062/ott-phase6e-bot@sha256:78c1972c29f1385eacd32f715a24ec41013b5883fb5f8fe0f2c597358d3bf70d"
 set "BOT_CPP_COMPILER_IMAGE=docker.io/library/gcc@sha256:5e927c284bf55a7dc796262e311a0703344f62f41f5621eb56843111b1d37e15"
-set "BOT_CPP_RUNTIME_IMAGE=docker.io/library/debian@sha256:7c7b2c966bc9ee8cedfeef67e0e279108992c77681fa595db4a9d65c06ccc587"
+set "BOT_CPP_RUNTIME_IMAGE=docker.io/library/debian@sha256:7ff6ba31527b9e336162fa061746c366c4b2032f4d2cff2078bea43f78efe3f8"
 set "BOT_PYTHON3_RUNTIME_IMAGE=docker.io/library/python@sha256:2ed6491b93cd49272ee6de2b5a38440c3448360322c089fc23e370722d74179d"
 
 echo [3/3] Building application...

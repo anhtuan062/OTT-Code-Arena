@@ -141,7 +141,7 @@ let sessionRepository: SqlSessionRepository;
 let rateLimitRepository: SqlRateLimitRepository;
 let sourceRevisionExecutor: SourceRevisionExecutor | undefined;
 let botPreflightService: BotPreflightService | undefined;
-let fairMatchDispatcher = new FairMatchDispatcher<ExecutedMatchResult>(2);
+let fairMatchDispatcher = new FairMatchDispatcher<ExecutedMatchResult>(2, 2);
 let hostCapacityController = new HostCapacityController(hostCapacityThresholdsFromEnv());
 let httpServer: Server | undefined;
 let tournamentLifecycleTimer: ReturnType<typeof setInterval> | undefined;
@@ -230,7 +230,7 @@ export async function initServer(storageDir?: string) {
   executionQueue = createExecutionQueue({ maxConcurrent: 2, maxQueueLength: 50, metricsName: 'execution' });
   hostCapacityController.stop();
   hostCapacityController = new HostCapacityController(hostCapacityThresholdsFromEnv());
-  fairMatchDispatcher = new FairMatchDispatcher<ExecutedMatchResult>(2);
+  fairMatchDispatcher = new FairMatchDispatcher<ExecutedMatchResult>(2, 2);
   projectionCache.clear();
   activeTournamentRuns.clear();
   tournamentRunOwners.clear();

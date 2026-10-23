@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { DockerExecutionLimiter } from '../../bot-executor/docker-execution-limiter.js';
+import { DEFAULT_DOCKER_EXECUTION_CONCURRENCY, DockerExecutionLimiter } from '../../bot-executor/docker-execution-limiter.js';
 
 function deferred<T = void>() {
   let resolve!: (value: T | PromiseLike<T>) => void;
@@ -9,6 +9,11 @@ function deferred<T = void>() {
 }
 
 describe('DockerExecutionLimiter', () => {
+  it('defaults to the two-pairing tournament Docker budget', () => {
+    expect(DEFAULT_DOCKER_EXECUTION_CONCURRENCY).toBe(2);
+    expect(new DockerExecutionLimiter().maxConcurrent).toBe(2);
+  });
+
   it('admits FIFO across independent tournament and practice executions', async () => {
     const limiter = new DockerExecutionLimiter(1);
     const first = deferred();

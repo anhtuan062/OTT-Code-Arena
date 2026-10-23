@@ -7,6 +7,53 @@ function sample(at: number, cpu = 10) {
 }
 
 describe('HostCapacityController', () => {
+  it('transitions healthy to constrained to recovery to healthy after sustained recovery', () => {
+    const controller = new HostCapacityController({
+      minSamples: 1,
+      constrainedSustainMs: 100,
+      recoverySustainMs: 100,
+      constrainedCpuPercent: 50,
+      criticalCpuPercent: 90,
+    });
+    expect(controller.record(sample(0, 60))).toBe('healthy');
+    expect(controller.record(sample(100, 60))).toBe('constrained');
+    expect(controller.record(sample(150))).toBe('constrained');
+    expect(controller.record(sample(199))).toBe('constrained');
+    expect(controller.record(sample(250))).toBe('recovery');
+    expect(controller.record(sample(349))).toBe('recovery');
+    expect(controller.record(sample(350))).toBe('healthy');
+  });
+
+  it('transitions constrained to critical only after critical pressure is sustained', () => {
+    const controller = new HostCapacityController({
+      minSamples: 1,
+      constrainedSustainMs: 0,
+      criticalSustainMs: 100,
+      constrainedCpuPercent: 50,
+      criticalCpuPercent: 90,
+    });
+    expect(controller.record(sample(0, 60))).toBe('constrained');
+    expect(controller.record(sample(50, 95))).toBe('constrained');
+    expect(controller.record(sample(150, 95))).toBe('critical');
+  });
+
+  it('resets recovery sustain when constrained pressure returns', () => {
+    const controller = new HostCapacityController({
+      minSamples: 1,
+      constrainedSustainMs: 0,
+      recoverySustainMs: 100,
+      constrainedCpuPercent: 50,
+      criticalCpuPercent: 90,
+    });
+    expect(controller.record(sample(0, 60))).toBe('constrained');
+    expect(controller.record(sample(50))).toBe('constrained');
+    expect(controller.record(sample(100, 60))).toBe('constrained');
+    expect(controller.record(sample(149))).toBe('constrained');
+    expect(controller.record(sample(250))).toBe('recovery');
+    expect(controller.record(sample(349))).toBe('recovery');
+    expect(controller.record(sample(350))).toBe('healthy');
+  });
+
   it('uses sustained thresholds and hysteresis for constrained/critical/recovery', () => {
     const controller = new HostCapacityController({
       minSamples: 1, constrainedSustainMs: 100, criticalSustainMs: 100,

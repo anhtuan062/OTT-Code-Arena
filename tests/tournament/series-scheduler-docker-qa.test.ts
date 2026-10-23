@@ -81,19 +81,28 @@ function matchConfig(maxTurns = 200): Tournament['matchConfig'] {
   };
 }
 
-function participants(count: number, sdk: { version: string; digest: string }, sourceDigest: string, runtimeId: 'cpp' | 'python3'): TournamentParticipant[] {
+function participants(
+  count: number,
+  sdk: { version: string; digest: string },
+  sourceDigest: string,
+  runtimeId: 'cpp' | 'python3',
+  profiles?: Partial<Record<'cpp' | 'python3', { sdk: { version: string; digest: string }; sourceDigest: string }>>,
+  runtimeIds: Array<'cpp' | 'python3'> = [],
+): TournamentParticipant[] {
   return Array.from({ length: count }, (_, index) => {
     const suffix = index + 1;
+    const selectedRuntimeId = runtimeIds[index] ?? runtimeId;
+    const selectedProfile = profiles?.[selectedRuntimeId];
     const execution: SourceRevisionExecution = {
       kind: 'source-revision',
       competitorId: `series-qa-competitor-${suffix}`,
       botId: `series-qa-bot-${suffix}`,
       revisionId: `series-qa-revision-${suffix}`,
-      runtimeId,
-      sourceDigest,
+      runtimeId: selectedRuntimeId,
+      sourceDigest: selectedProfile?.sourceDigest ?? sourceDigest,
       executionMode: 'strategy',
-      sdkVersion: sdk.version,
-      sdkDigest: sdk.digest,
+      sdkVersion: selectedProfile?.sdk.version ?? sdk.version,
+      sdkDigest: selectedProfile?.sdk.digest ?? sdk.digest,
     };
     const bot: BotDefinition = {
       botId: execution.botId,
@@ -118,6 +127,10 @@ interface QaStats {
   activePairings: Set<string>;
   peakActivePairings: number;
   peakDockerPermits: number;
+  peakDockerActive: number;
+  peakDockerPending: number;
+  peakHeapUsedBytes: number;
+  cpuStartUsage: NodeJS.CpuUsage;
   prematureAdvancement: boolean;
   checkpoints: MatchSchedulerCheckpoint[];
   limiterEvents: Array<{
@@ -140,6 +153,10 @@ function createStats(): QaStats {
     activePairings: new Set(),
     peakActivePairings: 0,
     peakDockerPermits: 0,
+    peakDockerActive: 0,
+    peakDockerPending: 0,
+    peakHeapUsedBytes: process.memoryUsage().heapUsed,
+    cpuStartUsage: process.cpuUsage(),
     prematureAdvancement: false,
     checkpoints: [],
     limiterEvents: [],
@@ -200,6 +217,7 @@ interface QaContext {
   releaseRevisionScopes: string[];
   sourceByRevision: Map<string, Buffer>;
   benchmarkOptions: BenchmarkExecutorOptions;
+  dockerConcurrency: 1 | 2;
 }
 
 const QA_RUN_TIMEOUT_MS = 540_000;
@@ -285,21 +303,68 @@ async function createContext(
   schedulerConcurrency: 1 | 2 = 2,
   fixtureSeed = '',
   benchmarkOptions: BenchmarkExecutorOptions = { runtimeId: 'cpp', availability: 'cached', artifactCache: false },
+  dockerConcurrency: 1 | 2 = schedulerConcurrency,
+  fixtureKind: 'standard' | 'two-bo3' = 'standard',
 ): Promise<QaContext> {
   const sdk = await getStrategySdkIdentity(benchmarkOptions.runtimeId);
   const source = benchmarkOptions.runtimeId === 'cpp' ? CPP_SOURCE : PYTHON_SOURCE;
   const sourceDigest = createHash('sha256').update(source).digest('hex');
   const tournamentId = `qa-series-${randomUUID().replaceAll('-', '')}`;
-  const tournamentParticipants = participants(count, sdk, sourceDigest, benchmarkOptions.runtimeId);
+  const mixedProfiles = fixtureKind === 'two-bo3'
+    ? {
+        cpp: {
+          sdk: await getStrategySdkIdentity('cpp'),
+          sourceDigest: createHash('sha256').update(CPP_SOURCE).digest('hex'),
+        },
+        python3: {
+          sdk: await getStrategySdkIdentity('python3'),
+          sourceDigest: createHash('sha256').update(PYTHON_SOURCE).digest('hex'),
+        },
+      }
+    : undefined;
+  const tournamentParticipants = fixtureKind === 'two-bo3'
+    ? participants(4, mixedProfiles!.cpp.sdk, mixedProfiles!.cpp.sourceDigest, 'cpp', mixedProfiles, ['cpp', 'python3', 'cpp', 'python3'])
+    : participants(count, sdk, sourceDigest, benchmarkOptions.runtimeId);
   const tournament = createMultiStageTournament({
     tournamentId,
-    name: count === 4 ? 'QA BO2 Group' : 'QA BO3 Elimination',
+    name: fixtureKind === 'two-bo3' ? 'QA Two BO3 Pairings' : count === 4 ? 'QA BO2 Group' : 'QA BO3 Elimination',
     participants: tournamentParticipants,
       matchConfig: matchConfig(benchmarkOptions.turnBudget ?? 200),
     options: {},
   });
   tournament.status = 'running';
   tournament.startedAt = new Date().toISOString();
+  if (fixtureKind === 'two-bo3') {
+    const groupStage = tournament.stages?.find(stage => stage.stageType === 'group_stage');
+    const group = groupStage?.groups?.[0];
+    const independentPairings = group?.rounds
+      .flatMap(round => round.pairings)
+      .filter(pairing => pairing.participantB !== null)
+      .slice(0, 2) ?? [];
+    if (!groupStage || !group || independentPairings.length !== 2) {
+      throw new Error('QA two-BO3 fixture could not create two independent pairings');
+    }
+    group.rounds = [{ roundNumber: 1, pairings: independentPairings }];
+    group.status = 'in_progress';
+    groupStage.status = 'in_progress';
+    tournament.stages = [groupStage];
+    for (const pairing of independentPairings) {
+      pairing.status = 'scheduled';
+      pairing.matchId = null;
+      pairing.matchResult = null;
+      pairing.startedAt = null;
+      pairing.completedAt = null;
+      pairing.seriesProgress = {
+        format: 'bo3',
+        bestOf: 3,
+        seed: `two-bo3:${pairing.pairingId}`,
+        nextGame: 1,
+        winsA: 0,
+        winsB: 0,
+        games: [],
+      };
+    }
+  }
   if (fixtureSeed) {
     for (const pairing of getAllTournamentPairings(tournament)) {
       if (pairing.participantB === null) continue;
@@ -319,12 +384,18 @@ async function createContext(
   await repository.initialize();
   await repository.save(tournament);
 
-  const limiter = new DockerExecutionLimiter(1, {
+  let limiter: DockerExecutionLimiter;
+  limiter = new DockerExecutionLimiter(dockerConcurrency, {
     onAdmitted: event => {
       stats.peakDockerPermits = Math.max(stats.peakDockerPermits, event.active);
+      stats.peakDockerActive = Math.max(stats.peakDockerActive, event.active);
+      stats.peakDockerPending = Math.max(stats.peakDockerPending, limiter.pending);
       stats.limiterEvents.push({ ...event, phase: 'admitted', executionMs: 0 });
     },
-    onReleased: event => stats.limiterEvents.push({ ...event, phase: 'released' }),
+    onReleased: event => {
+      stats.peakDockerPending = Math.max(stats.peakDockerPending, limiter.pending);
+      stats.limiterEvents.push({ ...event, phase: 'released' });
+    },
   });
   const releaseRevisionScopes: string[] = [];
   const revisionExecutor = createRevisionDockerExecutor({
@@ -353,6 +424,7 @@ async function createContext(
   const originalExecuteRevision = revisionExecutor.executeRevision.bind(revisionExecutor);
   (revisionExecutor as any).executeRevision = async (...args: Parameters<typeof revisionExecutor.executeRevision>) => {
     const result = await originalExecuteRevision(...args);
+    stats.peakHeapUsedBytes = Math.max(stats.peakHeapUsedBytes, process.memoryUsage().heapUsed);
     const timings = result.timings;
     const executionContext = args[0] as { matchId?: string };
     stats.turnMetrics.push({
@@ -378,10 +450,14 @@ async function createContext(
       return Reflect.get(target, property, receiver);
     },
   });
+  const sourceByRuntime = new Map<'cpp' | 'python3', Buffer>([
+    ['cpp', CPP_SOURCE],
+    ['python3', PYTHON_SOURCE],
+  ]);
   const sourceByRevision = new Map(
     tournamentParticipants.map(participant => {
       const execution = participant.bot.execution as SourceRevisionExecution;
-      return [`${execution.botId}:${execution.revisionId}`, source] as const;
+      return [`${execution.botId}:${execution.revisionId}`, sourceByRuntime.get(execution.runtimeId) ?? source] as const;
     }),
   );
   const resolveRevision = async (execution: SourceRevisionExecution) =>
@@ -462,7 +538,7 @@ async function createContext(
       }
     },
   });
-  return { root, repository, manager, tournament, limiter, stats, releaseRevisionScopes, sourceByRevision, benchmarkOptions };
+  return { root, repository, manager, tournament, limiter, stats, releaseRevisionScopes, sourceByRevision, benchmarkOptions, dockerConcurrency };
 }
 
 function assertDurableTriad(root: string, tournamentId: string, matchId: string): Promise<void> {
@@ -511,6 +587,10 @@ async function summarizeSeriesRun(
     elapsedMs: Date.now() - startedAt,
     peakActivePairings: context.stats.peakActivePairings,
     peakDockerPermits: context.stats.peakDockerPermits,
+    peakDockerActive: context.stats.peakDockerActive,
+    peakDockerPending: context.stats.peakDockerPending,
+    processCpuUserMs: process.cpuUsage(context.stats.cpuStartUsage).user / 1000,
+    peakHeapUsedBytes: context.stats.peakHeapUsedBytes,
     permitWaitMs: released.map(event => event.waitMs),
     permitExecutionMs: released.map(event => event.executionMs),
     pairingCount: pairings.length,
@@ -582,12 +662,22 @@ suite('Series-aware scheduler RevisionDockerExecutor QA', () => {
     }
   });
 
-  it('runs independent BO2 group pairings at scheduler concurrency 2 while Docker stays globally serial', async () => {
+  it('runs two independent BO3 pairings at scheduler and Docker concurrency 2', async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), 'ott-series-docker-qa-'));
     const repository = new FileTournamentRepository({ baseDir: path.join(root, 'storage') });
     let context: QaContext;
     try {
-      context = await createContext(4, repository, root);
+      context = await createContext(
+        4,
+        repository,
+        root,
+        createStats(),
+        2,
+        '',
+        { runtimeId: 'cpp', availability: 'cached', artifactCache: false },
+        2,
+        'two-bo3',
+      );
     } catch (error) {
       repository.close();
       await fs.rm(root, { recursive: true, force: true });
@@ -598,8 +688,15 @@ suite('Series-aware scheduler RevisionDockerExecutor QA', () => {
     const run = await runWithAbortAndDrain(context);
     expect(run.success).toBe(true);
     expect(context.stats.peakActivePairings).toBe(2);
-    expect(context.stats.peakDockerPermits).toBeLessThanOrEqual(1);
-    expect(context.limiter.maxConcurrent).toBe(1);
+    expect(context.stats.peakDockerActive).toBe(2);
+    expect(context.limiter.maxConcurrent).toBe(2);
+    process.stdout.write(`DOCKER_CONCURRENCY_QA ${JSON.stringify({
+      schedulerConcurrency: 2,
+      dockerConcurrency: context.limiter.maxConcurrent,
+      peakDockerActive: context.stats.peakDockerActive,
+      peakDockerPending: context.stats.peakDockerPending,
+      duplicateClaims: context.stats.calls.length - new Set(context.stats.calls).size,
+    })}\n`);
     expect(context.stats.calls.length).toBeGreaterThan(0);
     expect(new Set(context.stats.calls).size).toBe(context.stats.calls.length);
     expect(context.stats.prematureAdvancement).toBe(false);
@@ -611,10 +708,11 @@ suite('Series-aware scheduler RevisionDockerExecutor QA', () => {
     const groupStage = final!.stages!.find(stage => stage.stageType === 'group_stage')!;
     const groupPairings = groupStage.groups!.flatMap(group => group.rounds.flatMap(round => round.pairings))
       .filter(pairing => pairing.participantB !== null);
-    expect(groupPairings.every(pairing => pairing.matchResult?.series?.format === 'bo2')).toBe(true);
+    expect(groupPairings).toHaveLength(2);
+    expect(groupPairings.every(pairing => pairing.matchResult?.series?.format === 'bo3')).toBe(true);
     expect(groupPairings.every(pairing => Boolean(pairing.matchResult?.series?.games))).toBe(true);
     for (const pairing of groupPairings) {
-      expect(pairing.matchResult?.series?.games).toHaveLength(2);
+      expect(pairing.matchResult?.series?.games).toHaveLength(3);
       for (const game of pairing.matchResult!.series!.games) {
         expect(await repository.loadMatchResult(context.tournament.tournamentId, game.matchId)).not.toBeNull();
         expect(await repository.loadReplay(context.tournament.tournamentId, game.matchId)).not.toBeNull();
@@ -725,7 +823,7 @@ suite('Series-aware scheduler RevisionDockerExecutor QA', () => {
       expect(summaries.at(-1)!.cleanup).toEqual({ active: 0, pending: 0 });
       expect(summaries.at(-1)!.tournamentStatus).toBe('completed');
       expect(summaries.at(-1)!.peakActivePairings).toBeLessThanOrEqual(schedulerConcurrency);
-      expect(summaries.at(-1)!.peakDockerPermits).toBeLessThanOrEqual(1);
+      expect(summaries.at(-1)!.peakDockerActive).toBe(schedulerConcurrency);
       expect(summaries.at(-1)!.schedulerCheckpoints).toBeGreaterThan(0);
       expect(summaries.at(-1)!.stageStatuses.every(status => status.endsWith(':completed'))).toBe(true);
       expect(summaries.at(-1)!.permitWaitMs.every(value => value >= 0)).toBe(true);
@@ -749,9 +847,14 @@ suite('Series-aware scheduler RevisionDockerExecutor QA', () => {
     expect(parallel!.replayCommitChecks).toBe(parallel!.pairingCount + parallel!.gameCount);
     expect(serial!.elapsedMs).toBeGreaterThan(0);
     expect(parallel!.elapsedMs).toBeGreaterThan(0);
+    process.stdout.write(`SERIES_CONCURRENCY_TIMING ${JSON.stringify({
+      serialMs: serial!.elapsedMs,
+      parallelMs: parallel!.elapsedMs,
+      speedup: serial!.elapsedMs / parallel!.elapsedMs,
+    })}\n`);
     process.stdout.write(`SERIES_CONCURRENCY_COMPARISON ${JSON.stringify({
       fixtureSeed,
-      dockerExecutionBudget: 1,
+      dockerExecutionBudget: 2,
       sequential: { concurrency: 1, ...serial },
       parallel: { concurrency: 2, ...parallel },
     })}\n`);
@@ -913,7 +1016,10 @@ suite('Series-aware scheduler RevisionDockerExecutor QA', () => {
     const aggregate = selectedFixtures.flatMap(fixture => variants.map(variant => {
       const matching = rows.filter(row => row.fixture === fixture.name && row.variant === variant.name);
       const pairingP50 = matching.map(row => (row.pairingDurationMs as { p50: number }).p50);
-      const cache = matching.map(row => row.cache as { hits: number; misses: number; ratio: number });
+      const cache = matching.flatMap(row => {
+        const value = row.cache as { hits: number; misses: number; ratio: number } | null;
+        return value ? [value] : [];
+      });
       const median = (values: number[]) => percentile(values, 0.5);
       const mean = pairingP50.reduce((sum, value) => sum + value, 0) / Math.max(pairingP50.length, 1);
       const stddev = Math.sqrt(pairingP50.reduce((sum, value) => sum + ((value - mean) ** 2), 0) / Math.max(pairingP50.length, 1));

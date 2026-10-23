@@ -156,6 +156,9 @@ export class HostCapacityController {
       this.transition(critical ? 'critical' : 'constrained');
     } else if (this.state === 'constrained' && critical && normalized.at - (this.criticalSince ?? normalized.at) >= this.thresholds.criticalSustainMs) {
       this.transition('critical');
+    } else if (this.state === 'constrained' && !constrained && normalized.at - (this.recoverySince ?? normalized.at) >= this.thresholds.recoverySustainMs) {
+      this.transition('recovery');
+      this.recoverySince = normalized.at;
     } else if (this.state === 'critical' && !constrained && normalized.at - (this.recoverySince ?? normalized.at) >= this.thresholds.recoverySustainMs) {
       this.transition('recovery');
       this.recoverySince = normalized.at;

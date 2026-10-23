@@ -15,6 +15,7 @@ import { FileTournamentRepository } from '@tournament/persistence.js';
 import { TournamentManager, resolveSeriesSchedulerRuntimeConfig } from '@tournament/manager.js';
 import type { MatchExecutor } from '@tournament/executor.js';
 import { TournamentCommitCoordinator } from '@tournament/commit-coordinator.js';
+import { FairMatchDispatcher } from '@tournament/fair-match-dispatcher.js';
 
 function participants(count: number): TournamentParticipant[] {
   return Array.from({ length: count }, (_, index) => ({
@@ -153,6 +154,28 @@ class ConcurrentDeterministicExecutor implements MatchExecutor {
       return result(matchId, playerA, playerB);
     } finally {
       this.activePairings.delete(pairingMatchId);
+    }
+  }
+
+  async isAvailable(): Promise<boolean> { return true; }
+}
+
+class FairDispatcherConcurrentExecutor implements MatchExecutor {
+  readonly calls: string[] = [];
+  private readonly active = new Set<string>();
+  maxActive = 0;
+
+  async executeMatch(matchId: string, playerA: BotDefinition, playerB: BotDefinition): Promise<MatchResult> {
+    if (this.calls.includes(matchId)) throw new Error(`duplicate execution: ${matchId}`);
+    this.calls.push(matchId);
+    const pairingMatchId = matchId.replace(/-g[123]$/, '');
+    this.active.add(pairingMatchId);
+    this.maxActive = Math.max(this.maxActive, this.active.size);
+    try {
+      await new Promise(resolve => setTimeout(resolve, 5));
+      return result(matchId, playerA, playerB);
+    } finally {
+      this.active.delete(pairingMatchId);
     }
   }
 
@@ -324,6 +347,38 @@ describe('TournamentManager BO1 scheduler integration', () => {
       const saved = await repository.load(id);
       expect(saved?.status).toBe('completed');
       expect(saved?.rounds.every(round => round.pairings.every(pairing => pairing.status === 'completed'))).toBe(true);
+    }
+  }, 30_000);
+
+  it('runs two BO3 pairings from the same tournament concurrently through the fair dispatcher', async () => {
+    const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'ott-manager-fair-dispatcher-same-tournament-'));
+    directories.push(directory);
+    const repository = new FileTournamentRepository({ baseDir: directory });
+    repositories.push(repository);
+    const id = 'fair-dispatcher-same-tournament';
+    await repository.initialize();
+    await repository.save(seriesTournament(id, 3));
+    const executor = new FairDispatcherConcurrentExecutor();
+    const manager = new TournamentManager({
+      repository,
+      executor,
+      enableBo1MatchScheduler: true,
+      seriesMatchConcurrency: 2,
+      enableSeriesConcurrency2: true,
+    });
+    manager.setFairMatchDispatcher(new FairMatchDispatcher(2, 2));
+
+    const run = await manager.runAllMatches(id);
+
+    expect(run.success).toBe(true);
+    expect(executor.maxActive).toBe(2);
+    expect(new Set(executor.calls).size).toBe(executor.calls.length);
+    const saved = await repository.load(id);
+    expect(saved?.rounds.flatMap(round => round.pairings).every(pairing => pairing.status === 'completed')).toBe(true);
+    expect(saved?.rounds.flatMap(round => round.pairings)).toHaveLength(6);
+    for (const pairing of saved!.rounds.flatMap(round => round.pairings)) {
+      expect(await repository.loadMatchResult(id, pairing.matchId!)).not.toBeNull();
+      expect(await repository.loadReplay(id, pairing.matchId!)).not.toBeNull();
     }
   }, 30_000);
 
