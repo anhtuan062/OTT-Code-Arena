@@ -88,6 +88,7 @@ import {
   isMultiStageTournament,
   createMultiStageTournament,
   activateNextStage,
+  isManualStageGating,
   commitMatchResultAndResolveSlots,
   canPairingExecute,
   getCurrentStage,

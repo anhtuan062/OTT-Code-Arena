@@ -271,6 +271,10 @@ export function getCurrentStage(tournament: Tournament): TournamentStage | null 
  * transitions. This prevents the scheduler from crossing a stage boundary
  * without an organizer decision.
  */
+export function isManualStageGating(tournament: Tournament): boolean {
+  return tournament.stageGating === 'manual';
+}
+
 export function activateNextStage(tournament: Tournament): {
   activated: boolean;
   stage?: TournamentStage;
@@ -303,7 +307,7 @@ export function activateNextStage(tournament: Tournament): {
  */
 export function getExecutablePairings(tournament: Tournament): TournamentPairing[] {
   const currentStage = getCurrentStage(tournament);
-  if (!currentStage || currentStage.status !== 'in_progress') {
+  if (!currentStage || (isManualStageGating(tournament) ? currentStage.status !== 'in_progress' : currentStage.status === 'completed')) {
     return [];
   }
 
@@ -1040,7 +1044,7 @@ export function commitMatchResultAndResolveSlots(
           // Resolve the next stage, but keep it pending until organizer start.
           const groupStage = tournament.stages!.find(s => s.stageType === 'group_stage');
           if (groupStage) {
-            groupStage.status = 'pending';
+            groupStage.status = isManualStageGating(tournament) ? 'pending' : 'in_progress';
             const groupPairings = (groupStage.groups || []).flatMap(g => g.rounds.flatMap(r => r.pairings));
 
             for (const reg of stage.regions) {
@@ -1081,7 +1085,7 @@ export function commitMatchResultAndResolveSlots(
             }
 
             for (const g of groupStage.groups || []) {
-              g.status = 'pending';
+              g.status = isManualStageGating(tournament) ? 'pending' : 'in_progress';
               const groupBots = new Set<string>();
               for (const r of g.rounds) {
                 for (const p of r.pairings) {
@@ -1121,9 +1125,10 @@ export function commitMatchResultAndResolveSlots(
           // Resolve the next stage, but keep it pending until organizer start.
           const groupStage = tournament.stages!.find(s => s.stageType === 'group_stage');
           if (groupStage) {
-            groupStage.status = 'pending';
+            const nextStatus = isManualStageGating(tournament) ? 'pending' : 'in_progress';
+            groupStage.status = nextStatus;
             for (const g of groupStage.groups || []) {
-              g.status = 'pending';
+              g.status = nextStatus;
             }
           }
         }
@@ -1170,7 +1175,7 @@ export function commitMatchResultAndResolveSlots(
           // Resolve Knockout Round 1 slots for each group
           const knockoutStage = tournament.stages!.find(s => s.stageType === 'knockout');
           if (knockoutStage) {
-            knockoutStage.status = 'pending';
+            knockoutStage.status = isManualStageGating(tournament) ? 'pending' : 'in_progress';
             const knockoutPairings = (knockoutStage.rounds || []).flatMap(r => r.pairings);
 
             for (const g of stage.groups!) {

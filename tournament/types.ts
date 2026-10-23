@@ -424,6 +424,8 @@ export interface Tournament {
    * Legacy tournaments omit this field and use rounds directly.
    */
   stages?: TournamentStage[];
+  /** Whether stage advancement requires explicit organizer activation ('manual') or advances automatically. */
+  stageGating?: 'manual' | 'auto';
 }
 
 export interface TournamentUpdateDetails {

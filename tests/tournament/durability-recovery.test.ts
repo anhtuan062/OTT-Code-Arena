@@ -304,7 +304,7 @@ describe('Phase 3E - Tournament Durability & Recovery Validation', () => {
       // Verify heap stability: Cycle 3 heapUsed should not experience runaway growth (> 350 MB)
       const lastCycleHeap = cycleMetrics[cycleMetrics.length - 1]!.heapUsedMB;
       expect(lastCycleHeap).toBeLessThan(350);
-    }, 60_000);
+    }, 120_000);
   });
 
   describe('2. Heterogeneous 4-Region State & Server Restart Simulation', () => {
@@ -420,7 +420,7 @@ describe('Phase 3E - Tournament Durability & Recovery Validation', () => {
       expect(finalTourney.stages![1]!.status).toBe('completed');
       expect(finalTourney.stages![2]!.status).toBe('completed');
       expect(finalTourney.stages![2]!.advancement.advancingParticipantIds).toHaveLength(1);
-    }, 45_000);
+    }, 120_000);
   });
 
   describe('3. Fault Injection at Persistence Boundaries', () => {

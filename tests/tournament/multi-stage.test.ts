@@ -385,6 +385,7 @@ describe('Tournament Multi-Stage Model & Compatibility (Phase 2A)', () => {
       }
 
       // Now all group matches are done -> Group stage is completed!
+      tournament.stageGating = 'manual';
       expect(groupStage.status).toBe('completed');
       expect(knockoutStage.status).toBe('pending');
       expect(activateNextStage(tournament).activated).toBe(true);
@@ -519,6 +520,7 @@ describe('Tournament Multi-Stage Model & Compatibility (Phase 2A)', () => {
       }
 
       // Now all 4 regions are complete: preliminary stage completes and group stage unlocks!
+      tournament.stageGating = 'manual';
       expect(prelimStage.status).toBe('completed');
       expect(prelimStage.advancement.isComplete).toBe(true);
       expect(prelimStage.advancement.advancingParticipantIds).toHaveLength(128);
@@ -621,6 +623,7 @@ describe('Tournament Multi-Stage Model & Compatibility (Phase 2A)', () => {
         }
       }
       expect(region3.status).toBe('completed');
+      recovered!.stageGating = 'manual';
       expect(recPrelim.status).toBe('completed');
       expect(recPrelim.advancement.isComplete).toBe(true);
       expect(recPrelim.advancement.advancingParticipantIds).toHaveLength(101);

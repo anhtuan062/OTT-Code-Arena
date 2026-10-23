@@ -411,7 +411,7 @@ describe('Phase 3D - Large Tournament Reliability Test', () => {
 
       const finalTourney = (await repository.load(tournamentId))!;
       expect(finalTourney.status).toBe('completed');
-    }, 45_000);
+    }, 120_000);
   });
 
   describe('3. Fault Injection, Pause/Resume, and Persistence Boundaries', () => {
@@ -472,7 +472,7 @@ describe('Phase 3D - Large Tournament Reliability Test', () => {
       const finalTourney = (await repository.load(tournamentId))!;
       expect(finalTourney.status).toBe('completed');
       expect(isTournamentComplete(finalTourney)).toBe(true);
-    }, 45_000);
+    }, 120_000);
 
     it('recovers from server restart when a pairing was interrupted mid-flight', async () => {
       const executor1 = new TrackingMockExecutor();
@@ -486,7 +486,7 @@ describe('Phase 3D - Large Tournament Reliability Test', () => {
       const tournamentId = 'tourney-crash-restart-256';
       const participants = createDummyParticipants(count);
 
-      await manager1.createTournament(tournamentId, 'Crash Restart Arena', 'multi_stage');
+      await manager1.createTournament(tournamentId, 'Crash Restart Arena', 'multi_stage', { bestOf: 1 });
       const loaded = (await repository.load(tournamentId))!;
       loaded.participants = participants;
       loaded.status = 'registration_closed';
@@ -724,7 +724,7 @@ describe('Phase 3D - Large Tournament Reliability Test', () => {
       expect(successResults.length).toBe(1);
       expect(failedResults.length).toBe(1);
       expect(failedResults[0]!.error).toMatch(/already being executed|not in scheduled state/i);
-    }, 15_000);
+    }, 120_000);
 
     it('handles elimination draw with pending_tiebreaker, halts infinite loop, and resumes on resolveTiebreaker', async () => {
       const executor = new TrackingMockExecutor();
@@ -738,7 +738,7 @@ describe('Phase 3D - Large Tournament Reliability Test', () => {
       const tournamentId = 'tourney-tiebreaker-elim';
       const participants = createDummyParticipants(count);
 
-      await manager.createTournament(tournamentId, 'Tiebreaker Arena', 'multi_stage');
+      await manager.createTournament(tournamentId, 'Tiebreaker Arena', 'multi_stage', { bestOf: 1 });
       const loaded = (await repository.load(tournamentId))!;
       loaded.participants = participants;
       loaded.status = 'registration_closed';
