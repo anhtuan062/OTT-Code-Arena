@@ -86,6 +86,9 @@ describe('tournament participation requests', () => {
       .set('x-csrf-token', organizerCsrf)
       .send({ name: 'Private arena' });
     expect(privateResponse.status).toBe(201);
+    await organizer.patch(`/api/tournaments/${privateResponse.body.tournamentId}`)
+      .set('x-csrf-token', organizerCsrf)
+      .send({ schedule: { visibleAt: new Date(Date.now() - 1000).toISOString() } });
 
     const bot = await createBot(competitor, competitorCsrf, 'owned bot');
     const discovery = await competitor.get('/api/tournaments/discoverable');

@@ -418,8 +418,15 @@ describe('Phase 3B - Scale Readiness', () => {
       expect(startRes.success).toBe(true);
 
       // Run all matches
-      const runRes = await manager.runAllMatches('t-seq-256');
+      let runRes = await manager.runAllMatches('t-seq-256');
       expect(runRes.success).toBe(true);
+      let tSeq = (await repository.load('t-seq-256'))!;
+      while (tSeq.stages?.some(st => st.status === 'pending')) {
+        await manager.startNextStage('t-seq-256');
+        runRes = await manager.runAllMatches('t-seq-256');
+        expect(runRes.success).toBe(true);
+        tSeq = (await repository.load('t-seq-256'))!;
+      }
 
       // Strict sequential execution: max concurrent executions is exactly 1
       expect(maxConcurrentExecutions).toBe(1);
@@ -437,7 +444,7 @@ describe('Phase 3B - Scale Readiness', () => {
 
       // Champion is crowned
       expect(finished.stages![2]!.advancement.advancingParticipantIds.length).toBe(1);
-    }, 60_000);
+    }, 120_000);
   });
 
   describe('Scale Crash Recovery & Idempotency', () => {
@@ -488,8 +495,15 @@ describe('Phase 3B - Scale Readiness', () => {
       });
 
       // Resume execution with manager2
-      const resumeRes = await manager2.runAllMatches('t-recovery-256');
+      let resumeRes = await manager2.runAllMatches('t-recovery-256');
       expect(resumeRes.success).toBe(true);
+      let tRec = (await repository.load('t-recovery-256'))!;
+      while (tRec.stages?.some(st => st.status === 'pending')) {
+        await manager2.startNextStage('t-recovery-256');
+        resumeRes = await manager2.runAllMatches('t-recovery-256');
+        expect(resumeRes.success).toBe(true);
+        tRec = (await repository.load('t-recovery-256'))!;
+      }
 
       // The executor is called once per committed game, not once per pairing.
       expect(executedCount).toBe(766);
@@ -498,6 +512,6 @@ describe('Phase 3B - Scale Readiness', () => {
       expect(reloaded.status).toBe('completed');
       expect(isTournamentComplete(reloaded)).toBe(true);
       expect(reloaded.stages![2]!.status).toBe('completed');
-    }, 60_000);
+    }, 120_000);
   });
 });

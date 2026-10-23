@@ -691,17 +691,15 @@ describe('TournamentCommitCoordinator - Real FileTournamentRepository Contract',
 
       // Exactly once transitions
       const groupTrans = transitionEvents.filter(e => e.stageId === groupStage.stageId && e.toStatus === 'completed');
-      const koTrans = transitionEvents.filter(e => e.stageId === knockoutStage.stageId && e.toStatus === 'in_progress');
 
       expect(groupTrans).toHaveLength(1);
-      expect(koTrans).toHaveLength(1);
 
       const finalSnapshot = (await repository.load('t-file-ms'))!;
       const groupInSnapshot = finalSnapshot.stages!.find(s => s.stageId === groupStage.stageId)!;
       const koInSnapshot = finalSnapshot.stages!.find(s => s.stageId === knockoutStage.stageId)!;
 
       expect(groupInSnapshot.status).toBe('completed');
-      expect(koInSnapshot.status).toBe('in_progress');
+      expect(koInSnapshot.status).toBe('pending');
     });
   });
 

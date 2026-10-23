@@ -455,6 +455,8 @@ describe('Tournament Manager - Multi-Stage Integration (Phase 2C)', () => {
       // Run remaining matches
       const runAllRes = await manager.runAllMatches('draw-group-tourney');
       expect(runAllRes.success).toBe(true);
+      await manager.startNextStage('draw-group-tourney');
+      await manager.runAllMatches('draw-group-tourney');
 
       const completedTourney = (await manager.loadTournament('draw-group-tourney')).data!;
       expect(completedTourney.status).toBe('completed');
@@ -485,6 +487,7 @@ describe('Tournament Manager - Multi-Stage Integration (Phase 2C)', () => {
       }
 
       // Group stage is now complete, Knockout Round 1 is in_progress
+      await manager.startNextStage('draw-ko-tourney');
       const tourneyAfterGroup = (await manager.loadTournament('draw-ko-tourney')).data!;
       const koStage = tourneyAfterGroup.stages!.find(s => s.stageType === 'knockout')!;
       expect(koStage.status).toBe('in_progress');
@@ -558,11 +561,16 @@ describe('Tournament Manager - Multi-Stage Integration (Phase 2C)', () => {
       expect(resumeRes.success).toBe(true);
 
       // Finish remaining matches
-      const finishRun = await manager.runAllMatches('pause-tourney');
+      let finishRun = await manager.runAllMatches('pause-tourney');
       expect(finishRun.success).toBe(true);
-
-      const finalTourney = (await manager.loadTournament('pause-tourney')).data!;
-      expect(finalTourney.status).toBe('completed');
+      let loadedTourney = (await manager.loadTournament('pause-tourney')).data!;
+      while (loadedTourney.stages?.some(st => st.status === 'pending')) {
+        await manager.startNextStage('pause-tourney');
+        finishRun = await manager.runAllMatches('pause-tourney');
+        expect(finishRun.success).toBe(true);
+        loadedTourney = (await manager.loadTournament('pause-tourney')).data!;
+      }
+      expect(loadedTourney.status).toBe('completed');
     });
   });
 
@@ -609,11 +617,16 @@ describe('Tournament Manager - Multi-Stage Integration (Phase 2C)', () => {
       expect(resetPairing.matchId).toBeNull();
 
       // Now run all matches to completion
-      const finishRes = await freshManager.runAllMatches('crash-tourney');
+      let finishRes = await freshManager.runAllMatches('crash-tourney');
       expect(finishRes.success).toBe(true);
-
-      const finalState = (await freshManager.loadTournament('crash-tourney')).data!;
-      expect(finalState.status).toBe('completed');
+      let loadedCrash = (await freshManager.loadTournament('crash-tourney')).data!;
+      while (loadedCrash.stages?.some(st => st.status === 'pending')) {
+        await freshManager.startNextStage('crash-tourney');
+        finishRes = await freshManager.runAllMatches('crash-tourney');
+        expect(finishRes.success).toBe(true);
+        loadedCrash = (await freshManager.loadTournament('crash-tourney')).data!;
+      }
+      expect(loadedCrash.status).toBe('completed');
     });
 
     it('recovers a committed result when batch persistence crashes before saving tournament state', async () => {
@@ -686,10 +699,15 @@ describe('Tournament Manager - Multi-Stage Integration (Phase 2C)', () => {
       await manager.generateSchedule('mem-tourney');
       await manager.startTournament('mem-tourney');
 
-      const runRes = await manager.runAllMatches('mem-tourney');
+      let runRes = await manager.runAllMatches('mem-tourney');
       expect(runRes.success).toBe(true);
-
-      const loaded = await memoryRepo.load('mem-tourney');
+      let loaded = await memoryRepo.load('mem-tourney');
+      while (loaded?.stages?.some(st => st.status === 'pending')) {
+        await manager.startNextStage('mem-tourney');
+        runRes = await manager.runAllMatches('mem-tourney');
+        expect(runRes.success).toBe(true);
+        loaded = await memoryRepo.load('mem-tourney');
+      }
       expect(loaded?.status).toBe('completed');
       expect(loaded?.stages?.length).toBeGreaterThan(0);
     });
@@ -721,6 +739,7 @@ describe('Tournament Manager - Multi-Stage Integration (Phase 2C)', () => {
       }
 
       // Now Knockout Stage is in_progress
+      await manager.startNextStage('hard-draw-tourney');
       const koTourney = (await manager.loadTournament('hard-draw-tourney')).data!;
       const koStage = koTourney.stages!.find(s => s.stageType === 'knockout')!;
       const koPairing = koStage.rounds![0]!.pairings[0]!;

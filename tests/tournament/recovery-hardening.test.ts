@@ -137,6 +137,7 @@ describe('Phase 3G: Tournament Recovery Hardening', () => {
     expect(snapshotAtKnockoutStart).not.toBeNull();
 
     // 2. Run Knockout matches (4 QF, 2 SF, 1 Final)
+    await manager.startNextStage(tournamentId);
     const tourneyAtKO = (await repository.load(tournamentId))!;
     for (const p of tourneyAtKO.stages![1]!.rounds![0]!.pairings) {
       await manager.runPairingById(tournamentId, p.pairingId);
@@ -216,6 +217,12 @@ describe('Phase 3G: Tournament Recovery Hardening', () => {
 
     // Run all matches to completion
     await manager.runAllMatches(tournamentId);
+    let loadedT = (await repository.load(tournamentId))!;
+    while (loadedT.stages?.some(st => st.status === 'pending')) {
+      await manager.startNextStage(tournamentId);
+      await manager.runAllMatches(tournamentId);
+      loadedT = (await repository.load(tournamentId))!;
+    }
 
     const completedTourney = (await repository.load(tournamentId))!;
     expect(isTournamentComplete(completedTourney)).toBe(true);
@@ -421,6 +428,7 @@ describe('Phase 3G: Tournament Recovery Hardening', () => {
       await manager.runNextMatch(tournamentId);
     }
 
+    await manager.startNextStage(tournamentId);
     // Find the first Knockout pairing
     const tourney = (await repository.load(tournamentId))!;
     const knockoutStage = tourney.stages!.find(s => s.stageType === 'knockout')!;
@@ -596,6 +604,7 @@ describe('Phase 3G: Tournament Recovery Hardening', () => {
     }
 
     // 2. Run QF1, QF2, and SF1
+    await manager.startNextStage(tournamentId);
     const tourneyAtKO = (await repository.load(tournamentId))!;
     const koStage = tourneyAtKO.stages!.find(s => s.stageType === 'knockout')!;
     const qf1 = koStage.rounds![0]!.pairings[0]!;

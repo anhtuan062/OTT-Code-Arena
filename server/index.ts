@@ -1140,7 +1140,12 @@ function safeParticipationRequest(request: ParticipationRequest, includeCompetit
 function organizerParticipationRequest(request: ParticipationRequest) {
   const safe = safeParticipationRequest(request, true) as Record<string, unknown>;
   const bot = botRepository.findById(request.botId);
-  return bot ? { ...safe, botName: bot.name } : safe;
+  const competitor = userRepository.findById(request.competitorId);
+  return {
+    ...safe,
+    ...(bot ? { botName: bot.name } : {}),
+    ...(competitor ? { competitorUsername: competitor.username, username: competitor.username } : {}),
+  };
 }
 
 /**

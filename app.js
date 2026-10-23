@@ -9444,8 +9444,10 @@ function renderMultiStageWorkspace(options = {}) {
   const isPhase5Workspace = workspace.closest('.phase-layout-running') !== null;
   const isPhase7Workspace = workspace.closest('.phase-layout-completed-archive') !== null;
   const isCompetitorPublicWorkspace = state.user?.role === 'competitor';
-  if (!options.hideProgressSummary && !isCompetitorPublicWorkspace && !isPhase5Workspace && !isPhase7Workspace && getTournamentLifecyclePhase(state.currentTournament) !== 5) {
-    renderMultiStageProgressSummary(workspace, progress.progress || progress, activeStage, actualStage);
+  if (!isCompetitorPublicWorkspace) {
+    if (!options.hideProgressSummary && !isPhase5Workspace && !isPhase7Workspace && getTournamentLifecyclePhase(state.currentTournament) !== 5) {
+      renderMultiStageProgressSummary(workspace, progress.progress || progress, activeStage, actualStage);
+    }
   }
   renderMultiStageNavigation(workspace, stages, activeStage?.stageId);
   renderPendingTiebreakerPanel(workspace, activeStage);
