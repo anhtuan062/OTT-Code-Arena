@@ -198,6 +198,25 @@ describe('Multi-Stage Tournament API (Phase 3A)', () => {
       expect((await competitorAgent.post(`/api/tournaments/${tournamentId}/participation-requests`).set('x-csrf-token', competitorCsrf).send({})).status).not.toBe(201);
     });
 
+    it('exposes enabled rule modifiers in the public tournament detail projection', async () => {
+      const created = await organizerAgent.post('/api/tournaments')
+        .set('x-csrf-token', organizerCsrf)
+        .send({ name: 'Public Conversion rule' });
+      const tournamentId = created.body.tournamentId;
+      const patched = await organizerAgent.patch(`/api/tournaments/${tournamentId}`)
+        .set('x-csrf-token', organizerCsrf)
+        .send({
+          schedule: { visibleAt: new Date(Date.now() - 1_000).toISOString() },
+          rulesConfig: { rulesetId: 'ott-standard', rulesetVersion: 1, ruleModifiers: { conversion: true } },
+        });
+      expect(patched.status).toBe(200);
+
+      const detail = await competitorAgent.get(`/api/tournaments/${tournamentId}`);
+      expect(detail.status).toBe(200);
+      expect(detail.body.rulesConfig.ruleModifiers.conversion).toBe(true);
+      expect(detail.body.rulesConfig.rulesetId).toBe('ott-standard');
+    });
+
     it('keeps a draft without visibleAt private', async () => {
       const created = await organizerAgent.post('/api/tournaments')
         .set('x-csrf-token', organizerCsrf)

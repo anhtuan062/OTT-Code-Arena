@@ -1704,6 +1704,34 @@ function safeSpectatorTournament(tournament: Tournament, viewerId?: string, incl
     tournamentId: tournament.tournamentId,
     name: tournament.name,
     format: tournament.format,
+    rulesConfig: {
+      rulesetId: tournament.rulesConfig?.rulesetId ?? 'ott-standard',
+      rulesetVersion: tournament.rulesConfig?.rulesetVersion ?? 1,
+      ruleModifiers: {
+        conversion: Boolean(
+          tournament.rulesConfig?.ruleModifiers?.conversion
+          ?? tournament.rulesetSnapshot?.ruleModifiers?.conversion
+        ),
+      },
+    },
+    matchConfig: {
+      bestOf: tournament.matchConfig?.bestOf,
+      maxTurns: tournament.matchConfig?.maxTurns,
+      turnTimeoutMs: tournament.matchConfig?.turnTimeoutMs,
+    },
+    scoringConfig: {
+      winPoints: tournament.scoringConfig?.winPoints,
+      drawPoints: tournament.scoringConfig?.drawPoints,
+      lossPoints: tournament.scoringConfig?.lossPoints,
+      byePoints: tournament.scoringConfig?.byePoints,
+    },
+    botLimits: {
+      maxSourceBytes: tournament.botLimits?.maxSourceBytes,
+      memoryLimitMb: tournament.botLimits?.memoryLimitMb,
+      cpuLimit: tournament.botLimits?.cpuLimit,
+      maxProcesses: tournament.botLimits?.maxProcesses,
+      maxBotsPerCompetitor: tournament.botLimits?.maxBotsPerCompetitor,
+    },
     status: tournament.status,
     spectatorAccess: tournament.status === 'running',
     viewerParticipantIds,
