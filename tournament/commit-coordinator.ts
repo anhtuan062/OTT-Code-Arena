@@ -342,6 +342,7 @@ export function createCompliantReplay(
     winner: matchResult.winner,
     terminationReason: matchResult.terminationReason ?? 'goal_reached',
     series: (matchResult as any).series ?? replayObj.series,
+    ...(replayObj.ruleModifiers ? { ruleModifiers: replayObj.ruleModifiers } : {}),
     metadata: replayObj.metadata,
   };
 }

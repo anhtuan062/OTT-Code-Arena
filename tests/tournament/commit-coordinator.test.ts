@@ -30,6 +30,7 @@ import type { MatchReplay } from '@match-runner/types.js';
 import {
   TournamentCommitCoordinator,
   createTournamentCommitCoordinator,
+  createCompliantReplay,
   ConflictingCommitError,
   DurableClaimMismatchError,
   InvalidGameOrderError,
@@ -250,6 +251,29 @@ describe('TournamentCommitCoordinator - Real FileTournamentRepository Contract',
 
       expect(loadedResult?.winner).toBe('B');
       expect(loadedReplay?.matchId).toBe(matchRecord.matchId);
+    });
+
+    it('preserves Conversion rule modifiers through compliant replay persistence', async () => {
+      const tournament = createRoundRobinTournament('t-triad-conversion', 4);
+      await repository.save(tournament);
+
+      const pairing = tournament.rounds[0]!.pairings[0]!;
+      const matchRecord = createMockMatchRecord(pairing.pairingId, pairing.participantA, pairing.participantB, 'A');
+      const replay = { ...createMockReplay(matchRecord), ruleModifiers: { conversion: true } };
+
+      const compliantReplay = createCompliantReplay(matchRecord, replay);
+      expect(compliantReplay.ruleModifiers).toEqual({ conversion: true });
+
+      const res = await coordinator.commitMatchResult({
+        tournamentId: 't-triad-conversion',
+        pairingId: pairing.pairingId,
+        matchResult: matchRecord,
+        replay,
+      });
+
+      expect(res.success).toBe(true);
+      const loadedReplay = await repository.loadReplay('t-triad-conversion', matchRecord.matchId);
+      expect(loadedReplay?.ruleModifiers).toEqual({ conversion: true });
     });
   });
 
