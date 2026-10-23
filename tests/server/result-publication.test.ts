@@ -85,7 +85,11 @@ describe('published tournament result access', () => {
     expect(detail.body.resultsPublishedAt).toBeTruthy();
     expect(detail.body.participants[0]).toEqual({ participantId: 'P1', name: 'Player One' });
     expect(detail.body).not.toHaveProperty('metadata');
-    expect(detail.body).not.toHaveProperty('matchConfig');
+    expect(detail.body.matchConfig).toMatchObject({
+      bestOf: 1,
+      maxTurns: expect.any(Number),
+      turnTimeoutMs: expect.any(Number),
+    });
 
     expect((await competitor.get('/api/tournaments/public-published/standings')).status).toBe(200);
     const publicResult = await competitor.get('/api/tournaments/public-published/results/m-public-results');
