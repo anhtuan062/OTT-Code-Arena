@@ -1655,7 +1655,10 @@ function publicProgressProjection(tournament: Tournament) {
       completedStages: view.stages.filter(stage => stage.status === 'completed').length,
       pendingTiebreakers: allPairings.filter(pairing => pairing.status === 'pending_tiebreaker').length,
     },
-    stages: compactStageProgress(tournament, false),
+    // Competitor schedule/results are public once the tournament is visible.
+    // Keep the live group standings in the same projection so the leaderboard
+    // advances after each committed match instead of waiting for publication.
+    stages: compactStageProgress(tournament, true),
   };
 }
 
@@ -1664,7 +1667,7 @@ function publicStagesProjection(tournament: Tournament, compact: boolean) {
   const participantName = (participantId: string | null) => participantId
     ? tournament.participants.find(item => item.participantId === participantId)?.name ?? participantId
     : 'Miền đấu';
-  const compactStages = compact ? compactStageProgress(tournament, false) : null;
+  const compactStages = compact ? compactStageProgress(tournament, true) : null;
   const stages = compact
     ? compactStages
     : (safeSpectatorStages(tournament, participantName) ?? multiStageView.stages);

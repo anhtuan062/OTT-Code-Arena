@@ -175,7 +175,9 @@ describe('multi-stage API payload projections', () => {
 
     const progress = await competitorAgent.get('/api/tournaments/redaction-256/progress');
     expect(progress.status).toBe(200);
-    expect(progress.body.stages[1].groups[0].standings).toEqual([]);
+    expect(progress.body.stages[1].groups[0].standings).toEqual([
+      expect.objectContaining({ participantId: 'p-1', matchesPlayed: 1, wins: 1, points: 3 }),
+    ]);
   });
 
   it('keeps legacy rounds by default and supports an explicit compact view', async () => {

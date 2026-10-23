@@ -349,8 +349,9 @@ export interface SeriesSchedulerRuntimeConfig {
 }
 
 /**
- * Resolve the production opt-in from environment configuration.
- * A value of 2 is rejected unless both scheduler opt-ins are explicit.
+ * Resolve the production scheduler configuration.
+ * New server instances use two active pairings by default. Operators can
+ * explicitly reduce capacity to one or disable the scheduler through env.
  * Configuration is read when the manager is created; changing environment
  * variables does not interrupt an already-running scheduler.
  */
@@ -358,7 +359,8 @@ export function resolveSeriesSchedulerRuntimeConfig(
   env: NodeJS.ProcessEnv = process.env,
 ): SeriesSchedulerRuntimeConfig {
   const enabledValue = env.OTT_ENABLE_SERIES_SCHEDULER?.trim().toLowerCase();
-  const concurrencyValue = env.OTT_SERIES_MATCH_CONCURRENCY?.trim() || '1';
+  const enabled = enabledValue === undefined ? true : enabledValue === 'true';
+  const concurrencyValue = env.OTT_SERIES_MATCH_CONCURRENCY?.trim() || (enabled ? '2' : '1');
   const concurrency2Value = env.OTT_ENABLE_SERIES_CONCURRENCY_2?.trim().toLowerCase();
   if (enabledValue && enabledValue !== 'true' && enabledValue !== 'false') {
     throw new Error('OTT_ENABLE_SERIES_SCHEDULER must be true or false');
@@ -369,9 +371,10 @@ export function resolveSeriesSchedulerRuntimeConfig(
   if (concurrencyValue !== '1' && concurrencyValue !== '2') {
     throw new Error('OTT_SERIES_MATCH_CONCURRENCY must be 1 or 2');
   }
-  const enabled = enabledValue === 'true';
   const concurrency = Number(concurrencyValue) as 1 | 2;
-  const concurrency2Enabled = concurrency2Value === 'true';
+  const concurrency2Enabled = concurrency2Value === undefined
+    ? enabled && concurrency === 2
+    : concurrency2Value === 'true';
   if (concurrency === 2 && (!enabled || !concurrency2Enabled)) {
     throw new Error(
       'Concurrency 2 requires OTT_ENABLE_SERIES_SCHEDULER=true and ' +
@@ -1115,7 +1118,7 @@ export class TournamentManager {
       const requests = tournament.participationRequests ?? (tournament.participationRequests = []);
       const runtimeConfig = executionConfiguration(tournament);
       const sourceExecution = request.botSnapshot?.execution?.kind === 'source-revision' ? request.botSnapshot.execution : null;
-      const requestedName = request.participantName.trim();
+      const requestedName = request.participantName?.trim() || 'Bot';
       const normalizedName = requestedName.toLocaleLowerCase();
       const activeRequests = requests.filter(item => item.status === 'pending' || item.status === 'approved');
       const ownName = tournament.participants.find(participant => participant.bot?.execution?.kind === 'source-revision'

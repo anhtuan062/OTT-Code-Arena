@@ -1037,10 +1037,10 @@ export function commitMatchResultAndResolveSlots(
           stage.advancement.isComplete = true;
           stage.advancement.advancingParticipantIds = stage.regions.flatMap(r => r.advancingParticipantIds);
 
-          // Resolve Group Stage slots, but keep the stage pending until the
-          // organizer explicitly starts it.
+          // Resolve the next stage, but keep it pending until organizer start.
           const groupStage = tournament.stages!.find(s => s.stageType === 'group_stage');
           if (groupStage) {
+            groupStage.status = 'pending';
             const groupPairings = (groupStage.groups || []).flatMap(g => g.rounds.flatMap(r => r.pairings));
 
             for (const reg of stage.regions) {
@@ -1081,6 +1081,7 @@ export function commitMatchResultAndResolveSlots(
             }
 
             for (const g of groupStage.groups || []) {
+              g.status = 'pending';
               const groupBots = new Set<string>();
               for (const r of g.rounds) {
                 for (const p of r.pairings) {
@@ -1117,8 +1118,14 @@ export function commitMatchResultAndResolveSlots(
           }
           stage.advancement.advancingParticipantIds = advancing;
 
-          // Keep Group Stage pending until the organizer explicitly starts it.
+          // Resolve the next stage, but keep it pending until organizer start.
           const groupStage = tournament.stages!.find(s => s.stageType === 'group_stage');
+          if (groupStage) {
+            groupStage.status = 'pending';
+            for (const g of groupStage.groups || []) {
+              g.status = 'pending';
+            }
+          }
         }
       }
     }
@@ -1163,6 +1170,7 @@ export function commitMatchResultAndResolveSlots(
           // Resolve Knockout Round 1 slots for each group
           const knockoutStage = tournament.stages!.find(s => s.stageType === 'knockout');
           if (knockoutStage) {
+            knockoutStage.status = 'pending';
             const knockoutPairings = (knockoutStage.rounds || []).flatMap(r => r.pairings);
 
             for (const g of stage.groups!) {

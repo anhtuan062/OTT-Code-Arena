@@ -194,11 +194,11 @@ describe('TournamentManager BO1 scheduler integration', () => {
     return new TournamentManager({ repository, executor, enableBo1MatchScheduler: true });
   }
 
-  it('defaults to scheduler concurrency 1 and validates the production concurrency-2 opt-in', () => {
+  it('defaults to scheduler concurrency 2 and allows an explicit serial override', () => {
     expect(resolveSeriesSchedulerRuntimeConfig({})).toEqual({
-      enabled: false,
-      concurrency: 1,
-      concurrency2Enabled: false,
+      enabled: true,
+      concurrency: 2,
+      concurrency2Enabled: true,
     });
     expect(resolveSeriesSchedulerRuntimeConfig({
       OTT_ENABLE_SERIES_SCHEDULER: 'true',
@@ -209,10 +209,8 @@ describe('TournamentManager BO1 scheduler integration', () => {
       OTT_SERIES_MATCH_CONCURRENCY: '2',
       OTT_ENABLE_SERIES_CONCURRENCY_2: 'true',
     })).toEqual({ enabled: true, concurrency: 2, concurrency2Enabled: true });
-    expect(() => resolveSeriesSchedulerRuntimeConfig({ OTT_SERIES_MATCH_CONCURRENCY: '2' }))
-      .toThrow(/requires OTT_ENABLE_SERIES_SCHEDULER/);
     expect(() => resolveSeriesSchedulerRuntimeConfig({
-      OTT_ENABLE_SERIES_SCHEDULER: 'true', OTT_SERIES_MATCH_CONCURRENCY: '2',
+      OTT_ENABLE_SERIES_SCHEDULER: 'true', OTT_SERIES_MATCH_CONCURRENCY: '2', OTT_ENABLE_SERIES_CONCURRENCY_2: 'false',
     })).toThrow(/OTT_ENABLE_SERIES_CONCURRENCY_2/);
     expect(() => resolveSeriesSchedulerRuntimeConfig({ OTT_SERIES_MATCH_CONCURRENCY: '3' }))
       .toThrow(/must be 1 or 2/);
@@ -488,9 +486,16 @@ describe('TournamentManager BO1 scheduler integration', () => {
       qaMaxActiveMatches: 2,
     });
 
-    const run = await manager.runAllMatches(id);
-    expect(run.success).toBe(true);
-    const saved = await repository.load(id);
+    const firstRun = await manager.runAllMatches(id);
+    expect(firstRun.success).toBe(true);
+    let saved = await repository.load(id);
+    expect(saved?.status).toBe('running');
+    expect(saved?.stages?.[0]?.status).toBe('completed');
+    while (saved?.stages?.some(stage => stage.status === 'pending')) {
+      expect((await manager.startNextStage(id)).success).toBe(true);
+      expect((await manager.runAllMatches(id)).success).toBe(true);
+      saved = await repository.load(id);
+    }
     expect(saved?.status).toBe('completed');
     expect(saved?.stages?.every(stage => stage.status === 'completed')).toBe(true);
     const groupPairings = saved!.stages!.find(stage => stage.stageType === 'group_stage')!.groups!
@@ -524,10 +529,17 @@ describe('TournamentManager BO1 scheduler integration', () => {
       onBo1SchedulerCheckpoint: checkpoint => checkpoints.push(checkpoint.phase),
     });
 
-    const run = await manager.runAllMatches(id);
-    expect(run.success).toBe(true);
+    const firstRun = await manager.runAllMatches(id);
+    expect(firstRun.success).toBe(true);
     expect(checkpoints).toContain('dispatch');
-    const saved = await repository.load(id);
+    let saved = await repository.load(id);
+    expect(saved?.status).toBe('running');
+    expect(saved?.stages?.[0]?.status).toBe('completed');
+    while (saved?.stages?.some(stage => stage.status === 'pending')) {
+      expect((await manager.startNextStage(id)).success).toBe(true);
+      expect((await manager.runAllMatches(id)).success).toBe(true);
+      saved = await repository.load(id);
+    }
     expect(saved?.status).toBe('completed');
     expect(saved?.stages?.every(stage => stage.status === 'completed')).toBe(true);
     const groupPairings = saved!.stages!.find(stage => stage.stageType === 'group_stage')!.groups!
