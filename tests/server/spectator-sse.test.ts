@@ -45,7 +45,7 @@ describe('Spectator SSE stream routing and concurrency', () => {
   const match2Id = 'sse-match-2';
 
   async function writeFixture() {
-    const tournament = createTournament(tournamentId, 'SSE tournament fixture');
+    const tournament = createTournament(tournamentId, 'SSE tournament fixture', 'single_round_robin');
     tournament.status = 'running';
     tournament.startedAt = new Date().toISOString();
     tournament.participants = [

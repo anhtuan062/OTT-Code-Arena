@@ -50,7 +50,7 @@ describe('Tournament Manager', () => {
   });
 
   const createTestTournament = async (manager: TournamentManager, id: string, name: string): Promise<Tournament> => {
-    const result = await manager.createTournament(id, name);
+    const result = await manager.createTournament(id, name, 'single_round_robin');
     expect(result.success).toBe(true);
     return result.data!;
   };
@@ -107,7 +107,7 @@ describe('Tournament Manager', () => {
         executor: mockExecutor,
       });
 
-      const result = await manager.createTournament('tourney-1', 'Test Tournament');
+      const result = await manager.createTournament('tourney-1', 'Test Tournament', 'single_round_robin');
       expect(result.success).toBe(true);
       expect(result.data?.tournamentId).toBe('tourney-1');
       expect(result.data?.status).toBe('draft');
@@ -119,8 +119,8 @@ describe('Tournament Manager', () => {
         executor: mockExecutor,
       });
 
-      await manager.createTournament('tourney-1', 'Test Tournament');
-      const result = await manager.createTournament('tourney-1', 'Test Tournament 2');
+      await manager.createTournament('tourney-1', 'Test Tournament', 'single_round_robin');
+      const result = await manager.createTournament('tourney-1', 'Test Tournament 2', 'single_round_robin');
       expect(result.success).toBe(false);
       expect(result.error).toContain('already exists');
     });

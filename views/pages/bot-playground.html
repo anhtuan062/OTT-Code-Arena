@@ -139,15 +139,32 @@
           </label>
         </div>
 
+        <!-- Khối hướng dẫn khi người chơi chưa có bot -->
+        <div id="playground-no-bots-banner" class="playground-no-bots-banner" hidden>
+          <p class="playground-no-bots-text">Chưa có Bot kiểm thử? Tạo Bot mới hoặc chọn nhanh mẫu Strategy SDK:</p>
+          <div class="playground-no-bots-actions">
+            <button type="button" id="playground-create-bot-btn" class="primary-btn btn-sm">
+              <svg class="ui-icon" aria-hidden="true"><use href="#icon-plus"></use></svg>
+              <span>Tạo Bot mới</span>
+            </button>
+            <button type="button" id="playground-load-sample-cpp" class="secondary-btn btn-sm">
+              <span>Mẫu C++</span>
+            </button>
+            <button type="button" id="playground-load-sample-py" class="secondary-btn btn-sm">
+              <span>Mẫu Python</span>
+            </button>
+          </div>
+        </div>
+
         <div class="playground-editor-wrap">
           <pre id="playground-code-highlight" class="playground-code-highlight" aria-hidden="true"></pre>
           <label for="playground-code" class="visually-hidden">Mã nguồn kiểm thử</label>
-          <textarea id="playground-code" class="source-editor playground-code-area" spellcheck="false" rows="11" placeholder="Vui lòng chọn Bot từ danh sách ở trên để hiển thị mã nguồn..." readonly></textarea>
+          <textarea id="playground-code" class="source-editor playground-code-area" spellcheck="false" rows="11" placeholder="Vui lòng chọn Bot từ danh sách ở trên hoặc nạp Bot mẫu để kiểm thử..." readonly></textarea>
         </div>
 
         <div class="playground-editor-footer">
           <span id="playground-code-stats" class="field-help">0 ký tự · 0 dòng</span>
-          <span class="playground-readonly-note">Chỉ hiển thị mã nguồn Bot được chọn. Để sửa code, hãy vào Không gian Bot.</span>
+          <span id="playground-code-note" class="playground-readonly-note">Chỉ hiển thị mã nguồn Bot được chọn. Để sửa code, hãy vào Không gian Bot.</span>
         </div>
       </section>
 

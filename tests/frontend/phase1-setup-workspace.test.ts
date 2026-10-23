@@ -29,13 +29,13 @@ describe('Phase 1 Tournament Setup Workspace', () => {
     expect(tournaments).toContain('phase-setup-workspace-grid');
     expect(tournaments).toContain('phase-setup-workspace');
 
-    // 5 section tabs
+    // 4 configuration tabs
     expect(tournaments).toContain('phase-config-tabs');
     expect(tournaments).toContain("id: 'tab-config-info'");
     expect(tournaments).toContain("id: 'tab-config-rules'");
-    expect(tournaments).toContain("id: 'tab-config-policy'");
-    expect(tournaments).toContain("id: 'tab-config-format'");
-    expect(tournaments).toContain("id: 'tab-config-results'");
+    expect(tournaments).toContain("id: 'tab-config-time'");
+    expect(tournaments).toContain("id: 'tab-config-bots'");
+    expect(tournaments).not.toContain("id: 'tab-config-results'");
 
     // Bundled app includes the workspace implementation
     expect(app).toContain('phase-setup-workspace-grid');
@@ -58,6 +58,19 @@ describe('Phase 1 Tournament Setup Workspace', () => {
     expect(tournaments).toContain("id: 'edit-t-contact'");
     expect(tournaments).toContain("id: 'edit-t-rules'");
     expect(tournaments).toContain("id: 'edit-t-policy'");
+    expect(tournaments).toContain("phase1Date('edit-t-visibleAt'");
+    expect(tournaments).toContain("phase1Date('edit-t-registrationOpensAt'");
+    expect(tournaments).toContain("phase1Date('edit-t-registrationClosesAt'");
+    expect(tournaments).toContain("phase1Select('edit-t-ruleset'");
+    expect(tournaments).toContain("'ott-standard', [{ value: 'ott-standard'");
+    expect(tournaments).not.toContain("phase1Select('edit-t-best-of'");
+    expect(tournaments).toContain("'Nhiều giai đoạn'");
+    expect(tournaments).not.toContain("phase1Select('edit-t-format'");
+    expect(tournaments).toContain("text: 'Vòng bảng: BO2'");
+    expect(tournaments).toContain("text: 'Vòng loại: BO3'");
+    expect(tournaments).toContain("text: 'Conversion'");
+    expect(tournaments).toContain("phase1Number('edit-t-maxTurns'");
+    expect(tournaments).toContain("phase1Number('edit-t-maxSourceBytes'");
 
     // Input validation
     expect(tournaments).toContain('Tên giải đấu phải từ 1 đến 100 ký tự.');
@@ -74,6 +87,9 @@ describe('Phase 1 Tournament Setup Workspace', () => {
     expect(tournaments).toContain('contactInfo: String(draft.contactInfo || \'\').trim()');
     expect(tournaments).toContain('rulesNotes: String(draft.rulesNotes || \'\').trim()');
     expect(tournaments).toContain('policyNotes: String(draft.policyNotes || \'\').trim()');
+    expect(tournaments).toContain('schedule: current.schedule');
+    expect(tournaments).toContain('rulesConfig: current.rulesConfig');
+    expect(tournaments).toContain('botLimits: current.botLimits');
   });
 
   it('presents structured OTT game rules in 6 distinct articles with code-backed values', async () => {
@@ -143,6 +159,23 @@ describe('Phase 1 Tournament Setup Workspace', () => {
     expect(tournaments).not.toContain('Sẵn sàng mở đăng ký');
   });
 
+  it('uses the Phase 2 API contract for schedule, rules, and Bot limits', async () => {
+    const tournaments = await source('js/tournaments.js');
+    expect(tournaments).toContain('schedule: current.schedule');
+    expect(tournaments).toContain('rulesConfig: current.rulesConfig');
+    expect(tournaments).toContain('botLimits: current.botLimits');
+    expect(tournaments).toContain('registrationClosesAt');
+    expect(tournaments).toContain('phase-runtime-note');
+    expect(tournaments).toContain('Match Runner');
+  });
+
+  it('renders server-authoritative lifecycle countdowns and preserves pending review semantics', async () => {
+    const tournaments = await source('js/tournaments.js');
+    expect(tournaments).toContain('updateTournamentScheduleNotice');
+    expect(tournaments).toContain('registrationClosedReason === \'scheduled\'');
+    expect(tournaments).toContain('Backend sẽ không tạo lịch khi còn pending');
+  });
+
   it('deduplicates Phase 3 roster rows by botId before rendering', async () => {
     const tournaments = await source('js/tournaments.js');
 
@@ -162,6 +195,9 @@ describe('Phase 1 Tournament Setup Workspace', () => {
     expect(css).toContain('.phase-rule-article');
     expect(css).toContain('.rule-badge');
     expect(css).toContain('.phase-rule-callout');
+    expect(css).toContain('.phase-settings-grid');
+    expect(css).toContain('.phase-settings-list');
+    expect(css).toContain('.phase-runtime-note');
     expect(css).toContain('.phase-open-reg-cta');
 
     // Light green palette

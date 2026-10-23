@@ -31,7 +31,7 @@ function setAuthenticated(user, csrfToken) {
   let targetView = (AUTHENTICATED_VIEWS.has(hashView) && document.getElementById(hashView))
     ? hashView
     : (AUTHENTICATED_VIEWS.has(savedView) && document.getElementById(savedView) ? savedView : 'dashboard');
-  if (!competitor && (targetView === 'bots' || targetView === 'bot-workspace')) targetView = 'dashboard';
+  if (!competitor && (targetView === 'bots' || targetView === 'bot-workspace' || targetView === 'player-guide')) targetView = 'dashboard';
   navigate(targetView);
   if (targetView === 'bot-workspace' && typeof restoreBotWorkspace === 'function') void restoreBotWorkspace();
 }

@@ -25,8 +25,16 @@ function bindEvents() {
   });
   document.querySelectorAll('.nav-link').forEach(link => on(link, 'click', () => {
     if (link.dataset.target === 'tournaments' && link.dataset.scope) state.tournamentScope = link.dataset.scope;
-    navigate(link.dataset.target);
+    navigate(link.dataset.target, { fromNav: true });
   }));
+  on(document, 'click', event => {
+    const guideAction = event.target?.closest?.('[data-guide-target]');
+    if (!guideAction) return;
+    const target = guideAction.dataset.guideTarget;
+    if (!target) return;
+    event.preventDefault();
+    navigate(target);
+  }, { feature: 'player guide actions' });
   on(document, 'click', event => {
     const breadcrumbLink = event.target?.closest?.('.topbar-breadcrumb-link');
     if (!breadcrumbLink) return;
@@ -279,7 +287,7 @@ document.querySelectorAll('.bottom-nav [data-target]').forEach(button => bindEve
   state.tournamentScope = button.dataset.target === 'my-tournaments'
     ? 'mine'
     : button.dataset.scope || (state.user?.role === 'organizer' ? 'managed' : 'discoverable');
-  navigate(button.dataset.target === 'my-tournaments' ? 'tournaments' : button.dataset.target);
+  navigate(button.dataset.target === 'my-tournaments' ? 'tournaments' : button.dataset.target, { fromNav: true });
 }));
 if (window.ResizeObserver) {
   const editor = $('#bot-source-editor');
@@ -299,3 +307,20 @@ setInterval(() => {
     void refreshTournamentDetail().finally(() => { state.detailRefreshInFlight = false; });
   }
 }, 5000);
+
+setInterval(() => {
+  if (state.activeView !== 'tournament-detail' || !state.currentTournament) return;
+  updateTournamentScheduleNotice(state.currentTournament);
+  const schedule = state.currentTournament.schedule || {};
+  const now = Date.now();
+  const nextLifecycleTimestamp = state.currentTournament.status === 'draft'
+    ? Date.parse(schedule.registrationOpensAt || '')
+    : state.currentTournament.status === 'registration_open'
+      ? Date.parse(schedule.registrationClosesAt || '')
+      : NaN;
+  const due = Number.isFinite(nextLifecycleTimestamp) && nextLifecycleTimestamp <= now;
+  if (due && !state.detailRefreshInFlight) {
+    state.detailRefreshInFlight = true;
+    void refreshTournamentDetail().finally(() => { state.detailRefreshInFlight = false; });
+  }
+}, 1000);

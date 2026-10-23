@@ -86,7 +86,7 @@ describe('Multi-Stage Tournament API (Phase 3A)', () => {
       expect(res.body.error).toContain('disabled by feature flag');
     });
 
-    it('creates legacy single_round_robin even when feature flag is disabled', async () => {
+    it('does not create a legacy format through the new tournament API', async () => {
       closeServer();
       process.env.ENABLE_MULTI_STAGE = 'false';
       await initServer(testDir);
@@ -98,8 +98,8 @@ describe('Multi-Stage Tournament API (Phase 3A)', () => {
           name: 'Legacy Tournament',
         });
 
-      expect(res.status).toBe(201);
-      expect(res.body.format).toBe('single_round_robin');
+      expect(res.status).toBe(400);
+      expect(res.body.error).toContain('disabled by feature flag');
     });
 
     it('creates multi_stage tournament when feature flag is enabled', async () => {
@@ -113,11 +113,92 @@ describe('Multi-Stage Tournament API (Phase 3A)', () => {
 
       expect(res.status).toBe(201);
       expect(res.body.format).toBe('multi_stage');
+      expect(res.body.matchConfig.bestOf).toBe(3);
+      expect(res.body.configurationVersion).toBe(2);
       expect(res.body.metadata.ownerId).toBe(organizerId);
+
+      const legacyAttempt = await organizerAgent
+        .post('/api/tournaments')
+        .set('x-csrf-token', organizerCsrf)
+        .send({ name: 'Legacy API Attempt', format: 'single_round_robin', matchConfig: { bestOf: 1 } });
+      expect(legacyAttempt.status).toBe(400);
+    });
+  });
+
+  describe('Phase 2 Settings API', () => {
+    it('supports partial settings updates and rejects non-owners', async () => {
+      const created = await organizerAgent.post('/api/tournaments').set('x-csrf-token', organizerCsrf).send({ name: 'Settings API', format: 'multi_stage' });
+      const id = created.body.tournamentId;
+      const update = await organizerAgent.patch(`/api/tournaments/${id}`).set('x-csrf-token', organizerCsrf).send({
+        description: 'Updated intro',
+        schedule: { visibleAt: '2026-11-01T00:00:00.000Z', registrationClosesAt: '2026-12-01T00:00:00.000Z' },
+        matchConfig: { maxTurns: 300 },
+      });
+      expect(update.status).toBe(200);
+      expect(update.body.description).toBe('Updated intro');
+      expect(update.body.matchConfig.maxTurns).toBe(300);
+      expect(update.body.matchConfig.turnTimeoutMs).toBe(2000);
+      expect(update.body.schedule.visibleAt).toBe('2026-11-01T00:00:00.000Z');
+
+      const fixedFormat = await organizerAgent.patch(`/api/tournaments/${id}`).set('x-csrf-token', organizerCsrf).send({ format: 'single_round_robin' });
+      expect([400, 409]).toContain(fixedFormat.status);
+      const fixedSeries = await organizerAgent.patch(`/api/tournaments/${id}`).set('x-csrf-token', organizerCsrf).send({ matchConfig: { bestOf: 1 } });
+      expect([400, 409]).toContain(fixedSeries.status);
+
+      const forbidden = await otherOrganizerAgent.patch(`/api/tournaments/${id}`).set('x-csrf-token', otherOrganizerCsrf).send({ description: 'Nope' });
+      expect(forbidden.status).toBe(404);
+    });
+
+    it('validates unsupported rules and locks technical settings after registration opens', async () => {
+      const created = await organizerAgent.post('/api/tournaments').set('x-csrf-token', organizerCsrf).send({ name: 'Locked Settings' });
+      const id = created.body.tournamentId;
+      const invalid = await organizerAgent.patch(`/api/tournaments/${id}`).set('x-csrf-token', organizerCsrf).send({ rulesConfig: { rulesetId: 'future-rule' } });
+      expect(invalid.status).toBe(400);
+
+      const opened = await organizerAgent.post(`/api/tournaments/${id}/action`).set('x-csrf-token', organizerCsrf).send({ action: 'open_registration' });
+      expect(opened.status).toBe(200);
+      expect(opened.body.rulesetSnapshot.snapshotHash).toMatch(/^[a-f0-9]{64}$/);
+
+      const locked = await organizerAgent.patch(`/api/tournaments/${id}`).set('x-csrf-token', organizerCsrf).send({ format: 'multi_stage', matchConfig: { bestOf: 2 } });
+      expect(locked.status).toBe(409);
+      const extension = await organizerAgent.patch(`/api/tournaments/${id}`).set('x-csrf-token', organizerCsrf).send({ schedule: { registrationClosesAt: '2027-01-01T00:00:00.000Z' } });
+      expect(extension.status).toBe(200);
     });
   });
 
   describe('Read APIs & Frontend Compatibility', () => {
+    it('hides a tournament before visibleAt but keeps owner management available', async () => {
+      const created = await organizerAgent.post('/api/tournaments').set('x-csrf-token', organizerCsrf).send({ name: 'Scheduled Visibility' });
+      const tournamentId = created.body.tournamentId;
+      const future = new Date(Date.now() + 60_000).toISOString();
+      const patched = await organizerAgent.patch(`/api/tournaments/${tournamentId}`).set('x-csrf-token', organizerCsrf).send({
+        schedule: { visibleAt: future, registrationOpensAt: future },
+      });
+      expect(patched.status).toBe(200);
+      expect((await competitorAgent.get('/api/tournaments/discoverable')).body.some((item: { tournamentId: string }) => item.tournamentId === tournamentId)).toBe(false);
+      expect((await competitorAgent.get(`/api/tournaments/${tournamentId}`)).status).toBe(403);
+      expect((await organizerAgent.get(`/api/tournaments/${tournamentId}`)).status).toBe(200);
+    });
+
+    it('catches up scheduled open and close on API reads without a browser refresh', async () => {
+      const created = await organizerAgent.post('/api/tournaments').set('x-csrf-token', organizerCsrf).send({ name: 'Scheduled Transition' });
+      const tournamentId = created.body.tournamentId;
+      const now = Date.now();
+      const patched = await organizerAgent.patch(`/api/tournaments/${tournamentId}`).set('x-csrf-token', organizerCsrf).send({
+        schedule: {
+          visibleAt: new Date(now - 2_000).toISOString(),
+          registrationOpensAt: new Date(now - 1_000).toISOString(),
+          registrationClosesAt: new Date(now - 500).toISOString(),
+        },
+      });
+      expect(patched.status).toBe(200);
+      const detail = await organizerAgent.get(`/api/tournaments/${tournamentId}`);
+      expect(detail.status).toBe(200);
+      expect(detail.body.status).toBe('registration_closed');
+      expect(detail.body.registrationClosedReason).toBe('scheduled');
+      expect(detail.body.rulesetSnapshot.snapshotHash).toMatch(/^[a-f0-9]{64}$/);
+    });
+
     it('returns 404 for stages of non-existent tournament', async () => {
       const res = await organizerAgent.get('/api/tournaments/non-existent-id/stages');
       expect(res.status).toBe(404);

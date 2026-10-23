@@ -29,6 +29,9 @@ import {
   TournamentMultiStageView,
   DEFAULT_TOURNAMENT_MATCH_CONFIG,
   DEFAULT_SCORING_CONFIG,
+  DEFAULT_TOURNAMENT_SCHEDULE,
+  DEFAULT_TOURNAMENT_RULES,
+  DEFAULT_TOURNAMENT_BOT_LIMITS,
 } from './types.js';
 import {
   calculateTournamentFormat,
@@ -834,6 +837,10 @@ export function createMultiStageTournament(params: CreateMultiStageTournamentPar
     participants,
     matchConfig,
     scoringConfig,
+    schedule: { ...DEFAULT_TOURNAMENT_SCHEDULE },
+    rulesConfig: { ...DEFAULT_TOURNAMENT_RULES },
+    botLimits: { ...DEFAULT_TOURNAMENT_BOT_LIMITS },
+    rulesetSnapshot: null,
     // rounds is empty on multi-stage: stages is the single source of truth!
     rounds: [],
     standings: [],

@@ -196,6 +196,33 @@ function securityArgs(config: RevisionDockerExecutorConfig, executionId: string,
   ];
 }
 
+function memoryLimitBytes(value: string | undefined): number | null {
+  if (!value) return null;
+  const match = /^([0-9]+(?:\.[0-9]+)?)([kmgt]?i?b?)?$/i.exec(value.trim());
+  if (!match) return null;
+  const unit = (match[2] ?? '').toLowerCase();
+  const factor = unit.startsWith('g') ? 1024 ** 3 : unit.startsWith('m') ? 1024 ** 2 : unit.startsWith('k') ? 1024 : 1;
+  return Number(match[1]) * factor;
+}
+
+export function configWithResourceLimits(config: RevisionDockerExecutorConfig, limits?: ResourceLimits): RevisionDockerExecutorConfig {
+  if (!limits) return config;
+  const configuredMemory = memoryLimitBytes(config.memoryLimit);
+  const memoryBytes = limits.maxMemoryBytes && limits.maxMemoryBytes > 0
+    ? (configuredMemory ? Math.min(configuredMemory, limits.maxMemoryBytes) : limits.maxMemoryBytes)
+    : configuredMemory;
+  const configuredCpu = config.cpuLimit ?? 1;
+  const requestedCpu = limits.maxCpuPercent && limits.maxCpuPercent > 0 ? limits.maxCpuPercent / 100 : configuredCpu;
+  const configuredProcesses = config.pidsLimit ?? 64;
+  const requestedProcesses = limits.maxProcesses && limits.maxProcesses > 0 ? limits.maxProcesses : configuredProcesses;
+  return {
+    ...config,
+    ...(memoryBytes ? { memoryLimit: `${Math.max(1, Math.floor(memoryBytes))}b` } : {}),
+    cpuLimit: Math.max(0.01, Math.min(configuredCpu, requestedCpu)),
+    pidsLimit: Math.max(1, Math.min(configuredProcesses, Math.floor(requestedProcesses))),
+  };
+}
+
 export function buildCppCompileDockerArgs(
   config: RevisionDockerExecutorConfig,
   executionId: string,
@@ -726,8 +753,12 @@ export class RevisionDockerExecutor {
       return this.error('SECURITY_VIOLATION', 'Pinned source digest is malformed', null, '', '', false, 'source_integrity');
     }
     if (context.signal?.aborted) throw new ExecutionCancelledError();
+    const executionConfig = configWithResourceLimits(this.config, context.resourceLimits);
     if (createHash('sha256').update(revision.source).digest('hex') !== revision.execution.sourceDigest) {
       return this.error('SECURITY_VIOLATION', 'Source digest does not match the pinned revision', null, '', '', false, 'source_integrity');
+    }
+    if (context.resourceLimits?.maxFileSizeBytes && revision.source.byteLength > context.resourceLimits.maxFileSizeBytes) {
+      return this.error('RESOURCE_LIMIT_EXCEEDED', 'Source revision exceeds the tournament Bot limit', null, '', '', false, 'source_integrity');
     }
     const readinessStarted = performance.now();
     const available = await this.isAvailable(revision.execution.runtimeId);
@@ -897,10 +928,10 @@ export class RevisionDockerExecutor {
         const compile = await this.runContainer(
           `${context.executionId}-compile`,
           useVolume && volumeWorkspace
-            ? buildStrategyCppVolumeCompileDockerArgs(this.config, context.executionId, volumeWorkspace.sourceVolume, volumeWorkspace.sdkVolume, volumeWorkspace.outputVolume, volumeWorkspace.marker, this.ownership(context.revisionScopeId ?? context.executionId, 'compile'))
+            ? buildStrategyCppVolumeCompileDockerArgs(executionConfig, context.executionId, volumeWorkspace.sourceVolume, volumeWorkspace.sdkVolume, volumeWorkspace.outputVolume, volumeWorkspace.marker, this.ownership(context.revisionScopeId ?? context.executionId, 'compile'))
             : strategy
-            ? buildStrategyCppCompileDockerArgs(this.config, context.executionId, sourceDir, sdkDir, outputDir, this.ownership(context.revisionScopeId ?? context.executionId, 'compile'))
-            : buildCppCompileDockerArgs(this.config, context.executionId, sourceDir, outputDir, this.ownership(context.revisionScopeId ?? context.executionId, 'compile')),
+            ? buildStrategyCppCompileDockerArgs(executionConfig, context.executionId, sourceDir, sdkDir, outputDir, this.ownership(context.revisionScopeId ?? context.executionId, 'compile'))
+            : buildCppCompileDockerArgs(executionConfig, context.executionId, sourceDir, outputDir, this.ownership(context.revisionScopeId ?? context.executionId, 'compile')),
           undefined,
           this.config.defaultCompileTimeoutMs ?? 30_000,
           context.signal
@@ -984,13 +1015,14 @@ export class RevisionDockerExecutor {
     artifact: PreparedRevisionArtifact,
     timings: RevisionExecutionTimings,
   ): Promise<BotExecutionResult> {
+    const executionConfig = configWithResourceLimits(this.config, context.resourceLimits);
     const args = revision.execution.runtimeId === 'cpp'
       ? artifact.volumeWorkspace
-        ? buildCppVolumeRuntimeDockerArgs(this.config, context.executionId, artifact.volumeWorkspace.outputVolume, artifact.volumeWorkspace.marker, this.ownership(artifact.scopeId || context.executionId, 'warm'))
-        : buildCppRuntimeDockerArgs(this.config, context.executionId, artifact.outputDir, this.ownership(artifact.scopeId || context.executionId, artifact.key ? 'warm' : 'runtime'))
+        ? buildCppVolumeRuntimeDockerArgs(executionConfig, context.executionId, artifact.volumeWorkspace.outputVolume, artifact.volumeWorkspace.marker, this.ownership(artifact.scopeId || context.executionId, 'warm'))
+        : buildCppRuntimeDockerArgs(executionConfig, context.executionId, artifact.outputDir, this.ownership(artifact.scopeId || context.executionId, artifact.key ? 'warm' : 'runtime'))
       : artifact.volumeWorkspace
-        ? buildStrategyPythonVolumeRuntimeDockerArgs(this.config, context.executionId, artifact.volumeWorkspace.sourceVolume, artifact.volumeWorkspace.sdkVolume, artifact.volumeWorkspace.marker, this.ownership(artifact.scopeId || context.executionId, artifact.key ? 'warm' : 'runtime'))
-        : buildPythonRuntimeDockerArgs(this.config, context.executionId, artifact.sourceDir, this.ownership(artifact.scopeId || context.executionId, artifact.key ? 'warm' : 'runtime'));
+        ? buildStrategyPythonVolumeRuntimeDockerArgs(executionConfig, context.executionId, artifact.volumeWorkspace.sourceVolume, artifact.volumeWorkspace.sdkVolume, artifact.volumeWorkspace.marker, this.ownership(artifact.scopeId || context.executionId, artifact.key ? 'warm' : 'runtime'))
+        : buildPythonRuntimeDockerArgs(executionConfig, context.executionId, artifact.sourceDir, this.ownership(artifact.scopeId || context.executionId, artifact.key ? 'warm' : 'runtime'));
     const strategyArgs = revision.execution.executionMode === 'strategy'
       ? revision.execution.runtimeId === 'cpp'
         ? args

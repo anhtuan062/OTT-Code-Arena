@@ -80,7 +80,7 @@ Khi người chơi di chuyển quân vào ô đang có quân của đối phươ
 
 ## 4. Điều kiện Chiến thắng (Win Conditions)
 
-Một bên giành chiến thắng ngay lập tức (`winReason`) khi đạt được một trong hai điều kiện sau:
+Một bên giành chiến thắng ngay lập tức (`winReason`) khi đạt được một trong các điều kiện sau:
 
 1. **Đạt ô đích (`goal_reached`)**:
    - **Phe A** đưa bất kỳ quân cờ nào của mình tới ô đích **`i9`** (`row: 8, col: 8`).
@@ -89,6 +89,8 @@ Một bên giành chiến thắng ngay lập tức (`winReason`) khi đạt đư
 2. **Ăn hết toàn bộ quân đối phương (`all_pieces_captured`)**:
    - Một phe ăn hết sạch toàn bộ 9 quân cờ của đối thủ, khiến số quân đối phương trên bàn bằng 0 trong khi phe mình còn ít nhất 1 quân.
    - *Lưu ý*: Chỉ tiêu diệt hết 1 hoặc 2 loại quân (ví dụ ăn hết Búa của đối thủ) **không** tạo thành chiến thắng.
+3. **Đối phương lặp nước đi 3 lần (`repetition`)**:
+   - Khi bot đối phương thực hiện nước đi khiến quân cờ dao động qua lại 3 lần (ví dụ $d3 \to d4 \to d3 \to d4 \to d3$, tức 4 nước đi lặp lại khiến ô $d3$ được viếng thăm 3 lần mà không có nước ăn quân ở giữa), hoặc thực hiện cùng 1 nước đi 3 lần, hoặc làm tái lặp thế cờ toàn cục 3 lần, bot lặp nước đi sẽ **bị xử thua ngay lập tức** và bot còn lại giành **chiến thắng**.
 
 ---
 
@@ -98,28 +100,25 @@ Ván đấu được xử hòa (`winner: 'draw'`) khi xảy ra một trong các 
 
 1. **Vượt giới hạn số lượt (`turn_limit`)**:
    - Số lượt đấu (`state.turn`) vượt quá cấu hình `maxTurns` của ván đấu (giá trị mặc định trong hệ thống là **200** lượt).
-2. **Lặp lại thế cờ 3 lần (`repetition`)**:
-   - Cùng một trạng thái thế cờ xuất hiện 3 lần với cùng bên đến lượt đi.
-   - Hàm băm thế cờ `hashPosition(state)` tổng hợp deterministic từ:
-     `{currentPlayer}:{pieceId}:{pieceType}:{piecePlayer}:{row}:{col};...`
-3. **Không đủ lực lượng thi đấu (`insufficient_material`)**:
+2. **Không đủ lực lượng thi đấu (`insufficient_material`)**:
    - Cả hai bên chỉ còn lại duy nhất 1 loại quân trên bàn cờ và loại quân đó **giống hệt nhau** (ví dụ cả hai bên chỉ còn Kéo). Khi đó không bên nào có khả năng ăn quân đối phương.
-4. **Hết nước đi hợp lệ (`insufficient_material` fallback)**:
+3. **Hết nước đi hợp lệ (`insufficient_material` fallback)**:
    - Đến lượt đi nhưng mảng `legalMoves` rỗng và engine không xác định được người thắng.
 
 ---
 
-## 6. Xử thua do lỗi Bot (Forfeit)
+## 6. Xử thua do lỗi Bot & Lặp nước đi (Forfeit & Repetition Loss)
 
-Bot bị xử thua ngay lập tức (đối thủ thắng ván) nếu vi phạm một trong các lỗi sau:
+Bot bị xử thua ngay lập tức (đối thủ thắng ván) nếu vi phạm một trong các trường hợp sau:
 
-| Mã lỗi (`TerminationReason`) | Nguyên nhân |
-| :--- | :--- |
-| `bot_timeout` | Quá thời gian suy nghĩ mỗi nước đi (`turnTimeoutMs`, mặc định 2000ms; tối thiểu 5000ms đối với Docker source revision). |
-| `bot_crash` | Tiến trình bot thoát bất thường (non-zero exit code), bị kill do vượt giới hạn RAM/CPU, hoặc crash runtime. |
-| `bot_empty_output` | Bot kết thúc mà không in bất kỳ dữ liệu nào ra stdout. |
-| `bot_invalid_json` | Dữ liệu bot gửi về stdout không phải là một chuỗi JSON hợp lệ. |
-| `bot_illegal_move` | Bot gửi nước đi không nằm trong danh sách `legal_moves` do Engine cung cấp ở lượt đó, hoặc vi phạm tọa độ/khoảng cách. |
+| Mã kết thúc (`TerminationReason`) | Phân loại | Nguyên nhân |
+| :--- | :--- | :--- |
+| `repetition` | Luật thi đấu | Bot lặp nước đi / thế cờ 3 lần (ví dụ dao động 1 quân qua lại $d3 \to d4 \to d3 \to d4 \to d3$). Bot thực hiện nước đi lặp lần 3 bị xử thua, đối phương thắng. |
+| `bot_timeout` | Vi phạm kỹ thuật | Quá thời gian suy nghĩ mỗi nước đi (`turnTimeoutMs`, mặc định 2000ms; tối thiểu 5000ms đối với Docker source revision). |
+| `bot_crash` | Vi phạm kỹ thuật | Tiến trình bot thoát bất thường (non-zero exit code), bị kill do vượt giới hạn RAM/CPU, hoặc crash runtime. |
+| `bot_empty_output` | Vi phạm kỹ thuật | Bot kết thúc mà không in bất kỳ dữ liệu nào ra stdout. |
+| `bot_invalid_json` | Vi phạm kỹ thuật | Dữ liệu bot gửi về stdout không phải là một chuỗi JSON hợp lệ. |
+| `bot_illegal_move` | Vi phạm kỹ thuật | Bot gửi nước đi không nằm trong danh sách `legal_moves` do Engine cung cấp ở lượt đó, hoặc vi phạm tọa độ/khoảng cách. |
 
 *Lưu ý*: Nếu xảy ra lỗi hạ tầng (ví dụ Docker daemon không phản hồi, file hệ thống bị lỗi), trạng thái pairing được gán mã `failed` hoặc `engine_error` để Ban tổ chức có thể thực hiện chạy lại (retry) mà không tính thua oan cho bot.
 

@@ -1,0 +1,37 @@
+.player-guide-page { min-height: calc(100vh - 68px); background: #f3f5f8; }
+.player-guide-shell { width: 100%; box-sizing: border-box; margin: 0; padding: 32px 32px 64px; }
+.player-guide-hero { display: flex; justify-content: space-between; gap: 28px; align-items: flex-end; margin-bottom: 28px; padding: 30px 32px; border-radius: 16px; background: #475569; color: #fff; }
+.player-guide-hero h1 { margin: 4px 0 10px; font-size: clamp(2rem, 4vw, 3.2rem); line-height: 1.05; }
+.player-guide-hero .section-kicker { margin: 0; color: #bfdbfe; }
+.player-guide-lead { margin: 0; color: #e5e7eb; font-size: 1.02rem; line-height: 1.6; }
+.player-guide-hero-actions { display: flex; flex-wrap: wrap; gap: 10px; }
+.player-guide-hero-actions .primary-btn { background: #2563eb; border-color: #2563eb; }
+.player-guide-hero-actions .secondary-btn { border-color: #93c5fd; color: #eff6ff; background: transparent; }
+.player-guide-content { display: grid; gap: 26px; }
+.player-guide-section { padding: 28px 30px; border: 1px solid #d8dee8; border-radius: 14px; background: #fff; }
+.player-guide-section-heading { display: grid; grid-template-columns: 38px minmax(0, 1fr); gap: 14px; align-items: start; margin-bottom: 22px; }
+.player-guide-section-heading h2 { margin: 0 0 7px; color: #1f2937; font-size: clamp(1.3rem, 2.2vw, 1.8rem); line-height: 1.2; }
+.player-guide-section-heading p { margin: 0; color: var(--text-secondary, #5f6b7a); line-height: 1.6; }
+.player-guide-number { display: grid; place-items: center; width: 34px; height: 34px; border-radius: 50%; background: #dbeafe; color: #1d4ed8; font-weight: 800; }
+.player-guide-steps, .player-guide-list { margin: 0; padding-left: 21px; color: var(--text-secondary, #5f6b7a); line-height: 1.62; }
+.player-guide-steps { display: grid; gap: 13px; }
+.player-guide-steps strong { color: var(--text-primary, #1f2937); }
+.player-guide-columns, .player-guide-code-grid, .player-guide-rules-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.player-guide-rules-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.player-guide-panel { min-width: 0; padding: 18px 20px; border-radius: 10px; background: #f5f7fa; }
+.player-guide-panel h3 { margin: 0 0 10px; color: #1f2937; font-size: 1rem; }
+.player-guide-panel p { margin: 0; }
+.player-guide-code-grid { margin-top: 18px; }
+.player-guide-code-grid h3 { margin: 0 0 8px; color: #1f2937; font-size: .95rem; }
+.player-guide-code { min-height: 92px; margin: 0; overflow-x: auto; padding: 14px 16px; border-radius: 8px; background: #1e1e1e; color: #dbeafe; font: 13px/1.6 ui-monospace, SFMono-Regular, Consolas, monospace; }
+.player-guide-wide-list { display: grid; gap: 8px; }
+.player-guide-note { margin: 18px 0 0; padding: 13px 16px; border-left: 3px solid #2563eb; background: #eff6ff; color: #475569; line-height: 1.55; }
+.player-guide-matchups { display: grid; gap: 8px; color: #1d4ed8; font-weight: 700; }
+.player-guide-help { color: var(--text-secondary, #5f6b7a); line-height: 1.55; }
+.player-guide-status-table-wrap { margin-top: 20px; overflow-x: auto; }
+.player-guide-status-table { width: 100%; border-collapse: collapse; color: var(--text-secondary, #66736b); }
+.player-guide-status-table caption { margin-bottom: 8px; color: #1f2937; font-weight: 800; text-align: left; }
+.player-guide-status-table th, .player-guide-status-table td { padding: 10px 12px; border-bottom: 1px solid #d8dee8; text-align: left; }
+.player-guide-status-table th { color: #1f2937; background: #f5f7fa; }
+.player-guide-errors { background: #fafbfc; }
+@media (max-width: 760px) { .player-guide-shell { width: 100%; padding: 18px 12px 48px; } .player-guide-hero { display: grid; padding: 24px 20px; } .player-guide-hero-actions { width: 100%; } .player-guide-hero-actions button { flex: 1 1 180px; } .player-guide-section { padding: 22px 18px; } .player-guide-columns, .player-guide-code-grid, .player-guide-rules-grid { grid-template-columns: 1fr; } }

@@ -19,7 +19,13 @@ import {
   TournamentStatus,
   PairingStatus,
   DEFAULT_TOURNAMENT_MATCH_CONFIG,
+  CURRENT_TOURNAMENT_CONFIGURATION_VERSION,
+  NEW_TOURNAMENT_BEST_OF,
   DEFAULT_SCORING_CONFIG,
+  DEFAULT_TOURNAMENT_SCHEDULE,
+  DEFAULT_TOURNAMENT_RULES,
+  NEW_TOURNAMENT_SCORING_CONFIG,
+  DEFAULT_TOURNAMENT_BOT_LIMITS,
 } from './types.js';
 import type { MatchReplay } from '@match-runner/types.js';
 import { StorageOwnership } from './ownership.js';
@@ -317,7 +323,7 @@ export class FileTournamentRepository implements TournamentRepository {
     const file = this.getTournamentFile(tournamentId);
     try {
       const data = await fs.readFile(file, 'utf-8');
-      return JSON.parse(data) as Tournament;
+      return normalizeTournament(JSON.parse(data));
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
         // A writer briefly removes tournament.json while moving it to its
@@ -326,7 +332,7 @@ export class FileTournamentRepository implements TournamentRepository {
         // the writer's temp-file rename, producing EPERM and/or lost state.
         return this.withWriteLock(`tournament:${tournamentId}`, async () => {
           try {
-            return JSON.parse(await fs.readFile(file, 'utf-8')) as Tournament;
+            return normalizeTournament(JSON.parse(await fs.readFile(file, 'utf-8')));
           } catch (retryError) {
             if ((retryError as NodeJS.ErrnoException).code !== 'ENOENT') throw retryError;
           }
@@ -345,7 +351,7 @@ export class FileTournamentRepository implements TournamentRepository {
             throw new Error(`Ambiguous tournament recovery for ${tournamentId}: multiple backup files exist`);
           }
           await fs.rename(path.join(dir, backups[0]!), file);
-          return JSON.parse(await fs.readFile(file, 'utf-8')) as Tournament;
+          return normalizeTournament(JSON.parse(await fs.readFile(file, 'utf-8')));
         });
       }
       throw error;
@@ -702,19 +708,29 @@ export class FileTournamentRepository implements TournamentRepository {
 export function createTournament(
   tournamentId: string,
   name: string,
-  format: TournamentFormat = 'single_round_robin',
+  format: TournamentFormat = 'multi_stage',
   matchConfig: Partial<typeof DEFAULT_TOURNAMENT_MATCH_CONFIG> = {},
   scoringConfig: Partial<typeof DEFAULT_SCORING_CONFIG> = {}
 ): Tournament {
   const now = new Date().toISOString();
+  const isCurrentMultiStage = format === 'multi_stage';
   return {
     tournamentId,
     name,
     format,
+    ...(isCurrentMultiStage ? { configurationVersion: CURRENT_TOURNAMENT_CONFIGURATION_VERSION } : {}),
     status: 'draft',
     participants: [],
-    matchConfig: { ...DEFAULT_TOURNAMENT_MATCH_CONFIG, ...matchConfig },
+    matchConfig: {
+      ...DEFAULT_TOURNAMENT_MATCH_CONFIG,
+      ...matchConfig,
+      ...(isCurrentMultiStage ? { bestOf: NEW_TOURNAMENT_BEST_OF } : {}),
+    },
     scoringConfig: { ...DEFAULT_SCORING_CONFIG, ...scoringConfig },
+    schedule: { ...DEFAULT_TOURNAMENT_SCHEDULE },
+    rulesConfig: { ...DEFAULT_TOURNAMENT_RULES },
+    botLimits: { ...DEFAULT_TOURNAMENT_BOT_LIMITS },
+    rulesetSnapshot: null,
     rounds: [],
     standings: [],
     createdAt: now,
@@ -725,6 +741,38 @@ export function createTournament(
     resultsPublishedAt: null,
     participationRequests: [],
   };
+}
+
+/**
+ * Read-time compatibility boundary. This intentionally does not write the
+ * normalized shape back to tournament.json, so legacy files retain all of
+ * their original values and remain untouched until an explicit mutation.
+ */
+export function normalizeTournament(raw: Partial<Tournament>): Tournament {
+  const legacy = raw as Tournament & { registrationOpenedAt?: string | null; registrationClosedAt?: string | null };
+  return {
+    ...raw,
+    matchConfig: raw.configurationVersion === 2
+      ? { ...DEFAULT_TOURNAMENT_MATCH_CONFIG, ...(raw.matchConfig ?? {}), bestOf: NEW_TOURNAMENT_BEST_OF }
+      : { ...DEFAULT_TOURNAMENT_MATCH_CONFIG, ...(raw.matchConfig ?? {}) },
+    scoringConfig: raw.configurationVersion === 2
+      ? { ...NEW_TOURNAMENT_SCORING_CONFIG }
+      : { ...DEFAULT_SCORING_CONFIG, ...(raw.scoringConfig ?? {}) },
+    schedule: {
+      ...DEFAULT_TOURNAMENT_SCHEDULE,
+      ...(raw.schedule ?? {}),
+      registrationOpensAt: raw.schedule?.registrationOpensAt ?? legacy.registrationOpenedAt ?? null,
+      registrationClosesAt: raw.schedule?.registrationClosesAt ?? legacy.registrationClosedAt ?? null,
+    },
+    rulesConfig: { ...DEFAULT_TOURNAMENT_RULES, ...(raw.rulesConfig ?? {}) },
+    botLimits: { ...DEFAULT_TOURNAMENT_BOT_LIMITS, ...(raw.botLimits ?? {}) },
+    rulesetSnapshot: raw.rulesetSnapshot ?? null,
+    participants: raw.participants ?? [],
+    rounds: raw.rounds ?? [],
+    standings: raw.standings ?? [],
+    registrationOpenedAt: raw.registrationOpenedAt ?? null,
+    registrationClosedAt: raw.registrationClosedAt ?? null,
+  } as Tournament;
 }
 
 /**

@@ -13,6 +13,11 @@ export type { TerminationReason, Player };
  */
 export type TournamentFormat = 'single_round_robin' | 'multi_stage';
 
+/** Configuration policy for tournaments created by the current setup flow. */
+export const CURRENT_TOURNAMENT_CONFIGURATION_VERSION = 2 as const;
+export const NEW_TOURNAMENT_FORMAT: TournamentFormat = 'multi_stage';
+export const NEW_TOURNAMENT_BEST_OF = 3 as const;
+
 /**
  * Tournament status lifecycle
  */
@@ -23,6 +28,8 @@ export type TournamentStatus =
   | 'running'
   | 'completed'
   | 'cancelled';
+
+export type TournamentRegistrationClosedReason = 'manual' | 'scheduled';
 
 /**
  * Pairing status within a round
@@ -252,6 +259,48 @@ export interface TournamentScoringConfig {
   byePoints?: number; // Deprecated; byes always award 0 points.
 }
 
+/** Planned publication and registration windows. Actual lifecycle timestamps remain separate. */
+export interface TournamentScheduleConfig {
+  visibleAt: string | null;
+  registrationOpensAt: string | null;
+  registrationClosesAt: string | null;
+}
+
+/** The only standard ruleset currently implemented by the engine. */
+export interface TournamentRulesConfig {
+  rulesetId: 'ott-standard';
+  rulesetVersion: 1;
+  /** Independent, engine-supported rule modifiers. Omitted legacy data means standard. */
+  ruleModifiers?: Partial<TournamentRuleModifiers>;
+}
+
+export interface TournamentRuleModifiers {
+  conversion: boolean;
+}
+
+/** Resource limits already enforced by the source-revision executor. */
+export interface TournamentBotLimits {
+  maxSourceBytes: number;
+  memoryLimitMb: number;
+  cpuLimit: number;
+  maxProcesses: number;
+  /** Maximum active/pending Bots one competitor may place in a new tournament. */
+  maxBotsPerCompetitor?: number;
+}
+
+/** Immutable input snapshot for later scheduling/replay stages. */
+export interface TournamentRulesetSnapshot {
+  rulesetId: 'ott-standard';
+  rulesetVersion: 1;
+  snapshotHash: string;
+  createdAt: string;
+  format: TournamentFormat;
+  matchConfig: TournamentMatchConfig;
+  scoringConfig: TournamentScoringConfig;
+  botLimits: TournamentBotLimits;
+  ruleModifiers: TournamentRuleModifiers;
+}
+
 /**
  * Tournament standing for a participant
  */
@@ -335,10 +384,19 @@ export interface Tournament {
   tournamentId: string;
   name: string;
   format: TournamentFormat;
+  /** Omitted on legacy records; current-created tournaments are version 2. */
+  configurationVersion?: typeof CURRENT_TOURNAMENT_CONFIGURATION_VERSION;
   status: TournamentStatus;
   participants: TournamentParticipant[];
   matchConfig: TournamentMatchConfig;
   scoringConfig: TournamentScoringConfig;
+  schedule: TournamentScheduleConfig;
+  /** Why registration is closed; legacy tournaments may omit this field. */
+  registrationClosedReason?: TournamentRegistrationClosedReason | null;
+  rulesConfig: TournamentRulesConfig;
+  botLimits: TournamentBotLimits;
+  /** Set exactly once when registration opens; never edited afterwards. */
+  rulesetSnapshot?: TournamentRulesetSnapshot | null;
   rounds: TournamentRound[];
   standings: TournamentStanding[];
   createdAt: string;
@@ -374,6 +432,12 @@ export interface TournamentUpdateDetails {
   contactInfo?: string;
   rulesNotes?: string;
   policyNotes?: string;
+  schedule?: Partial<TournamentScheduleConfig>;
+  format?: TournamentFormat;
+  matchConfig?: Partial<TournamentMatchConfig>;
+  scoringConfig?: Partial<TournamentScoringConfig>;
+  rulesConfig?: Partial<TournamentRulesConfig>;
+  botLimits?: Partial<TournamentBotLimits>;
 }
 
 /**
@@ -404,6 +468,34 @@ export const DEFAULT_SCORING_CONFIG: TournamentScoringConfig = {
   drawPoints: 1,
   lossPoints: 0,
   byePoints: 0, // A bye advances without awarding points.
+};
+
+/** New multi-stage tournaments use one fixed standings policy. */
+export const NEW_TOURNAMENT_SCORING_CONFIG: TournamentScoringConfig = {
+  winPoints: 3,
+  drawPoints: 1,
+  lossPoints: 0,
+  byePoints: 0,
+};
+
+export const DEFAULT_TOURNAMENT_SCHEDULE: TournamentScheduleConfig = {
+  visibleAt: null,
+  registrationOpensAt: null,
+  registrationClosesAt: null,
+};
+
+export const DEFAULT_TOURNAMENT_RULES: TournamentRulesConfig = {
+  rulesetId: 'ott-standard',
+  rulesetVersion: 1,
+  ruleModifiers: { conversion: false },
+};
+
+export const DEFAULT_TOURNAMENT_BOT_LIMITS: TournamentBotLimits = {
+  maxSourceBytes: 64 * 1024,
+  memoryLimitMb: 256,
+  cpuLimit: 1,
+  maxProcesses: 64,
+  maxBotsPerCompetitor: 1,
 };
 
 /**

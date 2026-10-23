@@ -18,7 +18,7 @@ describe('published tournament result access', () => {
   let organizerCsrf: string;
 
   async function writeFixture(tournamentId: string, access: 'public' | 'private', published: boolean, ownerId: string) {
-    const tournament = createTournament(tournamentId, tournamentId);
+    const tournament = createTournament(tournamentId, tournamentId, 'single_round_robin');
     tournament.status = 'completed';
     tournament.completedAt = new Date().toISOString();
     tournament.resultsPublishedAt = published ? new Date().toISOString() : null;

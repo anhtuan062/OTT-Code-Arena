@@ -9,7 +9,7 @@ export * from './validation.js';
 import { PROTOCOL_VERSION } from './types.js';
 import { constructBotRequest, parseBotResponse, botMoveToCoords } from './validation.js';
 import type { BotRequest, BotResponse, BotMove, BotError, ProtocolVersion } from './types.js';
-import type { GameState, MoveOption } from '../engine/types.js';
+import type { GameState, MoveOption, RuleModifiers } from '../engine/types.js';
 
 export { PROTOCOL_VERSION };
 
@@ -20,8 +20,8 @@ export class BotProtocol {
   /**
    * Create a bot request from engine state
    */
-  static createRequest(matchId: string, state: GameState, legalMoves: MoveOption[]): BotRequest {
-    return constructBotRequest(matchId, state, legalMoves);
+  static createRequest(matchId: string, state: GameState, legalMoves: MoveOption[], ruleModifiers?: RuleModifiers): BotRequest {
+    return constructBotRequest(matchId, state, legalMoves, ruleModifiers);
   }
 
   /**
@@ -50,8 +50,8 @@ export class BotProtocol {
   }
 }
 
-export function createBotRequest(matchId: string, state: GameState, legalMoves: MoveOption[]): BotRequest {
-  return BotProtocol.createRequest(matchId, state, legalMoves);
+export function createBotRequest(matchId: string, state: GameState, legalMoves: MoveOption[], ruleModifiers?: RuleModifiers): BotRequest {
+  return BotProtocol.createRequest(matchId, state, legalMoves, ruleModifiers);
 }
 
 export function parseBotResponseSafe(jsonString: string): { success: true; response: BotResponse } | { success: false; error: BotError } {

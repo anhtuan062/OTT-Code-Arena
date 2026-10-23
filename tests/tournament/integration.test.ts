@@ -141,7 +141,7 @@ describe('Tournament Manager - Integration', () => {
 
   it('should run complete tournament with real bots (4 participants)', async () => {
     // Create tournament
-    const createResult = await manager.createTournament('integration-1', 'Integration Test');
+    const createResult = await manager.createTournament('integration-1', 'Integration Test', 'single_round_robin');
     expect(createResult.success).toBe(true);
 
     // Register 4 participants with real bots
@@ -235,7 +235,7 @@ describe('Tournament Manager - Integration', () => {
   }, 120000); // 2 minute timeout for full tournament
 
   it('should run complete tournament with 3 participants (odd count)', async () => {
-    const createResult = await manager.createTournament('integration-odd', 'Odd Participants Test');
+    const createResult = await manager.createTournament('integration-odd', 'Odd Participants Test', 'single_round_robin');
     expect(createResult.success).toBe(true);
 
     // Register 3 participants
@@ -285,7 +285,7 @@ describe('Tournament Manager - Integration', () => {
       args: ['-e', 'process.exit(1)'],
     };
 
-    const createResult = await manager.createTournament('integration-forfeit', 'Forfeit Test');
+    const createResult = await manager.createTournament('integration-forfeit', 'Forfeit Test', 'single_round_robin');
     expect(createResult.success).toBe(true);
 
     await manager.registerParticipant('integration-forfeit', 'P1', 'Sample Bot', createRealBot('sample-1'));
@@ -314,7 +314,7 @@ describe('Tournament Manager - Integration', () => {
   }, 60000);
 
   it('should be idempotent when processing same results', async () => {
-    const createResult = await manager.createTournament('integration-idempotent', 'Idempotent Test');
+    const createResult = await manager.createTournament('integration-idempotent', 'Idempotent Test', 'single_round_robin');
     expect(createResult.success).toBe(true);
 
     await manager.registerParticipant('integration-idempotent', 'P1', 'Sample Bot 1', createRealBot('sample-1'));
@@ -342,5 +342,5 @@ describe('Tournament Manager - Integration', () => {
       expect(standings1[i].wins).toBe(standings2[i].wins);
       expect(standings1[i].losses).toBe(standings2[i].losses);
     }
-  }, 120000);
+  }, 180000);
 });

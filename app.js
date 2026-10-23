@@ -284,6 +284,7 @@ const state = {
   spectatorMode: false,
   detailStatus: null,
   detailRefreshInFlight: false,
+  tournamentLifecycleRefreshTimer: null,
   queueRefreshInFlight: false,
   conditionalResponseCache: new Map(),
   detailRequestBotNames: new Map(),
@@ -534,7 +535,7 @@ function toggleMobileNavigation() {
   toggle.setAttribute('aria-label', open ? 'Đóng điều hướng' : 'Mở điều hướng');
 }
 
-const AUTHENTICATED_VIEWS = new Set(['dashboard', 'bots', 'bot-workspace', 'tournaments', 'tournament-detail', 'replay-view', 'bot-playground']);
+const AUTHENTICATED_VIEWS = new Set(['dashboard', 'bots', 'bot-workspace', 'tournaments', 'tournament-detail', 'replay-view', 'bot-playground', 'player-guide']);
 
 function closeMobileNavigation() {
   const sidebar = $('#app-nav');
@@ -567,6 +568,30 @@ function renderTopbarBreadcrumb(sectionTitle, currentTitle, showParent = true, p
     attrs: { 'aria-current': 'page' },
   });
 
+  if (Array.isArray(state.navigationTrail) && state.navigationTrail.length > 1) {
+    const children = [];
+    for (let i = 0; i < state.navigationTrail.length - 1; i += 1) {
+      const entry = state.navigationTrail[i];
+      const sectionLink = create('a', {
+        className: 'topbar-breadcrumb-link',
+        text: entry.title,
+        attrs: {
+          href: `#${entry.target || entry.view}`,
+          'aria-label': `Về ${entry.title}`,
+        },
+      });
+      const separator = create('span', {
+        className: 'topbar-breadcrumb-separator',
+        text: '/',
+        attrs: { 'aria-hidden': 'true' },
+      });
+      children.push(sectionLink, separator);
+    }
+    children.push(current);
+    topbarBreadcrumb.replaceChildren(...children);
+    return;
+  }
+
   if (!showParent) {
     topbarBreadcrumb.replaceChildren(current);
     return;
@@ -591,6 +616,10 @@ function renderTopbarBreadcrumb(sectionTitle, currentTitle, showParent = true, p
 
 function updateTopbarTournamentBreadcrumb(name) {
   if (state.activeView !== 'tournament-detail' || !name) return;
+  if (Array.isArray(state.navigationTrail)) {
+    const item = state.navigationTrail.find(entry => entry.view === 'tournament-detail');
+    if (item) item.title = name;
+  }
   renderTopbarBreadcrumb(getTournamentDetailParentTitle(), name, true);
 }
 
@@ -628,6 +657,7 @@ function navigate(view, options = {}) {
   if (view !== 'tournament-detail' && typeof stopMultiStagePolling === 'function') stopMultiStagePolling();
   if (view !== 'tournament-detail' && typeof stopPhase2PreflightPolling === 'function') stopPhase2PreflightPolling();
   if (view === 'bot-workspace' && state.user?.role !== 'competitor') return false;
+  if (view === 'player-guide' && state.user?.role !== 'competitor') return false;
   // Opening the practice replay does not replace the draft; keep the editor
   // state intact without treating the preview transition as a destructive exit.
   const isPracticeReplay = view === 'replay-view' && state.replayContext?.practice === true;
@@ -656,7 +686,7 @@ function navigate(view, options = {}) {
     link.setAttribute('aria-current', active ? 'page' : 'false');
   });
   const tournamentCache = Array.isArray(state.tournaments) ? state.tournaments : [];
-  const pageTitles = { dashboard: state.user?.role === 'organizer' ? 'Tổng quan giải đấu' : 'Tổng quan', bots: 'Bot của tôi', 'bot-workspace': 'Tạo Bot', 'bot-playground': 'Test thế cờ', tournaments: state.user?.role === 'organizer' ? 'Quản lý giải đấu' : 'Giải đấu', 'tournament-detail': state.currentTournament?.name || tournamentCache.find(tournament => tournament.tournamentId === state.tournamentId)?.name || 'Chi tiết giải đấu', 'replay-view': 'Xem lại trận đấu' };
+  const pageTitles = { dashboard: state.user?.role === 'organizer' ? 'Tổng quan giải đấu' : 'Tổng quan', bots: 'Bot của tôi', 'bot-workspace': 'Tạo Bot', 'bot-playground': 'Test thế cờ', 'player-guide': 'Hướng dẫn người chơi', tournaments: state.user?.role === 'organizer' ? 'Quản lý giải đấu' : 'Giải đấu', 'tournament-detail': state.currentTournament?.name || tournamentCache.find(tournament => tournament.tournamentId === state.tournamentId)?.name || 'Chi tiết giải đấu', 'replay-view': 'Xem lại trận đấu' };
   const pageTitle = $('#page-title');
   if (pageTitle) pageTitle.textContent = pageTitles[view] || 'OTT Code Arena';
   const sectionTitle = state.user?.role === 'organizer' ? 'Quản lý' : 'Giải đấu';
@@ -665,17 +695,34 @@ function navigate(view, options = {}) {
     : pageTitles[view] || 'OTT Code Arena';
   const botWorkspaceParent = view === 'bot-workspace' ? getBotWorkspaceParent() : null;
   const replayParent = view === 'replay-view' ? getReplayParent(sectionTitle) : null;
-  const playgroundParent = view === 'bot-playground' ? { title: 'Bot của tôi', target: 'bots' } : null;
   const breadcrumbParent = view === 'tournament-detail'
     ? getTournamentDetailParentTitle()
-    : playgroundParent?.title || replayParent?.title || botWorkspaceParent?.title || sectionTitle;
-  const breadcrumbTarget = playgroundParent?.target || replayParent?.target || botWorkspaceParent?.target || 'tournaments';
-  renderTopbarBreadcrumb(breadcrumbParent, currentTitle, ['bot-workspace', 'tournament-detail', 'replay-view', 'bot-playground'].includes(view), breadcrumbTarget);
+    : replayParent?.title || botWorkspaceParent?.title || sectionTitle;
+  const breadcrumbTarget = replayParent?.target || botWorkspaceParent?.target || 'tournaments';
+
+  if (!Array.isArray(state.navigationTrail)) state.navigationTrail = [];
+  if (options.fromNav === true) {
+    state.navigationTrail = [{ view, title: currentTitle, target: view }];
+  } else {
+    const existingIndex = state.navigationTrail.findIndex(item => item.view === view);
+    if (existingIndex !== -1) {
+      state.navigationTrail = state.navigationTrail.slice(0, existingIndex + 1);
+      state.navigationTrail[existingIndex].title = currentTitle;
+    } else {
+      if (!state.navigationTrail.length && ['bot-workspace', 'tournament-detail', 'replay-view'].includes(view)) {
+        state.navigationTrail.push({ view: breadcrumbTarget, title: breadcrumbParent, target: breadcrumbTarget });
+      }
+      state.navigationTrail.push({ view, title: currentTitle, target: view });
+    }
+  }
+
+  renderTopbarBreadcrumb(breadcrumbParent, currentTitle, ['bot-workspace', 'tournament-detail', 'replay-view'].includes(view), breadcrumbTarget);
   closeMobileNavigation();
   target.classList.add('active');
   if (view === 'dashboard') void loadDashboard();
   if (view === 'bots') void loadBots();
   if (view === 'tournaments') void loadTournaments();
+  if (view === 'tournament-detail' && state.tournamentId && typeof refreshTournamentDetail === 'function') void refreshTournamentDetail();
   if (view === 'bot-playground' && typeof initBotPlayground === 'function') void initBotPlayground();
   if (view === 'bot-workspace') {
     const workspace = $('#bot-source-workspace');
@@ -684,7 +731,7 @@ function navigate(view, options = {}) {
   if (options.history !== false && view === 'bot-workspace' && window.location.hash !== '#bot-workspace') {
     window.history.pushState({ view }, '', '#bot-workspace');
   }
-  if (options.history !== false && ['dashboard', 'bots', 'tournaments', 'bot-playground'].includes(view)) {
+  if (options.history !== false && ['dashboard', 'bots', 'tournaments', 'bot-playground', 'player-guide'].includes(view)) {
     const hash = `#${view}`;
     if (window.location.hash !== hash) window.history.pushState({ view }, '', hash);
   }
@@ -706,7 +753,7 @@ function syncLocationRoute() {
   }
 
   let targetView = AUTHENTICATED_VIEWS.has(requestedView) ? requestedView : 'dashboard';
-  if (state.user.role !== 'competitor' && (targetView === 'bots' || targetView === 'bot-workspace')) targetView = 'dashboard';
+  if (state.user.role !== 'competitor' && (targetView === 'bots' || targetView === 'bot-workspace' || targetView === 'player-guide')) targetView = 'dashboard';
   if (requestedView !== targetView) window.history.replaceState({ view: targetView }, '', `#${targetView}`);
   if (state.activeView !== targetView || !document.getElementById(targetView)?.classList.contains('active')) {
     navigate(targetView, { history: false });
@@ -747,7 +794,7 @@ function setAuthenticated(user, csrfToken) {
   let targetView = (AUTHENTICATED_VIEWS.has(hashView) && document.getElementById(hashView))
     ? hashView
     : (AUTHENTICATED_VIEWS.has(savedView) && document.getElementById(savedView) ? savedView : 'dashboard');
-  if (!competitor && (targetView === 'bots' || targetView === 'bot-workspace')) targetView = 'dashboard';
+  if (!competitor && (targetView === 'bots' || targetView === 'bot-workspace' || targetView === 'player-guide')) targetView = 'dashboard';
   navigate(targetView);
   if (targetView === 'bot-workspace' && typeof restoreBotWorkspace === 'function') void restoreBotWorkspace();
 }
@@ -3990,6 +4037,7 @@ function updateTournamentLifecycleMobileSummary(label, count, progress, cancelle
 }
 
 function renderTournamentLifecycle(tournament) {
+  updateTournamentScheduleNotice(tournament);
   const list = $('#td-lifecycle');
   if (!list) return;
   const steps = ['Tạo giải', 'Mở đăng ký', 'Chốt danh sách', 'Lập lịch', 'Thi đấu', 'Hoàn thành', 'Công bố'];
@@ -4034,6 +4082,33 @@ function renderTournamentLifecycle(tournament) {
   if (current?.scrollIntoView && !state.detailRefreshInFlight) {
     current.scrollIntoView({ inline: 'center', block: 'nearest' });
   }
+}
+
+function formatTournamentCountdown(milliseconds) {
+  const totalSeconds = Math.max(0, Math.ceil(milliseconds / 1000));
+  const days = Math.floor(totalSeconds / 86400);
+  const hours = Math.floor((totalSeconds % 86400) / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  if (days) return `${days} ngày ${String(hours).padStart(2, '0')} giờ`;
+  if (hours) return `${hours} giờ ${String(minutes).padStart(2, '0')} phút`;
+  return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+}
+
+function updateTournamentScheduleNotice(tournament) {
+  const subtitle = $('#td-subtitle');
+  if (!subtitle || !tournament) return;
+  const schedule = tournament.schedule || {};
+  const now = Date.now();
+  const visibleAt = Date.parse(schedule.visibleAt || '');
+  const opensAt = Date.parse(schedule.registrationOpensAt || '');
+  const closesAt = Date.parse(schedule.registrationClosesAt || '');
+  let notice = '';
+  if (Number.isFinite(visibleAt) && visibleAt > now) notice = `Giải sẽ công khai sau ${formatTournamentCountdown(visibleAt - now)}.`;
+  else if (tournament.status === 'draft' && Number.isFinite(opensAt) && opensAt > now) notice = `Đăng ký sẽ mở sau ${formatTournamentCountdown(opensAt - now)}.`;
+  else if (tournament.status === 'registration_open' && Number.isFinite(closesAt) && closesAt > now) notice = `Đăng ký sẽ đóng sau ${formatTournamentCountdown(closesAt - now)}.`;
+  else if (tournament.status === 'registration_closed' && tournament.registrationClosedReason === 'scheduled') notice = 'Đã hết hạn tiếp nhận đăng ký tự động. Organizer vẫn có thể xử lý hồ sơ đang chờ trước khi chốt danh sách.';
+  if (notice) subtitle.textContent = notice;
 }
 
 function getTournamentLifecyclePhase(tournament) {
@@ -4110,7 +4185,7 @@ function renderTournamentLifecycleBody(container, tournament, multiStageContext)
   container.dataset.lifecyclePhase = String(phase);
 }
 
-function createPhase1Draft(tournament) {
+function createPhase1DraftLegacy(tournament) {
   return {
     name: tournament.name || '',
     description: tournament.description || '',
@@ -4121,7 +4196,7 @@ function createPhase1Draft(tournament) {
   };
 }
 
-function capturePhase1DraftFromDom(tournament) {
+function capturePhase1DraftFromDomLegacy(tournament) {
   const draft = state.phase1Draft || createPhase1Draft(tournament);
   const fields = {
     name: 'edit-t-name',
@@ -4139,7 +4214,7 @@ function capturePhase1DraftFromDom(tournament) {
   return draft;
 }
 
-function renderPhase1Creation(container, tournament) {
+function renderPhase1CreationLegacy(container, tournament) {
   const isOrganizer = state.user?.role === 'organizer';
   const formatLabel = tournamentFormatLabel(tournament.format);
   const matchConfig = tournament.matchConfig || {};
@@ -4271,7 +4346,6 @@ function renderPhase1Creation(container, tournament) {
     { key: 'rules', id: 'tab-config-rules', label: 'Luật chơi' },
     { key: 'policy', id: 'tab-config-policy', label: 'Quy định' },
     { key: 'format', id: 'tab-config-format', label: 'Thể thức' },
-    { key: 'results', id: 'tab-config-results', label: 'Kết quả' },
   ];
   tabs.forEach(t => {
     const tabBtn = create('button', {
@@ -4555,6 +4629,256 @@ function renderPhase1Creation(container, tournament) {
   container.appendChild(grid);
 }
 
+function phase1Schedule(tournament) {
+  return {
+    visibleAt: tournament.schedule?.visibleAt ?? null,
+    registrationOpensAt: tournament.schedule?.registrationOpensAt ?? tournament.registrationOpenedAt ?? null,
+    registrationClosesAt: tournament.schedule?.registrationClosesAt ?? tournament.registrationClosedAt ?? null,
+  };
+}
+
+function phase1DraftValue(value) {
+  return value === null || value === undefined ? '' : String(value);
+}
+
+function phase1LocalDateValue(value) {
+  if (!value) return '';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  const pad = number => String(number).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
+function phase1IsoDateValue(value) {
+  if (!value) return null;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? value : date.toISOString();
+}
+
+function createPhase1Draft(tournament) {
+  const matchConfig = tournament.matchConfig || {};
+  const scoringConfig = tournament.scoringConfig || {};
+  return {
+    name: tournament.name || '',
+    description: tournament.description || '',
+    organizerInfo: tournament.organizerInfo || '',
+    contactInfo: tournament.contactInfo || '',
+    rulesNotes: tournament.rulesNotes || '',
+    policyNotes: tournament.policyNotes || '',
+    format: tournament.format || 'multi_stage',
+    schedule: phase1Schedule(tournament),
+    rulesConfig: { rulesetId: tournament.rulesConfig?.rulesetId || 'ott-standard', rulesetVersion: tournament.rulesConfig?.rulesetVersion || 1, ruleModifiers: { conversion: Boolean(tournament.rulesConfig?.ruleModifiers?.conversion) } },
+    matchConfig: {
+      bestOf: matchConfig.bestOf ?? (tournament.configurationVersion === 2 ? 3 : 1),
+      maxTurns: matchConfig.maxTurns ?? 200,
+      turnTimeoutMs: matchConfig.turnTimeoutMs ?? 2000,
+    },
+    scoringConfig: {
+      winPoints: scoringConfig.winPoints ?? 3,
+      drawPoints: scoringConfig.drawPoints ?? 1,
+      lossPoints: scoringConfig.lossPoints ?? 0,
+    },
+    botLimits: {
+      maxSourceBytes: tournament.botLimits?.maxSourceBytes ?? 65536,
+      memoryLimitMb: tournament.botLimits?.memoryLimitMb ?? 256,
+      cpuLimit: tournament.botLimits?.cpuLimit ?? 1,
+      maxProcesses: tournament.botLimits?.maxProcesses ?? 64,
+      maxBotsPerCompetitor: tournament.botLimits?.maxBotsPerCompetitor ?? (tournament.configurationVersion === 2 ? 1 : 64),
+    },
+  };
+}
+
+function capturePhase1DraftFromDom(tournament) {
+  const draft = state.phase1Draft || createPhase1Draft(tournament);
+  const value = id => document.getElementById(id)?.value;
+  const textFields = ['name', 'description', 'organizerInfo', 'contactInfo'];
+  const ids = { name: 'edit-t-name', description: 'edit-t-desc', organizerInfo: 'edit-t-organizer', contactInfo: 'edit-t-contact' };
+  textFields.forEach(key => { const current = value(ids[key]); if (current !== undefined) draft[key] = current; });
+  const rules = value('edit-t-rules');
+  const policy = value('edit-t-policy');
+  if (rules !== undefined) draft.rulesNotes = rules;
+  if (policy !== undefined) draft.policyNotes = policy;
+  const format = value('edit-t-format');
+  if (format !== undefined) draft.format = format;
+  const ruleset = value('edit-t-ruleset');
+  if (ruleset !== undefined) draft.rulesConfig.rulesetId = ruleset;
+  const version = value('edit-t-ruleset-version');
+  if (version !== undefined) draft.rulesConfig.rulesetVersion = Number(version);
+  const conversion = document.getElementById('edit-t-rule-conversion');
+  if (conversion) draft.rulesConfig.ruleModifiers.conversion = Boolean(conversion.checked);
+  const bestOf = value('edit-t-best-of');
+  if (bestOf !== undefined) draft.matchConfig.bestOf = Number(bestOf);
+  ['maxTurns', 'turnTimeoutMs'].forEach(key => { const current = value(`edit-t-${key}`); if (current !== undefined) draft.matchConfig[key] = Number(current); });
+  ['winPoints', 'drawPoints', 'lossPoints'].forEach(key => { const current = value(`edit-t-${key}`); if (current !== undefined) draft.scoringConfig[key] = Number(current); });
+  ['maxSourceBytes', 'memoryLimitMb', 'cpuLimit', 'maxProcesses', 'maxBotsPerCompetitor'].forEach(key => { const current = value(`edit-t-${key}`); if (current !== undefined) draft.botLimits[key] = Number(current); });
+  ['visibleAt', 'registrationOpensAt', 'registrationClosesAt'].forEach(key => { const current = value(`edit-t-${key}`); if (current !== undefined) draft.schedule[key] = phase1IsoDateValue(current); });
+  state.phase1Draft = draft;
+  return draft;
+}
+
+function phase1MaxBots(format) {
+  return format === 'multi_stage' ? 4096 : 64;
+}
+
+function phase1Select(id, value, options, disabled = false) {
+  const select = create('select', { className: 'dialog-input', attrs: { id, ...(disabled ? { disabled: 'true' } : {}) } });
+  options.forEach(option => {
+    const item = create('option', { value: option.value, text: option.label });
+    if (String(option.value) === String(value)) item.selected = true;
+    select.appendChild(item);
+  });
+  return select;
+}
+
+function phase1Number(id, value, min, max, step = 1, disabled = false) {
+  return create('input', { className: 'dialog-input', value, attrs: { id, type: 'number', min, max, step, ...(disabled ? { disabled: 'true' } : {}) } });
+}
+
+function phase1Date(id, value, disabled = false) {
+  return create('input', { className: 'dialog-input', value: phase1LocalDateValue(value), attrs: { id, type: 'datetime-local', ...(disabled ? { disabled: 'true' } : {}) } });
+}
+
+function phase1ValueRow(label, value, hint = '') {
+  const row = create('div', { className: 'phase-settings-row' });
+  row.append(create('dt', { text: label }), create('dd', { text: phase1DraftValue(value) || 'Chưa thiết lập' }));
+  if (hint) row.appendChild(create('small', { className: 'phase-settings-hint', text: hint }));
+  return row;
+}
+
+function phase1ReadList(items) {
+  const list = create('dl', { className: 'phase-settings-list' });
+  items.forEach(item => list.appendChild(phase1ValueRow(item[0], item[1], item[2])));
+  return list;
+}
+
+function phase1RuntimeNote(text) {
+  return create('div', { className: 'phase-runtime-note', attrs: { role: 'note' }, children: [icon('td-icon-clipboard-list'), create('span', { text })] });
+}
+
+function renderPhase1Creation(container, tournament) {
+  const isOrganizer = state.user?.role === 'organizer';
+  const isEditing = Boolean(state.phase1EditMode && isOrganizer);
+  const draft = state.phase1Draft || createPhase1Draft(tournament);
+  const settingsLocked = tournament.status !== 'draft' || Boolean(tournament.rulesetSnapshot);
+  const isCurrentTournament = tournament.configurationVersion === 2;
+  const canEditIntro = isOrganizer && (tournament.status === 'draft' || tournament.status === 'registration_open');
+  const canEditSchedule = isOrganizer && (tournament.status === 'draft' || tournament.status === 'registration_open');
+  const activeTab = ['info', 'rules', 'time', 'bots'].includes(state.phase1ActiveTab) ? state.phase1ActiveTab : 'info';
+  state.phase1ActiveTab = activeTab;
+
+  const breadcrumbRoot = $('#td-breadcrumb-root');
+  if (breadcrumbRoot) breadcrumbRoot.textContent = 'Quản lý giải đấu';
+  const breadcrumbName = $('#td-breadcrumb-name');
+  if (breadcrumbName) breadcrumbName.textContent = 'Thiết lập giải đấu';
+  const phaseLabel = $('#td-phase-label');
+  if (phaseLabel) phaseLabel.textContent = 'Giai đoạn 1/7';
+
+  const grid = create('div', { className: 'phase-cards-grid phase-setup-workspace-grid' });
+  const card = create('section', { className: 'tournament-panel phase-card phase-config-summary phase-setup-workspace' });
+  const head = create('div', { className: 'tournament-panel-head phase-setup-head' });
+  const title = create('div', { className: 'phase-setup-head-title' });
+  title.append(icon('td-icon-clipboard-list'), create('div', { children: [create('h4', { text: 'Thiết lập giải đấu' }), create('p', { className: 'phase-setup-subtitle', text: 'Cấu hình trước khi mở đăng ký. Các thay đổi được lưu qua API của giải đấu.' })] }));
+  head.appendChild(title);
+  if (isOrganizer) {
+    const actions = create('div', { className: 'phase-setup-actions' });
+    if (!isEditing && canEditIntro) {
+      actions.appendChild(actionButton('Chỉnh sửa', () => { state.phase1EditMode = true; state.phase1Draft = createPhase1Draft(tournament); renderTournamentLifecycleBody(container, tournament); }, 'btn-edit-phase1-config', 'secondary-btn phase-edit-btn'));
+    } else if (isEditing) {
+      const cancel = actionButton('Hủy', () => { state.phase1EditMode = false; state.phase1Draft = null; renderTournamentLifecycleBody(container, tournament); }, 'btn-cancel-phase1-config', 'secondary-btn phase-cancel-btn');
+      const save = actionButton('Lưu thiết lập', async () => {
+        const current = capturePhase1DraftFromDom(tournament);
+        if (!String(current.name || '').trim() || String(current.name).trim().length > 100) { showToast('Tên giải đấu phải từ 1 đến 100 ký tự.', 'error'); $('#edit-t-name')?.focus(); return; }
+        const payload = { name: String(current.name).trim(), description: String(current.description || '').trim(), organizerInfo: String(current.organizerInfo || '').trim(), contactInfo: String(current.contactInfo || '').trim(), rulesNotes: String(current.rulesNotes || '').trim(), policyNotes: String(current.policyNotes || '').trim() };
+        if (tournament.status === 'draft') Object.assign(payload, { schedule: current.schedule, rulesConfig: current.rulesConfig, matchConfig: isCurrentTournament ? { ...current.matchConfig, bestOf: undefined } : current.matchConfig, ...(isCurrentTournament ? {} : { scoringConfig: current.scoringConfig }), botLimits: current.botLimits });
+        if (tournament.status === 'registration_open') {
+          const originalClose = phase1Schedule(tournament).registrationClosesAt;
+          if (current.schedule.registrationClosesAt !== originalClose) payload.schedule = { registrationClosesAt: current.schedule.registrationClosesAt };
+        }
+        try {
+          save.disabled = true;
+          const updated = await api(`/tournaments/${tournament.tournamentId}`, { method: 'PATCH', body: JSON.stringify(payload) });
+          Object.assign(tournament, updated);
+          state.phase1EditMode = false;
+          state.phase1Draft = null;
+          showToast('Đã lưu thiết lập giải đấu.', 'success');
+          renderTournamentLifecycleBody(container, tournament);
+        } catch (error) { showToast(error?.message || 'Không thể lưu thiết lập.', 'error'); }
+        finally { save.disabled = false; }
+      }, 'btn-save-phase1-config', 'primary-btn phase-save-btn');
+      actions.append(cancel, save);
+    }
+    head.appendChild(actions);
+  }
+  card.appendChild(head);
+
+  const tabsNav = create('div', { className: 'phase-filter-tabs phase-config-tabs', attrs: { role: 'tablist', 'aria-label': 'Nội dung thiết lập giải đấu' } });
+  [{ key: 'info', id: 'tab-config-info', label: 'Thông tin chung' }, { key: 'rules', id: 'tab-config-rules', label: 'Luật thi đấu' }, { key: 'time', id: 'tab-config-time', label: 'Thời gian' }, { key: 'bots', id: 'tab-config-bots', label: 'Giới hạn & Bot' }].forEach(tab => {
+    const button = create('button', { className: `phase-filter-tab${activeTab === tab.key ? ' is-active' : ''}`, attrs: { type: 'button', role: 'tab', id: tab.id, 'aria-selected': String(activeTab === tab.key), 'aria-controls': `phase-panel-${tab.key}` }, text: tab.label });
+    button.addEventListener('click', () => { if (isEditing) capturePhase1DraftFromDom(tournament); state.phase1ActiveTab = tab.key; renderTournamentLifecycleBody(container, tournament); });
+    tabsNav.appendChild(button);
+  });
+  card.appendChild(tabsNav);
+  const pane = create('div', { className: 'phase-tab-pane', attrs: { id: `phase-panel-${activeTab}`, role: 'tabpanel' } });
+
+  if (activeTab === 'info') {
+    if (!isEditing) pane.appendChild(phase1ReadList([['Tên giải đấu', tournament.name], ['Mô tả', tournament.description], ['Đơn vị tổ chức', tournament.organizerInfo], ['Liên hệ', tournament.contactInfo], ['Thể thức', tournamentFormatLabel(tournament.format)]]));
+    else {
+      const form = create('div', { className: 'phase-setup-form phase-settings-form' });
+      const formatControl = create('input', { className: 'dialog-input', value: isCurrentTournament ? 'Nhiều giai đoạn' : tournamentFormatLabel(tournament.format), attrs: { type: 'text', readonly: 'true' } });
+      form.append(createFormGroup('Tên giải đấu', create('input', { className: 'dialog-input', value: draft.name, attrs: { id: 'edit-t-name', type: 'text', maxlength: '100', required: 'true' } })), createFormGroup('Mô tả', create('textarea', { className: 'dialog-input phase-textarea', text: draft.description, attrs: { id: 'edit-t-desc', rows: '4', maxlength: '2000' } })), createFormGroup('Đơn vị tổ chức', create('input', { className: 'dialog-input', value: draft.organizerInfo, attrs: { id: 'edit-t-organizer', type: 'text', maxlength: '500' } })), createFormGroup('Liên hệ', create('input', { className: 'dialog-input', value: draft.contactInfo, attrs: { id: 'edit-t-contact', type: 'text', maxlength: '500' } })), createFormGroup('Thể thức', formatControl, isCurrentTournament ? 'Cố định: nhiều giai đoạn.' : 'Thể thức legacy được giữ nguyên và chỉ hiển thị.'));
+      pane.appendChild(form);
+    }
+  } else if (activeTab === 'rules') {
+    const rules = tournament.rulesConfig || { rulesetId: 'ott-standard', rulesetVersion: 1, ruleModifiers: { conversion: false } };
+    const conversionEnabled = Boolean(draft.rulesConfig?.ruleModifiers?.conversion ?? rules.ruleModifiers?.conversion);
+    if (!isEditing) pane.appendChild(phase1ReadList([['Luật gốc', 'OTT Standard (bắt buộc)'], ['Phiên bản luật', rules.rulesetVersion], ['Luật mở rộng: Conversion', conversionEnabled ? 'Đã bật' : 'Tắt'], ['Số ván mỗi cặp', isCurrentTournament ? 'Vòng bảng: BO2 · Vòng loại: BO3' : `Best of ${draft.matchConfig.bestOf}`], ['Điểm thắng', isCurrentTournament ? 3 : draft.scoringConfig.winPoints], ['Điểm hòa', isCurrentTournament ? 1 : draft.scoringConfig.drawPoints], ['Điểm thua', isCurrentTournament ? 0 : draft.scoringConfig.lossPoints], ['Điều lệ bổ sung', tournament.rulesNotes], ['Chính sách tham gia', tournament.policyNotes]]));
+    else {
+      const form = create('div', { className: 'phase-setup-form phase-settings-form' });
+      const seriesControl = create('div', { className: 'phase-fixed-series', children: isCurrentTournament
+        ? [create('span', { text: 'Vòng bảng: BO2' }), create('span', { text: 'Vòng loại: BO3' })]
+        : [create('span', { text: `Legacy: BO${draft.matchConfig.bestOf || 1}` })] });
+      const scoreControls = create('div', { className: 'phase-settings-grid', children: [
+        createFormGroup('Điểm thắng', create('input', { className: 'dialog-input', value: isCurrentTournament ? 3 : draft.scoringConfig.winPoints, attrs: { type: 'number', readonly: 'true' } })),
+        createFormGroup('Điểm hòa', create('input', { className: 'dialog-input', value: isCurrentTournament ? 1 : draft.scoringConfig.drawPoints, attrs: { type: 'number', readonly: 'true' } })),
+        createFormGroup('Điểm thua', create('input', { className: 'dialog-input', value: isCurrentTournament ? 0 : draft.scoringConfig.lossPoints, attrs: { type: 'number', readonly: 'true' } })),
+      ] });
+      form.append(
+        createFormGroup('Luật gốc', phase1Select('edit-t-ruleset', 'ott-standard', [{ value: 'ott-standard', label: 'OTT Standard' }], true), 'Luật OTT tiêu chuẩn luôn được áp dụng.'),
+        createFormGroup('Phiên bản luật', phase1Select('edit-t-ruleset-version', draft.rulesConfig.rulesetVersion, [{ value: 1, label: 'Version 1' }], true)),
+        createFormGroup('Số ván mỗi cặp', seriesControl, isCurrentTournament ? 'Cố định theo từng giai đoạn thi đấu.' : 'Giá trị legacy được giữ nguyên và chỉ hiển thị.'),
+        create('fieldset', { className: 'phase-rule-modifiers', children: [create('legend', { text: 'Luật mở rộng' }), create('label', { className: 'phase-rule-checkbox', children: [create('input', { attrs: { id: 'edit-t-rule-conversion', type: 'checkbox', ...(conversionEnabled ? { checked: 'true' } : {}), ...(settingsLocked ? { disabled: 'true' } : {}) } }), create('span', { children: [create('strong', { text: 'Conversion' }), create('small', { text: 'Quân bị ăn đổi phe và trở về ô xuất phát của quân ăn.' })] })] })] }),
+        scoreControls,
+        createFormGroup('Điều lệ bổ sung', create('textarea', { className: 'dialog-input phase-textarea', text: draft.rulesNotes, attrs: { id: 'edit-t-rules', rows: '4', maxlength: '2000', ...(settingsLocked ? { disabled: 'true' } : {}) } }), 'Nội dung này chỉ bổ sung thông tin, không thay đổi luật Engine.'),
+        createFormGroup('Chính sách tham gia', create('textarea', { className: 'dialog-input phase-textarea', text: draft.policyNotes, attrs: { id: 'edit-t-policy', rows: '4', maxlength: '2000', ...(settingsLocked ? { disabled: 'true' } : {}) } }))
+      );
+      pane.appendChild(form);
+    }
+    pane.appendChild(phase1RuntimeNote('OTT Standard luôn được áp dụng. Giải mới cố định vòng bảng BO2, vòng loại BO3 và tính điểm 3–1–0; Conversion chỉ được áp dụng khi bật và snapshot đã khóa.'));
+  } else if (activeTab === 'time') {
+    if (!isEditing) pane.appendChild(phase1ReadList([['Công khai từ', phase1Schedule(tournament).visibleAt], ['Mở đăng ký', phase1Schedule(tournament).registrationOpensAt], ['Đóng đăng ký', phase1Schedule(tournament).registrationClosesAt]]));
+    else {
+      const form = create('div', { className: 'phase-setup-form phase-settings-form' });
+      const closeLocked = tournament.status === 'registration_open' && !canEditSchedule;
+      form.append(createFormGroup('Thời gian công khai', phase1Date('edit-t-visibleAt', draft.schedule.visibleAt, closeLocked || settingsLocked)), createFormGroup('Mở đăng ký', phase1Date('edit-t-registrationOpensAt', draft.schedule.registrationOpensAt, closeLocked || settingsLocked)), createFormGroup('Đóng đăng ký', phase1Date('edit-t-registrationClosesAt', draft.schedule.registrationClosesAt, closeLocked), tournament.status === 'registration_open' ? 'Chỉ được gia hạn sang thời điểm muộn hơn.' : 'Có thể để trống nếu chưa chốt lịch.'));
+      pane.appendChild(form);
+    }
+    pane.appendChild(phase1RuntimeNote('Backend sẽ tự động công khai, mở và hết hạn tiếp nhận đăng ký theo lịch. Hết hạn tiếp nhận không tự duyệt hồ sơ pending và không tự lập lịch; organizer vẫn chốt danh sách bằng nghiệp vụ hiện có.'));
+  } else {
+    const limits = tournament.botLimits || draft.botLimits;
+    if (!isEditing) pane.appendChild(phase1ReadList([['Giới hạn lượt', draft.matchConfig.maxTurns], ['Timeout mỗi lượt', `${draft.matchConfig.turnTimeoutMs} ms (source revision thực thi tối thiểu ${Math.max(draft.matchConfig.turnTimeoutMs, 5000)} ms)`], ['Số Bot tối đa theo thể thức', phase1MaxBots(tournament.format)], ['Bot tối đa mỗi competitor', limits.maxBotsPerCompetitor ?? (isCurrentTournament ? 1 : 'Không giới hạn legacy')], ['Kích thước source tối đa', `${limits.maxSourceBytes} bytes`], ['Memory', `${limits.memoryLimitMb} MB`], ['CPU', limits.cpuLimit], ['Số process', limits.maxProcesses], ['Runtime hỗ trợ', 'C++17 và Python 3']]))
+    else {
+      const form = create('div', { className: 'phase-setup-form phase-settings-form' });
+      form.append(create('div', { className: 'phase-settings-grid', children: [createFormGroup('Giới hạn lượt', phase1Number('edit-t-maxTurns', draft.matchConfig.maxTurns, 1, 10000, 1, settingsLocked)), createFormGroup('Timeout mỗi lượt (ms)', phase1Number('edit-t-turnTimeoutMs', draft.matchConfig.turnTimeoutMs, 1, 120000, 1, settingsLocked))] }), create('div', { className: 'phase-settings-grid', children: [createFormGroup('Source tối đa (bytes)', phase1Number('edit-t-maxSourceBytes', draft.botLimits.maxSourceBytes, 1, 65536, 1, settingsLocked)), createFormGroup('Memory (MB)', phase1Number('edit-t-memoryLimitMb', draft.botLimits.memoryLimitMb, 64, 256, 1, settingsLocked)), createFormGroup('CPU', phase1Number('edit-t-cpuLimit', draft.botLimits.cpuLimit, 0.1, 1, 0.1, settingsLocked)), createFormGroup('Process tối đa', phase1Number('edit-t-maxProcesses', draft.botLimits.maxProcesses, 1, 64, 1, settingsLocked)), createFormGroup('Bot tối đa mỗi competitor', phase1Number('edit-t-maxBotsPerCompetitor', draft.botLimits.maxBotsPerCompetitor, 1, 64, 1, settingsLocked))] }), createFormGroup('Runtime', create('input', { className: 'dialog-input', value: 'C++17, Python 3', attrs: { id: 'edit-t-runtime', type: 'text', readonly: 'true' } }), 'Runtime được quản lý bởi Bot registration và không phải tùy chọn tự do của giải đấu.'), create('p', { className: 'phase-settings-capacity', text: `Số Bot tối đa theo thể thức hiện tại: ${phase1MaxBots(draft.format)}.` }));
+      pane.appendChild(form);
+    }
+    pane.appendChild(phase1RuntimeNote('Các giới hạn Bot được lưu qua API nhưng chưa được áp dụng động vào Match Runner trong giai đoạn này. Không hiển thị tùy chọn ngoài contract Backend.'));
+  }
+  card.appendChild(pane);
+  grid.appendChild(card);
+  container.appendChild(grid);
+  const _openActionLabel = actionLabel('open_registration');
+}
+
 function createFormGroup(label, control, helperText = null) {
   const group = create('div', { className: 'form-group phase-form-group' });
   group.appendChild(create('label', { className: 'form-label', text: label }));
@@ -4678,6 +5002,21 @@ function renderPhase3RosterFinal(container, tournament) {
   );
   container.appendChild(header);
 
+  const pendingRequests = (tournament.participationRequests || []).filter(request => request.status === 'pending');
+  if (pendingRequests.length) {
+    const headerDescription = header.querySelector('.dialog-copy');
+    if (headerDescription) headerDescription.textContent = 'Hạn tiếp nhận đăng ký đã kết thúc. Organizer xử lý hồ sơ đang chờ, sau đó mới chốt danh sách và tạo lịch thi đấu.';
+  }
+  if (isOrganizer && pendingRequests.length) {
+    const requestCard = create('section', { className: 'tournament-panel phase-card phase-requests-workspace phase-requests-inbox' });
+    const requestHead = create('div', { className: 'tournament-panel-head phase-workspace-head' });
+    requestHead.append(create('h3', { text: 'Hồ sơ chờ xử lý trước khi chốt danh sách' }), create('span', { className: 'panel-count request-pending-count', text: `${pendingRequests.length} đang chờ` }));
+    const requestList = create('div', { id: 'phase3-request-list', className: 'phase-request-list', attrs: { 'aria-live': 'polite' } });
+    requestCard.append(requestHead, create('p', { className: 'phase-runtime-note', text: 'Hạn tiếp nhận đã kết thúc. Backend không nhận hồ sơ mới và không tự duyệt hoặc từ chối các hồ sơ này.' }), requestList);
+    container.appendChild(requestCard);
+    void renderPhase2Requests(tournament.tournamentId, requestList, requestHead.querySelector('.request-pending-count'), tournament, { statsRoot: requestCard });
+  }
+
   const grid = create('div', { className: 'phase-cards-grid' });
 
   // Card 1: Roster Readiness & Next Action
@@ -4704,10 +5043,10 @@ function renderPhase3RosterFinal(container, tournament) {
 
   if (isOrganizer) {
     const actionBox = create('div', { className: 'phase-action-banner' });
-    actionBox.append(
-      create('p', { text: 'Danh sách tuyển thủ đã sẵn sàng. Hãy tạo lịch thi đấu để phân bảng và tạo các cặp đấu.' }),
-      actionButton(actionLabel('generate_schedule'), () => tournamentAction(tournament.tournamentId, state.authRevision, state.viewRevision, 'generate_schedule'), 'phase3-schedule-btn', 'primary-btn')
-    );
+    actionBox.appendChild(create('p', { text: pendingRequests.length
+      ? 'Hãy xử lý hết hồ sơ đang chờ. Backend sẽ không tạo lịch khi còn pending.'
+      : 'Danh sách tuyển thủ đã sẵn sàng. Hãy tạo lịch thi đấu để phân bảng và tạo các cặp đấu.' }));
+    if (!pendingRequests.length) actionBox.appendChild(actionButton(actionLabel('generate_schedule'), () => tournamentAction(tournament.tournamentId, state.authRevision, state.viewRevision, 'generate_schedule'), 'phase3-schedule-btn', 'primary-btn'));
     readinessCard.appendChild(actionBox);
   } else {
     const notice = create('div', { className: 'phase-notice-banner' });
@@ -4843,8 +5182,8 @@ function renderPhase3RosterFinal(container, tournament) {
       tr.appendChild(create('td', { children: [create('span', { className: `status-badge status-${row.status === 'ready' ? 'ready' : 'failed'}`, text: row.status === 'ready' ? 'Đã xác minh' : 'Cần xử lý' })] }));
       return tr;
     }));
-    const prev = actionButton('Trước', () => { page -= 1; renderRows(); }, 'phase3-prev', 'secondary-btn');
-    const next = actionButton('Sau', () => { page += 1; renderRows(); }, 'phase3-next', 'secondary-btn');
+    const prev = actionButton('Trước', () => { page -= 1; renderRows(); }, 'phase3-prev', 'secondary-btn tournament-pagination-button');
+    const next = actionButton('Sau', () => { page += 1; renderRows(); }, 'phase3-next', 'secondary-btn tournament-pagination-button');
     prev.disabled = page <= 1; next.disabled = page >= totalPages;
     pagination.replaceChildren(prev, create('span', { text: `${filtered.length ? (page - 1) * pageSize + 1 : 0}–${Math.min(page * pageSize, filtered.length)} / ${filtered.length}` }), next);
   };
@@ -5381,8 +5720,8 @@ function renderPhase4Scheduling(container, tournament) {
       listContainer.appendChild(empty);
     }
 
-    const previous = actionButton('Trước', () => { phase4Page -= 1; renderFilteredRounds(); }, `phase4-prev:${phase4Page}`, 'secondary-btn');
-    const next = actionButton('Sau', () => { phase4Page += 1; renderFilteredRounds(); }, `phase4-next:${phase4Page}`, 'secondary-btn');
+    const previous = actionButton('Trước', () => { phase4Page -= 1; renderFilteredRounds(); }, `phase4-prev:${phase4Page}`, 'secondary-btn tournament-pagination-button');
+    const next = actionButton('Sau', () => { phase4Page += 1; renderFilteredRounds(); }, `phase4-next:${phase4Page}`, 'secondary-btn tournament-pagination-button');
     previous.disabled = phase4Page <= 1;
     next.disabled = phase4Page >= totalPages;
     pagination.replaceChildren(previous, create('span', { text: `Trang ${phase4Page}/${totalPages} · ${totalVisiblePairings} cặp` }), next);
@@ -6800,8 +7139,8 @@ async function renderPhase2Requests(tournamentId, container, countBadge, tournam
     container.appendChild(list);
     if (pageCount > 1) {
       const pagination = create('nav', { className: 'phase-request-pagination', attrs: { 'aria-label': 'Phân trang yêu cầu tham gia' } });
-      const previous = actionButton('Trước', () => renderList(filter, page - 1), 'phase-request-prev', 'secondary-btn');
-      const next = actionButton('Sau', () => renderList(filter, page + 1), 'phase-request-next', 'secondary-btn');
+      const previous = actionButton('Trước', () => renderList(filter, page - 1), 'phase-request-prev', 'secondary-btn tournament-pagination-button');
+      const next = actionButton('Sau', () => renderList(filter, page + 1), 'phase-request-next', 'secondary-btn tournament-pagination-button');
       previous.disabled = page === 1;
       next.disabled = page === pageCount;
       pagination.append(previous, create('span', { className: 'phase-request-page-status', text: `Trang ${page} / ${pageCount}` }), next);
@@ -7265,8 +7604,8 @@ function renderRegionalPairings(container, response, region) {
   const paginationBar = create('div', { className: 'multi-stage-pagination' });
   const page = Number(pagination.page) || 1;
   const totalPages = Number(pagination.totalPages) || 1;
-  const previous = actionButton('Trước', () => loadRegionalPairings(state.multiStage.activeStageId, state.multiStage.activeRegionId, page - 1), `regional-prev:${page}`, 'secondary-btn');
-  const next = actionButton('Sau', () => loadRegionalPairings(state.multiStage.activeStageId, state.multiStage.activeRegionId, page + 1), `regional-next:${page}`, 'secondary-btn');
+  const previous = actionButton('Trước', () => loadRegionalPairings(state.multiStage.activeStageId, state.multiStage.activeRegionId, page - 1), `regional-prev:${page}`, 'secondary-btn tournament-pagination-button');
+  const next = actionButton('Sau', () => loadRegionalPairings(state.multiStage.activeStageId, state.multiStage.activeRegionId, page + 1), `regional-next:${page}`, 'secondary-btn tournament-pagination-button');
   previous.disabled = page <= 1; next.disabled = page >= totalPages;
   paginationBar.append(previous, create('span', { text: `Trang ${page}/${totalPages}` }), next);
   panel.appendChild(paginationBar);
@@ -7347,8 +7686,8 @@ function renderRegionalStandings(container, region) {
       );
       return row;
     }));
-    const previous = actionButton('Trước', () => { page -= 1; renderPage(); }, `regional-standings-prev:${page}`, 'secondary-btn');
-    const next = actionButton('Sau', () => { page += 1; renderPage(); }, `regional-standings-next:${page}`, 'secondary-btn');
+    const previous = actionButton('Trước', () => { page -= 1; renderPage(); }, `regional-standings-prev:${page}`, 'secondary-btn tournament-pagination-button');
+    const next = actionButton('Sau', () => { page += 1; renderPage(); }, `regional-standings-next:${page}`, 'secondary-btn tournament-pagination-button');
     previous.disabled = page <= 1;
     next.disabled = page >= totalPages;
     pagination.replaceChildren(previous, create('span', { text: `Trang ${page}/${totalPages}` }), next);
@@ -7731,8 +8070,8 @@ function renderGroupPairings(container, response, group) {
   const page = Number(pagination.page) || 1;
   const totalPages = Number(pagination.totalPages) || 1;
   const paginationBar = create('div', { className: 'multi-stage-pagination' });
-  const previous = actionButton('Trước', () => loadGroupPairings(state.multiStage.activeStageId, state.multiStage.activeGroupId, page - 1), `group-prev:${group?.groupId}:${page}`, 'secondary-btn');
-  const next = actionButton('Sau', () => loadGroupPairings(state.multiStage.activeStageId, state.multiStage.activeGroupId, page + 1), `group-next:${group?.groupId}:${page}`, 'secondary-btn');
+  const previous = actionButton('Trước', () => loadGroupPairings(state.multiStage.activeStageId, state.multiStage.activeGroupId, page - 1), `group-prev:${group?.groupId}:${page}`, 'secondary-btn tournament-pagination-button');
+  const next = actionButton('Sau', () => loadGroupPairings(state.multiStage.activeStageId, state.multiStage.activeGroupId, page + 1), `group-next:${group?.groupId}:${page}`, 'secondary-btn tournament-pagination-button');
   previous.disabled = page <= 1; next.disabled = page >= totalPages;
   paginationBar.append(previous, create('span', { text: `Trang ${page}/${totalPages}` }), next); panel.appendChild(paginationBar);
   container.appendChild(panel);
@@ -8156,8 +8495,8 @@ function renderKnockoutPagination(container, stageId) {
   const page = Number(pagination.page) || state.multiStage.knockoutPage;
   const totalPages = Number(pagination.totalPages) || 1;
   const bar = create('div', { className: 'multi-stage-pagination knockout-pagination' });
-  const previous = actionButton('Trước', () => loadKnockoutPairings(stageId, page - 1), `knockout-prev:${stageId}:${page}`, 'secondary-btn');
-  const next = actionButton('Sau', () => loadKnockoutPairings(stageId, page + 1), `knockout-next:${stageId}:${page}`, 'secondary-btn');
+  const previous = actionButton('Trước', () => loadKnockoutPairings(stageId, page - 1), `knockout-prev:${stageId}:${page}`, 'secondary-btn tournament-pagination-button');
+  const next = actionButton('Sau', () => loadKnockoutPairings(stageId, page + 1), `knockout-next:${stageId}:${page}`, 'secondary-btn tournament-pagination-button');
   previous.disabled = page <= 1; next.disabled = page >= totalPages;
   bar.append(previous, create('span', { text: `Trang ${page}/${totalPages}` }), next);
   container.appendChild(bar);
@@ -8745,6 +9084,7 @@ async function refreshTournamentDetail() {
     const multiStageWorkspace = $('#multi-stage-workspace'); if (multiStageWorkspace) multiStageWorkspace.hidden = true;
     state.viewerParticipantIds = Array.isArray(tournament.viewerParticipantIds) ? tournament.viewerParticipantIds : [];
     state.viewerParticipantId = state.viewerParticipantIds[0] ?? null;
+    state.currentTournament = tournament;
     state.detailStatus = tournament.status;
     state.spectatorMode = tournament.spectatorAccess === true;
     state.tournamentRegistrationContext = { name: tournament.name, status: tournament.status };
@@ -9654,8 +9994,6 @@ function replayParticipantName(participants, player) {
 
 function replayMovePlayer(move) {
   if (move?.player === 'A' || move?.player === 'B') return move.player;
-  if (typeof move?.pieceId === 'string' && move.pieceId.startsWith('A-')) return 'A';
-  if (typeof move?.pieceId === 'string' && move.pieceId.startsWith('B-')) return 'B';
   return null;
 }
 
@@ -10531,7 +10869,16 @@ function buildStateAt(moveIndex) {
     const move = state.replay.moves[index]; if (!move) continue;
     const piece = board.pieces.find(candidate => candidate.id === move.pieceId);
     if (!piece || !move.to) continue;
-    if (move.captures) board.pieces = board.pieces.filter(candidate => candidate.id !== move.captures);
+    if (move.captures) {
+      const captured = board.pieces.find(candidate => candidate.id === move.captures);
+      if (captured && state.replay.ruleModifiers?.conversion) {
+        captured.player = move.player;
+        captured.row = piece.row;
+        captured.col = piece.col;
+      } else {
+        board.pieces = board.pieces.filter(candidate => candidate.id !== move.captures);
+      }
+    }
     piece.row = move.to.row; piece.col = move.to.col;
     board.currentPlayer = move.player === 'A' ? 'B' : 'A';
     board.turn = Number(move.turn) + 1;
@@ -10793,11 +11140,11 @@ function initBotPlayground() {
   const container = $('#bot-playground');
   if (!container) return;
 
+  setupPlaygroundEvents();
   loadPlaygroundBotsList();
   setupPlaygroundCode();
   setupPlaygroundPiecePickerTokens();
   renderPlaygroundBoard();
-  setupPlaygroundEvents();
 }
 
 function setupPlaygroundPiecePickerTokens() {
@@ -10841,21 +11188,47 @@ async function loadPlaygroundBotsList(botsList = null) {
   const currentVal = select.value;
   select.replaceChildren(create('option', { value: '', text: '-- Chọn Bot để kiểm thử --' }));
 
-  bots.forEach(bot => {
-    select.appendChild(create('option', {
-      value: bot.id,
-      text: `${bot.name} (${bot.selectedRevision?.runtimeId === 'python3' ? 'Python 3' : 'C++17'})`
-    }));
-  });
+  if (bots.length > 0) {
+    const userGroup = create('optgroup', { label: 'Bot của bạn' });
+    bots.forEach(bot => {
+      userGroup.appendChild(create('option', {
+        value: bot.id,
+        text: `${bot.name || bot.id} (${bot.selectedRevision?.runtimeId === 'python3' ? 'Python 3' : 'C++17'})`
+      }));
+    });
+    select.appendChild(userGroup);
+  }
 
-  if (currentVal && bots.some(b => b.id === currentVal)) {
+  const sampleGroup = create('optgroup', { label: 'Bot mẫu có sẵn (Strategy SDK)' });
+  sampleGroup.appendChild(create('option', {
+    value: 'sample-cpp',
+    text: '🤖 Bot mẫu C++17 (Strategy SDK)'
+  }));
+  sampleGroup.appendChild(create('option', {
+    value: 'sample-python3',
+    text: '🐍 Bot mẫu Python 3 (Strategy SDK)'
+  }));
+  select.appendChild(sampleGroup);
+
+  const noBotsBanner = $('#playground-no-bots-banner');
+  if (noBotsBanner) {
+    noBotsBanner.hidden = (bots.length > 0);
+  }
+
+  if (currentVal && (bots.some(b => b.id === currentVal) || currentVal.startsWith('sample-'))) {
     select.value = currentVal;
-  } else if (!currentVal && bots.length > 0) {
-    const targetBot = (state.currentBot && bots.some(b => b.id === state.currentBot.id))
-      ? state.currentBot
-      : bots[0];
-    select.value = targetBot.id;
-    select.dispatchEvent(new Event('change'));
+  } else {
+    select.value = '';
+    const codeArea = $('#playground-code');
+    if (codeArea && !state.practiceDraft?.source) {
+      codeArea.value = '';
+      codeArea.readOnly = true;
+      updatePlaygroundCodeStats();
+    }
+    const runtimeSelect = $('#playground-runtime-selector');
+    if (runtimeSelect && !state.practiceDraft?.runtimeId) {
+      runtimeSelect.disabled = true;
+    }
   }
 }
 
@@ -11108,7 +11481,7 @@ async function runPlaygroundSingleTest() {
   const source = codeArea?.value || '';
   const runtimeId = $('#playground-runtime-selector')?.value || 'cpp';
   if (!selectedBotId || !source.trim()) {
-    setPlaygroundToast('Vui lòng chọn Bot từ danh sách trước khi kiểm thử.', 'error');
+    setPlaygroundToast('Vui lòng chọn Bot từ danh sách hoặc nạp Bot mẫu trước khi kiểm thử.', 'error');
     return;
   }
 
@@ -11143,7 +11516,7 @@ async function runPlaygroundSingleTest() {
     };
 
     let result;
-    if (selectedBotId) {
+    if (selectedBotId && !selectedBotId.startsWith('sample-')) {
       const selectedBot = (state.bots || []).find(b => b.id === selectedBotId);
       const revisionId = selectedBot?.selectedRevision?.revisionId;
       if (revisionId && !state.sourceDirty) {
@@ -11191,14 +11564,19 @@ async function runPlaygroundSingleTest() {
 
       if (resultBody) resultBody.hidden = false;
       switchPlaygroundTab('result');
-      setPlaygroundToast(`Test thành công! Bot đã chọn nước đi ${move.from} → ${move.to}.`, 'info');
+      const botLabel = selectedBotId === 'sample-cpp'
+        ? 'Bot mẫu C++17'
+        : selectedBotId === 'sample-python3'
+          ? 'Bot mẫu Python 3'
+          : (state.bots?.find(b => b.id === selectedBotId)?.name || 'Bot');
+      setPlaygroundToast(`Test thành công! ${botLabel} đã chọn nước đi ${move.from} → ${move.to}.`, 'info');
 
       // Kích hoạt animation nước đi trên bàn cờ
       animatePlaygroundMove(move.from, move.to, move.piece_id, result.capture);
 
       addPlaygroundHistoryEntry({
         success: true,
-        summary: `Đi từ ${move.from} → ${move.to}`,
+        summary: `${botLabel}: ${move.from} → ${move.to}`,
         detail: `Quân ${move.piece_id}${result.capture ? ` ăn ${result.capture}` : ''}`,
         at: new Date()
       });
@@ -11404,10 +11782,33 @@ function setupPlaygroundEvents() {
   $('#playground-code')?.addEventListener('input', updatePlaygroundCodeStats);
   $('#playground-code')?.addEventListener('scroll', syncPlaygroundCodeHighlight, { passive: true });
 
+  $('#playground-create-bot-btn')?.addEventListener('click', () => {
+    if (typeof navigate === 'function') {
+      navigate('bot-workspace');
+    }
+  });
+
+  $('#playground-load-sample-cpp')?.addEventListener('click', () => {
+    const select = $('#playground-bot-selector');
+    if (select) {
+      select.value = 'sample-cpp';
+      select.dispatchEvent(new Event('change'));
+    }
+  });
+
+  $('#playground-load-sample-py')?.addEventListener('click', () => {
+    const select = $('#playground-bot-selector');
+    if (select) {
+      select.value = 'sample-python3';
+      select.dispatchEvent(new Event('change'));
+    }
+  });
+
   $('#playground-bot-selector')?.addEventListener('change', async (e) => {
     const botId = e.target.value;
     const codeArea = $('#playground-code');
     const runtimeSelect = $('#playground-runtime-selector');
+    const codeNote = $('#playground-code-note');
 
     if (!botId) {
       if (codeArea) {
@@ -11416,6 +11817,27 @@ function setupPlaygroundEvents() {
         updatePlaygroundCodeStats();
       }
       if (runtimeSelect) runtimeSelect.disabled = true;
+      if (codeNote) {
+        codeNote.textContent = 'Chỉ hiển thị mã nguồn Bot được chọn. Để sửa code, hãy vào Không gian Bot.';
+      }
+      return;
+    }
+
+    if (botId === 'sample-cpp' || botId === 'sample-python3') {
+      const runtime = botId === 'sample-python3' ? 'python3' : 'cpp';
+      if (runtimeSelect) {
+        runtimeSelect.value = runtime;
+        runtimeSelect.disabled = true;
+      }
+      if (codeArea) {
+        codeArea.value = PLAYGROUND_STARTER_CODE[runtime] || PLAYGROUND_STARTER_CODE.cpp;
+        codeArea.readOnly = true;
+        updatePlaygroundCodeStats();
+      }
+      if (codeNote) {
+        codeNote.textContent = `Đang xem Bot mẫu ${runtime === 'cpp' ? 'C++17' : 'Python 3'} (Strategy SDK). Tạo Bot để tùy biến chiến thuật.`;
+      }
+      setPlaygroundToast('');
       return;
     }
 
@@ -11463,6 +11885,9 @@ function setupPlaygroundEvents() {
             updatePlaygroundCodeStats();
           }
         }
+        if (codeNote) {
+          codeNote.textContent = 'Chỉ hiển thị mã nguồn Bot được chọn. Để sửa code, hãy vào Không gian Bot.';
+        }
       }
     } catch (err) {
       console.warn('Could not load bot source for playground', err);
@@ -11509,8 +11934,16 @@ function bindEvents() {
   });
   document.querySelectorAll('.nav-link').forEach(link => on(link, 'click', () => {
     if (link.dataset.target === 'tournaments' && link.dataset.scope) state.tournamentScope = link.dataset.scope;
-    navigate(link.dataset.target);
+    navigate(link.dataset.target, { fromNav: true });
   }));
+  on(document, 'click', event => {
+    const guideAction = event.target?.closest?.('[data-guide-target]');
+    if (!guideAction) return;
+    const target = guideAction.dataset.guideTarget;
+    if (!target) return;
+    event.preventDefault();
+    navigate(target);
+  }, { feature: 'player guide actions' });
   on(document, 'click', event => {
     const breadcrumbLink = event.target?.closest?.('.topbar-breadcrumb-link');
     if (!breadcrumbLink) return;
@@ -11763,7 +12196,7 @@ document.querySelectorAll('.bottom-nav [data-target]').forEach(button => bindEve
   state.tournamentScope = button.dataset.target === 'my-tournaments'
     ? 'mine'
     : button.dataset.scope || (state.user?.role === 'organizer' ? 'managed' : 'discoverable');
-  navigate(button.dataset.target === 'my-tournaments' ? 'tournaments' : button.dataset.target);
+  navigate(button.dataset.target === 'my-tournaments' ? 'tournaments' : button.dataset.target, { fromNav: true });
 }));
 if (window.ResizeObserver) {
   const editor = $('#bot-source-editor');
@@ -11783,3 +12216,20 @@ setInterval(() => {
     void refreshTournamentDetail().finally(() => { state.detailRefreshInFlight = false; });
   }
 }, 5000);
+
+setInterval(() => {
+  if (state.activeView !== 'tournament-detail' || !state.currentTournament) return;
+  updateTournamentScheduleNotice(state.currentTournament);
+  const schedule = state.currentTournament.schedule || {};
+  const now = Date.now();
+  const nextLifecycleTimestamp = state.currentTournament.status === 'draft'
+    ? Date.parse(schedule.registrationOpensAt || '')
+    : state.currentTournament.status === 'registration_open'
+      ? Date.parse(schedule.registrationClosesAt || '')
+      : NaN;
+  const due = Number.isFinite(nextLifecycleTimestamp) && nextLifecycleTimestamp <= now;
+  if (due && !state.detailRefreshInFlight) {
+    state.detailRefreshInFlight = true;
+    void refreshTournamentDetail().finally(() => { state.detailRefreshInFlight = false; });
+  }
+}, 1000);

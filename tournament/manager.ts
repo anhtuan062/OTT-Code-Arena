@@ -25,7 +25,13 @@ import {
   TerminationReason,
   Player,
   DEFAULT_TOURNAMENT_MATCH_CONFIG,
+  NEW_TOURNAMENT_BEST_OF,
+  NEW_TOURNAMENT_FORMAT,
   DEFAULT_SCORING_CONFIG,
+  NEW_TOURNAMENT_SCORING_CONFIG,
+  DEFAULT_TOURNAMENT_SCHEDULE,
+  DEFAULT_TOURNAMENT_RULES,
+  DEFAULT_TOURNAMENT_BOT_LIMITS,
   VALID_STATUS_TRANSITIONS,
   MIN_PARTICIPANTS,
   MAX_PARTICIPANTS,
@@ -98,6 +104,163 @@ import { FairMatchDispatcher } from './fair-match-dispatcher.js';
 import type { FairMatchQuantum } from './fair-match-dispatcher.js';
 
 const BO3_GAME_TRANSITION_DELAY_MS = 2500;
+
+function isIsoDate(value: unknown): value is string {
+  return typeof value === 'string' && Number.isFinite(Date.parse(value));
+}
+
+function createRulesetSnapshot(tournament: Tournament, createdAt: string) {
+  const payload = {
+    rulesetId: tournament.rulesConfig?.rulesetId ?? DEFAULT_TOURNAMENT_RULES.rulesetId,
+    rulesetVersion: tournament.rulesConfig?.rulesetVersion ?? DEFAULT_TOURNAMENT_RULES.rulesetVersion,
+    format: tournament.format,
+    matchConfig: { ...DEFAULT_TOURNAMENT_MATCH_CONFIG, ...(tournament.matchConfig ?? {}) },
+    scoringConfig: { ...DEFAULT_SCORING_CONFIG, ...(tournament.scoringConfig ?? {}) },
+    botLimits: { ...DEFAULT_TOURNAMENT_BOT_LIMITS, ...(tournament.botLimits ?? {}) },
+    ruleModifiers: { conversion: Boolean(tournament.rulesConfig?.ruleModifiers?.conversion) },
+  } as const;
+  return {
+    ...payload,
+    createdAt,
+    snapshotHash: createHash('sha256').update(JSON.stringify(payload)).digest('hex'),
+  };
+}
+
+function executionConfiguration(tournament: Tournament): {
+  matchConfig: TournamentMatchConfig;
+  botLimits: typeof DEFAULT_TOURNAMENT_BOT_LIMITS;
+  ruleModifiers: { conversion: boolean };
+} {
+  const snapshot = tournament.rulesetSnapshot;
+  return {
+    matchConfig: { ...DEFAULT_TOURNAMENT_MATCH_CONFIG, ...(snapshot?.matchConfig ?? tournament.matchConfig ?? {}) },
+    botLimits: { ...DEFAULT_TOURNAMENT_BOT_LIMITS, ...(snapshot?.botLimits ?? tournament.botLimits ?? {}) },
+    ruleModifiers: { conversion: Boolean(snapshot?.ruleModifiers?.conversion ?? tournament.rulesConfig?.ruleModifiers?.conversion) },
+  };
+}
+
+function maxBotsPerCompetitor(tournament: Tournament, botLimits: typeof DEFAULT_TOURNAMENT_BOT_LIMITS): number {
+  // Legacy records predate this policy and must retain their historical
+  // ability to submit multiple Bots per competitor.
+  if (tournament.configurationVersion !== 2) return Number.MAX_SAFE_INTEGER;
+  return Math.max(1, Math.floor(botLimits.maxBotsPerCompetitor ?? 1));
+}
+
+function applyScheduledLifecycle(tournament: Tournament, now: Date): { opened: boolean; closed: boolean } {
+  const schedule = tournament.schedule ?? DEFAULT_TOURNAMENT_SCHEDULE;
+  const nowMs = now.getTime();
+  let opened = false;
+  let closed = false;
+
+  if (tournament.status === 'draft' && schedule.registrationOpensAt) {
+    const opensAt = Date.parse(schedule.registrationOpensAt);
+    if (Number.isFinite(opensAt) && opensAt <= nowMs) {
+      const openedAt = now.toISOString();
+      tournament.status = 'registration_open';
+      tournament.registrationOpenedAt = tournament.registrationOpenedAt ?? openedAt;
+      tournament.schedule = {
+        ...DEFAULT_TOURNAMENT_SCHEDULE,
+        ...schedule,
+        registrationOpensAt: schedule.registrationOpensAt ?? openedAt,
+      };
+      tournament.rulesetSnapshot = tournament.rulesetSnapshot ?? createRulesetSnapshot(tournament, openedAt);
+      opened = true;
+    }
+  }
+
+  if (tournament.status === 'registration_open' && schedule.registrationClosesAt) {
+    const closesAt = Date.parse(schedule.registrationClosesAt);
+    if (Number.isFinite(closesAt) && closesAt <= nowMs) {
+      tournament.status = 'registration_closed';
+      tournament.registrationClosedAt = tournament.registrationClosedAt ?? now.toISOString();
+      tournament.registrationClosedReason = 'scheduled';
+      closed = true;
+    }
+  }
+
+  return { opened, closed };
+}
+
+function validateTournamentSettingsUpdate(
+  tournament: Tournament,
+  update: TournamentUpdateDetails,
+): { valid: true } | { valid: false; error: string } {
+  const settingsChanged = Boolean(update.format || update.matchConfig || update.scoringConfig || update.rulesConfig || update.botLimits);
+  if (tournament.configurationVersion === 2) {
+    if (update.format !== undefined && update.format !== NEW_TOURNAMENT_FORMAT) {
+      return { valid: false, error: 'New tournaments use the multi_stage format' };
+    }
+    if (update.matchConfig && Object.prototype.hasOwnProperty.call(update.matchConfig, 'bestOf')) {
+      return { valid: false, error: 'New tournaments use stage-specific series: Group Stage BO2 and Knockout BO3' };
+    }
+    if (update.scoringConfig && Object.keys(update.scoringConfig).some(key => ['winPoints', 'drawPoints', 'lossPoints', 'byePoints'].includes(key))) {
+      return { valid: false, error: 'New tournaments use fixed scoring: win 3, draw 1, loss 0' };
+    }
+  }
+  const locked = tournament.status !== 'draft' || Boolean(tournament.rulesetSnapshot);
+  if (settingsChanged && locked) {
+    return { valid: false, error: 'Tournament format, rules, scoring and technical limits are locked after registration opens' };
+  }
+
+  if (update.format && update.format !== 'single_round_robin' && update.format !== 'multi_stage') {
+    return { valid: false, error: 'Invalid tournament format' };
+  }
+  if (update.rulesConfig && Object.keys(update.rulesConfig).some(key => !['rulesetId', 'rulesetVersion', 'ruleModifiers'].includes(key))) return { valid: false, error: 'Unsupported rulesConfig option' };
+  if (update.rulesConfig && (update.rulesConfig.rulesetId !== undefined && update.rulesConfig.rulesetId !== 'ott-standard' || update.rulesConfig.rulesetVersion !== undefined && update.rulesConfig.rulesetVersion !== 1)) {
+    return { valid: false, error: 'Unsupported tournament ruleset' };
+  }
+  if (update.rulesConfig?.ruleModifiers) {
+    const modifiers = update.rulesConfig.ruleModifiers;
+    if (Object.keys(modifiers).some(key => key !== 'conversion')) return { valid: false, error: 'Unsupported rule modifier' };
+    if (modifiers.conversion !== undefined && typeof modifiers.conversion !== 'boolean') return { valid: false, error: 'conversion modifier must be boolean' };
+  }
+
+  const match = update.matchConfig;
+  if (match) {
+    if (Object.keys(match).some(key => !['protocolVersion', 'maxTurns', 'turnTimeoutMs', 'maxStdoutBytes', 'maxStderrBytes', 'failurePolicy', 'maxRetries', 'logRequests', 'logResponses', 'logStates', 'bestOf'].includes(key))) return { valid: false, error: 'Unsupported matchConfig option' };
+    if (match.protocolVersion !== undefined && match.protocolVersion !== '0.1.0') return { valid: false, error: 'Unsupported protocol version' };
+    if (match.failurePolicy !== undefined && match.failurePolicy !== 'forfeit') return { valid: false, error: 'Unsupported failure policy' };
+    if (match.bestOf !== undefined && ![1, 2, 3].includes(match.bestOf)) return { valid: false, error: 'bestOf must be 1, 2 or 3' };
+    const positive = ['maxTurns', 'turnTimeoutMs', 'maxStdoutBytes', 'maxStderrBytes', 'maxRetries'] as const;
+    for (const key of positive) if (match[key] !== undefined && (!Number.isInteger(match[key]) || match[key] < 0)) return { valid: false, error: `Invalid matchConfig.${key}` };
+    if (match.maxTurns !== undefined && match.maxTurns > 10000 || match.turnTimeoutMs !== undefined && match.turnTimeoutMs > 120000) return { valid: false, error: 'Match technical limit is outside the supported range' };
+  }
+  const score = update.scoringConfig;
+  if (score && Object.values(score).some(value => value !== undefined && (typeof value !== 'number' || !Number.isFinite(value) || value < 0))) {
+    return { valid: false, error: 'Scoring values must be non-negative numbers' };
+  }
+  if (score && Object.keys(score).some(key => !['winPoints', 'drawPoints', 'lossPoints', 'byePoints'].includes(key))) return { valid: false, error: 'Unsupported scoringConfig option' };
+  const limits = update.botLimits;
+  if (limits) {
+    if (Object.keys(limits).some(key => !['maxSourceBytes', 'memoryLimitMb', 'cpuLimit', 'maxProcesses', 'maxBotsPerCompetitor'].includes(key))) return { valid: false, error: 'Unsupported botLimits option' };
+    if (limits.maxSourceBytes !== undefined && (!Number.isInteger(limits.maxSourceBytes) || limits.maxSourceBytes < 1 || limits.maxSourceBytes > DEFAULT_TOURNAMENT_BOT_LIMITS.maxSourceBytes)) return { valid: false, error: 'maxSourceBytes exceeds the engine limit' };
+    if (limits.memoryLimitMb !== undefined && (!Number.isInteger(limits.memoryLimitMb) || limits.memoryLimitMb < 64 || limits.memoryLimitMb > DEFAULT_TOURNAMENT_BOT_LIMITS.memoryLimitMb)) return { valid: false, error: 'memoryLimitMb is outside the supported range' };
+    if (limits.cpuLimit !== undefined && (!Number.isFinite(limits.cpuLimit) || limits.cpuLimit <= 0 || limits.cpuLimit > DEFAULT_TOURNAMENT_BOT_LIMITS.cpuLimit)) return { valid: false, error: 'cpuLimit is outside the supported range' };
+    if (limits.maxProcesses !== undefined && (!Number.isInteger(limits.maxProcesses) || limits.maxProcesses < 1 || limits.maxProcesses > DEFAULT_TOURNAMENT_BOT_LIMITS.maxProcesses)) return { valid: false, error: 'maxProcesses is outside the supported range' };
+    if (limits.maxBotsPerCompetitor !== undefined && (!Number.isInteger(limits.maxBotsPerCompetitor) || limits.maxBotsPerCompetitor < 1 || limits.maxBotsPerCompetitor > 64)) return { valid: false, error: 'maxBotsPerCompetitor is outside the supported range' };
+  }
+
+  if (update.schedule) {
+    if (Object.keys(update.schedule).some(key => !['visibleAt', 'registrationOpensAt', 'registrationClosesAt'].includes(key))) return { valid: false, error: 'Unsupported schedule option' };
+    const current = tournament.schedule ?? DEFAULT_TOURNAMENT_SCHEDULE;
+    const next = { ...current, ...update.schedule };
+    for (const key of ['visibleAt', 'registrationOpensAt', 'registrationClosesAt'] as const) {
+      if (next[key] !== null && !isIsoDate(next[key])) return { valid: false, error: `Invalid schedule.${key}` };
+    }
+    if (next.registrationOpensAt && next.registrationClosesAt && Date.parse(next.registrationOpensAt) >= Date.parse(next.registrationClosesAt)) return { valid: false, error: 'Registration opening must be before closing' };
+    if (next.visibleAt && next.registrationOpensAt && Date.parse(next.visibleAt) > Date.parse(next.registrationOpensAt)) return { valid: false, error: 'Visibility must not start after registration opening' };
+    if (tournament.status !== 'draft' && tournament.status !== 'registration_open') {
+      return { valid: false, error: 'Tournament schedule is locked after registration closes' };
+    }
+    if (tournament.status === 'registration_open') {
+      const onlyExtension = Object.keys(update.schedule).every(key => key === 'registrationClosesAt');
+      const currentClose = current.registrationClosesAt ? Date.parse(current.registrationClosesAt) : null;
+      const nextClose = next.registrationClosesAt ? Date.parse(next.registrationClosesAt) : null;
+      if (!onlyExtension || !nextClose || (currentClose !== null && nextClose <= currentClose) || nextClose <= Date.now()) return { valid: false, error: 'Only a valid registration deadline extension is allowed while registration is open' };
+    }
+  }
+  return { valid: true };
+}
 
 function createMatchId(tournamentId: string, pairingId: string): string {
   const candidate = `${tournamentId}-${pairingId}`;
@@ -593,7 +756,7 @@ export class TournamentManager {
   async createTournament(
     tournamentId: string,
     name: string,
-    format: TournamentFormat = 'single_round_robin',
+    format: TournamentFormat = this.enableMultiStage ? NEW_TOURNAMENT_FORMAT : 'single_round_robin',
     matchConfig?: Partial<TournamentMatchConfig>,
     scoringConfig?: Partial<TournamentScoringConfig>
   ): Promise<TournamentOperationResult<Tournament>> {
@@ -621,7 +784,14 @@ export class TournamentManager {
       tournament.matchConfig = { ...this.defaultMatchConfig };
     }
 
-    if (scoringConfig) {
+    if (tournament.configurationVersion === 2) {
+      tournament.format = NEW_TOURNAMENT_FORMAT;
+      tournament.matchConfig.bestOf = NEW_TOURNAMENT_BEST_OF;
+    }
+
+    if (tournament.configurationVersion === 2) {
+      tournament.scoringConfig = { ...NEW_TOURNAMENT_SCORING_CONFIG };
+    } else if (scoringConfig) {
       tournament.scoringConfig = { ...this.defaultScoringConfig, ...scoringConfig };
     } else {
       tournament.scoringConfig = { ...this.defaultScoringConfig };
@@ -635,6 +805,7 @@ export class TournamentManager {
    * Load a tournament
    */
   async loadTournament(tournamentId: string): Promise<TournamentOperationResult<Tournament>> {
+    await this.syncScheduledLifecycle(new Date(), tournamentId);
     const tournament = await this.repository.load(tournamentId);
     if (!tournament) {
       return { success: false, error: `Tournament ${tournamentId} not found` };
@@ -646,7 +817,27 @@ export class TournamentManager {
    * List all tournaments
    */
   async listTournaments(): Promise<Tournament[]> {
+    await this.syncScheduledLifecycle();
     return this.repository.list();
+  }
+
+  /** Apply due publication-independent registration transitions after restart and between scheduler ticks. */
+  async syncScheduledLifecycle(now = new Date(), tournamentId?: string): Promise<number> {
+    const candidates = tournamentId
+      ? [await this.repository.load(tournamentId)]
+      : await this.repository.list();
+    let changedCount = 0;
+    for (const candidate of candidates) {
+      if (!candidate) continue;
+      const result = await this.mutateTournament(candidate.tournamentId, async tournament => {
+        const changed = applyScheduledLifecycle(tournament, now);
+        if (!changed.opened && !changed.closed) return { success: true, data: false };
+        await this.saveTournament(tournament);
+        return { success: true, data: true };
+      });
+      if (result.success && result.data) changedCount += 1;
+    }
+    return changedCount;
   }
 
   async updateMetadata(
@@ -691,6 +882,15 @@ export class TournamentManager {
       if (update.policyNotes !== undefined) {
         tournament.policyNotes = typeof update.policyNotes === 'string' ? update.policyNotes.trim().slice(0, 2000) : '';
       }
+
+      const settings = validateTournamentSettingsUpdate(tournament, update);
+      if (!settings.valid) return { success: false, error: settings.error };
+      if (update.schedule) tournament.schedule = { ...DEFAULT_TOURNAMENT_SCHEDULE, ...(tournament.schedule ?? {}), ...update.schedule };
+      if (update.format !== undefined) tournament.format = update.format;
+      if (update.matchConfig) tournament.matchConfig = { ...DEFAULT_TOURNAMENT_MATCH_CONFIG, ...(tournament.matchConfig ?? {}), ...update.matchConfig };
+      if (update.scoringConfig) tournament.scoringConfig = { ...DEFAULT_SCORING_CONFIG, ...(tournament.scoringConfig ?? {}), ...update.scoringConfig };
+      if (update.rulesConfig) tournament.rulesConfig = { ...DEFAULT_TOURNAMENT_RULES, ...(tournament.rulesConfig ?? {}), ...update.rulesConfig };
+      if (update.botLimits) tournament.botLimits = { ...DEFAULT_TOURNAMENT_BOT_LIMITS, ...(tournament.botLimits ?? {}), ...update.botLimits };
       await this.saveTournament(tournament);
       return { success: true, data: tournament };
     });
@@ -714,6 +914,8 @@ export class TournamentManager {
     bot: TournamentBot
   ): Promise<TournamentOperationResult<Tournament>> {
     return this.mutateTournament(tournamentId, async tournament => {
+      const lifecycle = applyScheduledLifecycle(tournament, new Date());
+      if (lifecycle.opened || lifecycle.closed) await this.saveTournament(tournament);
       if (tournament.status !== 'draft' && tournament.status !== 'registration_open') {
         return { success: false, error: `Cannot register: tournament status is ${tournament.status}` };
       }
@@ -724,6 +926,13 @@ export class TournamentManager {
         return { success: false, error: `Participant ${participantId} already registered` };
       }
       if (!bot.command || !bot.botId) return { success: false, error: 'Bot must have botId and command' };
+      const sourceExecution = bot.execution?.kind === 'source-revision' ? bot.execution : null;
+      if (sourceExecution) {
+        if (!['cpp', 'python3'].includes(sourceExecution.runtimeId)) return { success: false, error: 'This source runtime is not allowed for tournament execution' };
+        const configured = executionConfiguration(tournament);
+        const competitorBotCount = tournament.participants.filter(participant => participant.bot.execution?.kind === 'source-revision' && participant.bot.execution.competitorId === sourceExecution.competitorId).length;
+        if (competitorBotCount >= maxBotsPerCompetitor(tournament, configured.botLimits)) return { success: false, error: 'Competitor Bot limit reached for this tournament' };
+      }
       tournament.participants.push({
         participantId,
         name,
@@ -758,6 +967,7 @@ export class TournamentManager {
    * Open registration
    */
   async openRegistration(tournamentId: string): Promise<TournamentOperationResult<Tournament>> {
+    await this.syncScheduledLifecycle(new Date(), tournamentId);
     return this.transitionStatus(tournamentId, 'registration_open');
   }
 
@@ -765,6 +975,11 @@ export class TournamentManager {
   async closeRegistration(tournamentId: string): Promise<TournamentOperationResult<Tournament>> {
     return this.mutateTournament(tournamentId, async tournament => {
       if (tournament.status === 'registration_closed') return { success: true, data: tournament };
+      const lifecycle = applyScheduledLifecycle(tournament, new Date());
+      if (lifecycle.opened || lifecycle.closed) {
+        await this.saveTournament(tournament);
+        if (lifecycle.closed) return { success: true, data: tournament };
+      }
       const validTransitions = VALID_STATUS_TRANSITIONS[tournament.status] || [];
       if (!validTransitions.includes('registration_closed')) {
         return { success: false, error: `Invalid status transition: ${tournament.status} -> registration_closed` };
@@ -774,6 +989,7 @@ export class TournamentManager {
       }
       tournament.status = 'registration_closed';
       tournament.registrationClosedAt = tournament.registrationClosedAt ?? new Date().toISOString();
+      tournament.registrationClosedReason = 'manual';
       await this.saveTournament(tournament);
       return { success: true, data: tournament };
     });
@@ -786,6 +1002,9 @@ export class TournamentManager {
     return this.mutateTournament(tournamentId, async tournament => {
       if (tournament.format === 'multi_stage' && !this.enableMultiStage) {
         return { success: false, error: 'Multi-stage tournament format is disabled by feature flag' };
+      }
+      if (tournament.configurationVersion === 2 && (tournament.format !== NEW_TOURNAMENT_FORMAT || tournament.matchConfig.bestOf !== NEW_TOURNAMENT_BEST_OF)) {
+        return { success: false, error: 'New tournaments must use multi_stage with Group Stage BO2 and Knockout BO3' };
       }
       if (tournament.status !== 'registration_open' && tournament.status !== 'registration_closed') {
         return { success: false, error: `Cannot generate schedule: tournament status is ${tournament.status}` };
@@ -830,6 +1049,7 @@ export class TournamentManager {
         tournament.rounds = [];
         tournament.status = 'registration_closed';
         tournament.registrationClosedAt = tournament.registrationClosedAt ?? new Date().toISOString();
+        tournament.registrationClosedReason = tournament.registrationClosedReason ?? 'manual';
         tournament.standings = computeStandings(tournament.participants, [], tournament.scoringConfig);
         await this.saveTournament(tournament);
         return { success: true, data: tournament };
@@ -846,6 +1066,7 @@ export class TournamentManager {
       tournament.rounds = rounds;
       tournament.status = 'registration_closed';
       tournament.registrationClosedAt = tournament.registrationClosedAt ?? new Date().toISOString();
+      tournament.registrationClosedReason = tournament.registrationClosedReason ?? 'manual';
       tournament.standings = computeStandings(tournament.participants, [], tournament.scoringConfig);
       await this.saveTournament(tournament);
       return { success: true, data: tournament };
@@ -876,11 +1097,23 @@ export class TournamentManager {
     request: Omit<ParticipationRequest, 'requestId' | 'status' | 'requestedAt' | 'reviewedAt' | 'reviewedBy' | 'rejectionReason'>
   ): Promise<TournamentOperationResult<ParticipationRequest>> {
     return this.mutateTournament(tournamentId, async tournament => {
+      const lifecycle = applyScheduledLifecycle(tournament, new Date());
+      if (lifecycle.opened || lifecycle.closed) await this.saveTournament(tournament);
       if (tournament.status !== 'registration_open') return { success: false, error: `Cannot request participation: tournament status is ${tournament.status}` };
       const requests = tournament.participationRequests ?? (tournament.participationRequests = []);
+      const runtimeConfig = executionConfiguration(tournament);
+      const sourceExecution = request.botSnapshot?.execution?.kind === 'source-revision' ? request.botSnapshot.execution : null;
+      if (sourceExecution && !['cpp', 'python3'].includes(sourceExecution.runtimeId)) {
+        return { success: false, error: 'This source runtime is not allowed for tournament execution' };
+      }
       const duplicate = requests.find(existing => existing.competitorId === request.competitorId && existing.botId === request.botId && (existing.status === 'pending' || existing.status === 'approved'));
       if (duplicate) return { success: false, error: 'An active participation request already exists' };
-      if (tournament.participants.length + requests.filter(item => item.status === 'pending' || item.status === 'approved').length >= getMaxParticipants(tournament.format)) {
+      const competitorBotCount = tournament.participants.filter(participant => participant.bot?.execution?.kind === 'source-revision' && participant.bot?.execution?.competitorId === request.competitorId).length
+        + requests.filter(item => item.competitorId === request.competitorId && item.status === 'pending').length;
+      if (competitorBotCount >= maxBotsPerCompetitor(tournament, runtimeConfig.botLimits)) {
+        return { success: false, error: 'Competitor Bot limit reached for this tournament' };
+      }
+      if (tournament.participants.length + requests.filter(item => item.status === 'pending').length >= getMaxParticipants(tournament.format)) {
         return { success: false, error: 'Maximum participants reached' };
       }
       const created: ParticipationRequest = {
@@ -931,8 +1164,19 @@ export class TournamentManager {
       if (decision === 'approve' && tournament.participants.some(participant => participant.bot.botId === request.botId)) {
         return { success: false, error: 'This Bot is already a tournament participant' };
       }
+      const runtimeConfig = executionConfiguration(tournament);
+      if (decision === 'approve' && tournament.participants.length >= getMaxParticipants(tournament.format)) {
+        return { success: false, error: 'Maximum participants reached' };
+      }
+      const competitorBotCount = tournament.participants.filter(participant => participant.bot.execution?.kind === 'source-revision' && participant.bot.execution.competitorId === request.competitorId).length;
+      if (decision === 'approve' && competitorBotCount >= maxBotsPerCompetitor(tournament, runtimeConfig.botLimits)) {
+        return { success: false, error: 'Competitor Bot limit reached for this tournament' };
+      }
       const sourceExecution = request.botSnapshot.execution?.kind === 'source-revision' ? request.botSnapshot.execution : null;
       if (decision === 'approve' && sourceExecution) {
+        if (!['cpp', 'python3'].includes(sourceExecution.runtimeId)) {
+          return { success: false, error: 'This source runtime is not allowed for tournament execution' };
+        }
         if (sourceExecution.revisionId !== request.revisionId || sourceExecution.runtimeId !== request.runtimeId || sourceExecution.sourceDigest !== request.sourceDigest ||
             (sourceExecution.executionMode ?? 'raw') !== (request.executionMode ?? 'raw') ||
             sourceExecution.sdkVersion !== request.sdkVersion || sourceExecution.sdkDigest !== request.sdkDigest) {
@@ -1087,9 +1331,10 @@ export class TournamentManager {
       return { success: true, data: dispatched.results };
     }
 
+    const executionConfig = executionConfiguration(tournament);
     const useSeriesScheduler = this.enableBo1MatchScheduler &&
-      (tournament.matchConfig.bestOf === 2 || tournament.matchConfig.bestOf === 3 || isMultiStageTournament(tournament));
-    if (this.enableBo1MatchScheduler && (useSeriesScheduler || (tournament.matchConfig.bestOf === 1 && !isMultiStageTournament(tournament)))) {
+      (executionConfig.matchConfig.bestOf === 2 || executionConfig.matchConfig.bestOf === 3 || isMultiStageTournament(tournament));
+    if (this.enableBo1MatchScheduler && (useSeriesScheduler || (executionConfig.matchConfig.bestOf === 1 && !isMultiStageTournament(tournament)))) {
       return this.runAllMatchesWithScheduler(tournamentId, tournament, signal, useSeriesScheduler);
     }
 
@@ -1272,18 +1517,26 @@ export class TournamentManager {
             env: participantB.bot.env,
             execution: participantB.bot.execution,
           };
+          const configured = executionConfiguration(tournament);
           const matchConfig: MatchConfig = {
             matchId,
-            protocolVersion: tournament.matchConfig.protocolVersion,
-            maxTurns: tournament.matchConfig.maxTurns,
-            turnTimeoutMs: tournament.matchConfig.turnTimeoutMs,
-            maxStdoutBytes: tournament.matchConfig.maxStdoutBytes,
-            maxStderrBytes: tournament.matchConfig.maxStderrBytes,
-            failurePolicy: tournament.matchConfig.failurePolicy,
-            maxRetries: tournament.matchConfig.maxRetries,
-            logRequests: tournament.matchConfig.logRequests,
-            logResponses: tournament.matchConfig.logResponses,
-            logStates: tournament.matchConfig.logStates,
+            protocolVersion: configured.matchConfig.protocolVersion,
+            maxTurns: configured.matchConfig.maxTurns,
+            turnTimeoutMs: configured.matchConfig.turnTimeoutMs,
+            maxStdoutBytes: configured.matchConfig.maxStdoutBytes,
+            maxStderrBytes: configured.matchConfig.maxStderrBytes,
+            failurePolicy: configured.matchConfig.failurePolicy,
+            maxRetries: configured.matchConfig.maxRetries,
+            logRequests: configured.matchConfig.logRequests,
+            logResponses: configured.matchConfig.logResponses,
+            logStates: configured.matchConfig.logStates,
+            ruleModifiers: configured.ruleModifiers,
+            resourceLimits: {
+              maxMemoryBytes: configured.botLimits.memoryLimitMb * 1024 * 1024,
+              maxCpuPercent: configured.botLimits.cpuLimit * 100,
+              maxProcesses: configured.botLimits.maxProcesses,
+              maxFileSizeBytes: configured.botLimits.maxSourceBytes,
+            },
           };
 
           try {
@@ -1699,13 +1952,15 @@ export class TournamentManager {
    */
   private getPairingSeriesFormat(tournament: Tournament, pairing: TournamentPairing): 'bo1' | 'bo2' | 'bo3' {
     if (pairing.seriesProgress?.format) return pairing.seriesProgress.format;
+    const configured = executionConfiguration(tournament).matchConfig.bestOf ?? 1;
     if (isMultiStageTournament(tournament)) {
       const stage = getCurrentStage(tournament);
       const stagePairing = getAllTournamentPairings(tournament).find(candidate => candidate.pairingId === pairing.pairingId);
+      // Group Stage is fixed BO2; regional/preliminary and Knockout are fixed BO3.
+      // Legacy multi-stage records retain their historical stage behavior.
       if (stagePairing?.stageId === 'stage-group' || stage?.stageId === 'stage-group') return 'bo2';
       if (stagePairing?.stageId === 'stage-preliminary' || stagePairing?.stageId === 'stage-knockout') return 'bo3';
     }
-    const configured = tournament.matchConfig.bestOf ?? 1;
     return configured === 2 ? 'bo2' : configured === 3 ? 'bo3' : 'bo1';
   }
 
@@ -1778,18 +2033,26 @@ export class TournamentManager {
       // Execute match
       let matchResult: MatchResult;
       try {
-        const matchConfig: MatchConfig = {
+      const configured = executionConfiguration(tournament);
+      const matchConfig: MatchConfig = {
           matchId,
-          protocolVersion: tournament.matchConfig.protocolVersion,
-          maxTurns: tournament.matchConfig.maxTurns,
-          turnTimeoutMs: tournament.matchConfig.turnTimeoutMs,
-          maxStdoutBytes: tournament.matchConfig.maxStdoutBytes,
-          maxStderrBytes: tournament.matchConfig.maxStderrBytes,
-          failurePolicy: tournament.matchConfig.failurePolicy,
-          maxRetries: tournament.matchConfig.maxRetries,
-          logRequests: tournament.matchConfig.logRequests,
-          logResponses: tournament.matchConfig.logResponses,
-          logStates: tournament.matchConfig.logStates,
+        protocolVersion: configured.matchConfig.protocolVersion,
+        maxTurns: configured.matchConfig.maxTurns,
+        turnTimeoutMs: configured.matchConfig.turnTimeoutMs,
+        maxStdoutBytes: configured.matchConfig.maxStdoutBytes,
+        maxStderrBytes: configured.matchConfig.maxStderrBytes,
+        failurePolicy: configured.matchConfig.failurePolicy,
+        maxRetries: configured.matchConfig.maxRetries,
+        logRequests: configured.matchConfig.logRequests,
+        logResponses: configured.matchConfig.logResponses,
+        logStates: configured.matchConfig.logStates,
+        ruleModifiers: configured.ruleModifiers,
+        resourceLimits: {
+          maxMemoryBytes: configured.botLimits.memoryLimitMb * 1024 * 1024,
+          maxCpuPercent: configured.botLimits.cpuLimit * 100,
+          maxProcesses: configured.botLimits.maxProcesses,
+          maxFileSizeBytes: configured.botLimits.maxSourceBytes,
+        },
         };
         matchResult = await this.executor.executeMatch(
           matchId,
@@ -2039,7 +2302,7 @@ export class TournamentManager {
 
         // Give spectators a clear transition window and avoid starting the
         // next game immediately after the previous game's result is saved.
-        if (format === 'bo3' && tournament.matchConfig.bestOf === 3 && !isMultiStageTournament(tournament) && numberedGame < 3) {
+        if (format === 'bo3' && executionConfiguration(tournament).matchConfig.bestOf === 3 && !isMultiStageTournament(tournament) && numberedGame < 3) {
           await new Promise<void>(resolve => setTimeout(resolve, BO3_GAME_TRANSITION_DELAY_MS));
           if (signal?.aborted || this.cancelledTournaments.has(tournament.tournamentId)) {
             return { success: false, error: 'Tournament execution cancelled' };
@@ -2218,18 +2481,26 @@ export class TournamentManager {
     const sideB = participantById.get(sides.playerB)!;
     const botA: BotDefinition = { ...sideA.bot, player: 'A' };
     const botB: BotDefinition = { ...sideB.bot, player: 'B' };
+    const configured = executionConfiguration(tournament);
     const matchConfig: MatchConfig = {
       matchId: gameId,
-      protocolVersion: tournament.matchConfig.protocolVersion,
-      maxTurns: tournament.matchConfig.maxTurns,
-      turnTimeoutMs: tournament.matchConfig.turnTimeoutMs,
-      maxStdoutBytes: tournament.matchConfig.maxStdoutBytes,
-      maxStderrBytes: tournament.matchConfig.maxStderrBytes,
-      failurePolicy: tournament.matchConfig.failurePolicy,
-      maxRetries: tournament.matchConfig.maxRetries,
-      logRequests: tournament.matchConfig.logRequests,
-      logResponses: tournament.matchConfig.logResponses,
-      logStates: tournament.matchConfig.logStates,
+      protocolVersion: configured.matchConfig.protocolVersion,
+      maxTurns: configured.matchConfig.maxTurns,
+      turnTimeoutMs: configured.matchConfig.turnTimeoutMs,
+      maxStdoutBytes: configured.matchConfig.maxStdoutBytes,
+      maxStderrBytes: configured.matchConfig.maxStderrBytes,
+      failurePolicy: configured.matchConfig.failurePolicy,
+      maxRetries: configured.matchConfig.maxRetries,
+      logRequests: configured.matchConfig.logRequests,
+      logResponses: configured.matchConfig.logResponses,
+      logStates: configured.matchConfig.logStates,
+      ruleModifiers: configured.ruleModifiers,
+      resourceLimits: {
+        maxMemoryBytes: configured.botLimits.memoryLimitMb * 1024 * 1024,
+        maxCpuPercent: configured.botLimits.cpuLimit * 100,
+        maxProcesses: configured.botLimits.maxProcesses,
+        maxFileSizeBytes: configured.botLimits.maxSourceBytes,
+      },
       initialPieces: createSeededInitialPieces(
         // BO3 progress.seed is persisted before game 1 starts and therefore
         // remains stable across retry and server recovery.
@@ -2597,8 +2868,21 @@ export class TournamentManager {
         return { success: false, error: 'Cannot close registration while participation requests are pending' };
       }
       tournament.status = targetStatus;
-      if (targetStatus === 'registration_open') tournament.registrationOpenedAt = new Date().toISOString();
-      if (targetStatus === 'registration_closed') tournament.registrationClosedAt = tournament.registrationClosedAt ?? new Date().toISOString();
+      if (targetStatus === 'registration_open') {
+        const openedAt = new Date().toISOString();
+        tournament.registrationOpenedAt = openedAt;
+        tournament.schedule = {
+          ...DEFAULT_TOURNAMENT_SCHEDULE,
+          ...(tournament.schedule ?? {}),
+          registrationOpensAt: tournament.schedule?.registrationOpensAt ?? openedAt,
+        };
+        tournament.rulesetSnapshot = tournament.rulesetSnapshot ?? createRulesetSnapshot(tournament, openedAt);
+        tournament.registrationClosedReason = null;
+      }
+      if (targetStatus === 'registration_closed') {
+        tournament.registrationClosedAt = tournament.registrationClosedAt ?? new Date().toISOString();
+        tournament.registrationClosedReason = 'manual';
+      }
       if (targetStatus === 'completed') tournament.completedAt = new Date().toISOString();
       await this.saveTournament(tournament);
       return { success: true, data: tournament };
@@ -2874,7 +3158,7 @@ export async function createTournamentManager(
       process.env.NODE_ENV?.trim().toLowerCase() === 'production' ? 'sandbox-required' : 'development'
     );
     const effectiveMultiStage = enableMultiStage ?? (
-      process.env.ENABLE_MULTI_STAGE?.trim().toLowerCase() === 'true'
+      process.env.ENABLE_MULTI_STAGE?.trim().toLowerCase() !== 'false'
     );
     let matchExecutor = executor;
     if (!matchExecutor) {

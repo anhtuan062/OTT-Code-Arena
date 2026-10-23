@@ -179,7 +179,7 @@ describe('multi-stage API payload projections', () => {
   });
 
   it('keeps legacy rounds by default and supports an explicit compact view', async () => {
-    const tournament = createTournament('legacy-payload', 'Legacy Payload');
+    const tournament = createTournament('legacy-payload', 'Legacy Payload', 'single_round_robin');
     tournament.metadata = { ownerId };
     tournament.status = 'running';
     tournament.rounds = [{

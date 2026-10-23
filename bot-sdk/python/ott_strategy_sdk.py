@@ -26,6 +26,7 @@ class GameState:
     player: str
     board_size: int
     pieces: tuple[Piece, ...]
+    conversion: bool = False
 
 def run_strategy(choose_move: Callable[[GameState, Sequence[Move]], Move]) -> int:
     import json
@@ -41,7 +42,8 @@ def run_strategy(choose_move: Callable[[GameState, Sequence[Move]], Move]) -> in
         legal = tuple(Move(m["piece_id"], m["from"], m["to"], m.get("captures")) for m in request["legal_moves"])
         if not legal:
             raise ValueError("no legal move")
-        state = GameState(request["protocol_version"], request["match_id"], request["turn"], request["player"], request["board_size"], pieces)
+        conversion = bool(request.get("rules", {}).get("conversion", False))
+        state = GameState(request["protocol_version"], request["match_id"], request["turn"], request["player"], request["board_size"], pieces, conversion)
         selected = choose_move(state, legal)
         if not isinstance(selected, Move):
             raise ValueError("strategy must return Move")

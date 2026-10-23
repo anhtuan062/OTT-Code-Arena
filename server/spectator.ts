@@ -43,7 +43,7 @@ function safeTermination(value: unknown): string | null {
 
 function safeMove(move: LiveMatchSnapshot['latestMove']) {
   if (!move) return null;
-  const player = move.pieceId.startsWith('A-') ? 'A' : move.pieceId.startsWith('B-') ? 'B' : null;
+  const player = move.player ?? null;
   return {
     pieceId: move.pieceId,
     player,
@@ -145,6 +145,7 @@ export function projectSpectatorReplay(replay: MatchReplay): MatchReplay {
   const base = {
     matchId: replay.matchId,
     protocolVersion: replay.protocolVersion,
+    ...(replay.ruleModifiers ? { ruleModifiers: replay.ruleModifiers } : {}),
     initialState: replay.initialState,
     moves: replay.moves.map(move => ({ ...move })),
     finalState: replay.finalState,

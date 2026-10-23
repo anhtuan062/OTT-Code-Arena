@@ -590,6 +590,61 @@
   font-size: 0.82rem;
 }
 
+.playground-no-bots-banner {
+  background: #f8fafc;
+  border: 1px dashed #cbd5e1;
+  border-radius: 8px;
+  padding: 8px 12px;
+  margin-bottom: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.playground-no-bots-text {
+  margin: 0;
+  font-size: 0.78rem;
+  color: #475569;
+  line-height: 1.35;
+}
+
+.playground-no-bots-actions {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: nowrap;
+}
+
+.playground-no-bots-actions button,
+.playground-no-bots-actions .primary-btn,
+.playground-no-bots-actions .secondary-btn,
+.playground-no-bots-actions .btn-sm {
+  width: auto !important;
+  max-width: none !important;
+  min-width: 0;
+  min-height: 32px !important;
+  height: 32px !important;
+  padding: 0 12px !important;
+  margin: 0;
+  font-size: 0.75rem;
+  font-weight: 600;
+  white-space: nowrap;
+  border-radius: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  flex: 0 0 auto;
+  box-shadow: none;
+}
+
+.playground-no-bots-actions svg {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+}
+
 .playground-editor-wrap {
   position: relative;
   margin-bottom: 8px;

@@ -234,7 +234,7 @@ describe('Tournament Persistence', () => {
 
       expect(tournament.tournamentId).toBe('test-id');
       expect(tournament.name).toBe('Test Name');
-      expect(tournament.format).toBe('single_round_robin');
+      expect(tournament.format).toBe('multi_stage');
       expect(tournament.status).toBe('draft');
       expect(tournament.participants).toHaveLength(0);
       expect(tournament.rounds).toHaveLength(0);

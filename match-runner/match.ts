@@ -74,6 +74,7 @@ export class MatchRunner {
     const engineConfig: Partial<GameConfig> = {
       maxTurns: this.config.maxTurns,
       turnTimeoutMs: this.config.turnTimeoutMs,
+      ruleModifiers: this.config.ruleModifiers,
       ...(this.config.initialPieces ? { initialPieces: this.config.initialPieces } : {}),
     };
     this.engine = new GameEngine(engineConfig);
@@ -135,7 +136,7 @@ export class MatchRunner {
       }
 
       // Construct bot request
-      const request = constructBotRequest(this.config.matchId, currentState, legalMoves);
+      const request = constructBotRequest(this.config.matchId, currentState, legalMoves, this.config.ruleModifiers);
       const requestValidation = validateBotRequest(request);
       if (!requestValidation.valid) {
         throw new Error(`Constructed bot request failed protocol validation: ${requestValidation.error?.message ?? 'unknown error'}`);
@@ -166,6 +167,7 @@ export class MatchRunner {
         timeoutMs: botDef.execution?.kind === 'source-revision'
           ? sourceRevisionTurnTimeoutMs(this.config.turnTimeoutMs)
           : this.config.turnTimeoutMs,
+        resourceLimits: this.config.resourceLimits,
         signal,
         revisionScopeId: this.config.matchId,
       };
@@ -257,6 +259,7 @@ export class MatchRunner {
       turnLog.executionDiagnostic!.engineAcceptedMove = true;
 
       turnLog.appliedMove = {
+        player: currentPlayer,
         pieceId: coords.pieceId,
         from: { row: fromPosition.row, col: fromPosition.col },
         to: { row: coords.toRow, col: coords.toCol },
@@ -273,6 +276,11 @@ export class MatchRunner {
       const gameResult = this.engine.checkGameOver();
       if (gameResult.finished) {
         return this.finishMatch(gameResult.reason as TerminationReason, gameResult.winner, currentState);
+      }
+
+      if (this.engine.checkRepetitionLoss(currentPlayer)) {
+        const winner = currentPlayer === 'A' ? 'B' : 'A';
+        return this.finishMatch('repetition', winner, currentState);
       }
     }
 
@@ -342,6 +350,7 @@ export class MatchRunner {
       finalState,
       initialState: this.initialState,
       turnLog: this.turnLog,
+      ruleModifiers: this.config.ruleModifiers ?? { conversion: false },
       metadata: this.getExecutionMetadata(),
     };
 
@@ -431,6 +440,7 @@ export class MatchRunner {
       finalState: result.finalState,
       winner: result.winner,
       terminationReason: result.terminationReason,
+      ruleModifiers: result.ruleModifiers ?? { conversion: false },
       metadata: result.metadata as MatchReplay['metadata'],
     };
   }

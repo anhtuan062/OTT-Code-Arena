@@ -99,6 +99,7 @@ describe('Match Runner', () => {
       const revisionExecutor: SourceRevisionExecutor = {
         async executeRevision(context, revision, request) {
           expect(context.revisionScopeId).toBe('test-match');
+          expect(context.resourceLimits).toEqual({ maxMemoryBytes: 128 * 1024 * 1024, maxCpuPercent: 50, maxProcesses: 8 });
           calls.push(revision);
           const move = request.legal_moves[0]!;
           return {
@@ -123,7 +124,7 @@ describe('Match Runner', () => {
       const sourceBot: BotDefinition = {
         botId: 'bot-a', player: 'A', command: '', args: [], execution,
       };
-      const runner = createMatchRunner(createTestConfig({ maxTurns: 1 }), sourceBot, playerB, {}, legacyExecutor, revisionExecutor, async pinned => {
+      const runner = createMatchRunner(createTestConfig({ maxTurns: 1, resourceLimits: { maxMemoryBytes: 128 * 1024 * 1024, maxCpuPercent: 50, maxProcesses: 8 } }), sourceBot, playerB, {}, legacyExecutor, revisionExecutor, async pinned => {
         expect(pinned).toEqual(execution);
         return Buffer.from('print("ok")');
       });
@@ -547,6 +548,33 @@ describe('Match Runner', () => {
 
       expect(result.winner).toBe('B');
       expect(result.terminationReason).toBe('bot_illegal_move');
+    });
+
+    it('should penalize a bot with loss when repeating moves 3 times (d3-d4-d3-d4-d3)', async () => {
+      // Oscillating bot that repeats piece A-dam-1 back and forth between c1 and c2
+      const oscillatingBot: BotDefinition = {
+        botId: 'oscillating-bot',
+        player: 'A',
+        command: 'node',
+        args: ['-e', `
+          const fs = require('fs');
+          const input = fs.readFileSync(0, 'utf-8');
+          const req = JSON.parse(input);
+          // Target c2 on turn 1, 5, etc.; c1 on turn 3, 7, etc.
+          const targetTo = req.turn % 4 === 1 ? 'c2' : 'c1';
+          const move = req.legal_moves.find(m => m.piece_id === 'A-dam-1' && m.to === targetTo)
+            || req.legal_moves[0];
+          console.log(JSON.stringify({ move: { piece_id: move.piece_id, from: move.from, to: move.to } }));
+        `],
+      };
+
+      const runner = createMatchRunner(createTestConfig({ maxTurns: 50 }), oscillatingBot, playerB);
+      const result = await runner.run();
+
+      // Bot A repeated 3 times (c1-c2-c1-c2-c1), so Bot A loses and Bot B wins by repetition
+      expect(result.winner).toBe('B');
+      expect(result.terminationReason).toBe('repetition');
+      expect(result.turnCount).toBe(7);
     });
   });
 });

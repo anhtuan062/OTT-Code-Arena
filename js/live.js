@@ -127,8 +127,6 @@ function replayParticipantName(participants, player) {
 
 function replayMovePlayer(move) {
   if (move?.player === 'A' || move?.player === 'B') return move.player;
-  if (typeof move?.pieceId === 'string' && move.pieceId.startsWith('A-')) return 'A';
-  if (typeof move?.pieceId === 'string' && move.pieceId.startsWith('B-')) return 'B';
   return null;
 }
 

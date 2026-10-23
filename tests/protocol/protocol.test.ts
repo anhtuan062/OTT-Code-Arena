@@ -364,6 +364,15 @@ describe('Bot Protocol - Types and Validation', () => {
         }
       }
     });
+
+    it('carries supported rule modifiers without deriving ownership from ids', () => {
+      const request = constructBotRequest('match-conversion', state, legalMoves, { conversion: true });
+      expect(request.rules).toEqual({ conversion: true });
+      expect(validateBotRequest(request).valid).toBe(true);
+      const convertedPiece = { ...request.pieces[0], id: 'B-dam-1', player: 'A' as const };
+      expect(convertedPiece.player).toBe('A');
+      expect(convertedPiece.id.startsWith('B-')).toBe(true);
+    });
   });
 
   describe('Integration with GameEngine', () => {

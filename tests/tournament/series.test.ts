@@ -100,7 +100,7 @@ describe('BO3 tournament series', () => {
       async isAvailable() { return true; },
     };
     const manager = new TournamentManager({ repository, executor, defaultMatchConfig: { bestOf: 3 } });
-    await manager.createTournament('bo3', 'BO3');
+    await manager.createTournament('bo3', 'BO3', 'single_round_robin');
     await manager.registerParticipant('bo3', 'P1', 'Player 1', { botId: 'B1', command: 'node', args: [] });
     await manager.registerParticipant('bo3', 'P2', 'Player 2', { botId: 'B2', command: 'node', args: [] });
     await manager.openRegistration('bo3');
@@ -145,7 +145,7 @@ describe('BO3 tournament series', () => {
       async isAvailable() { return true; },
     };
     const manager = new TournamentManager({ repository, executor, defaultMatchConfig: { bestOf: 3 } });
-    await manager.createTournament('bo3-stop', 'BO3 stop');
+    await manager.createTournament('bo3-stop', 'BO3 stop', 'single_round_robin');
     await manager.registerParticipant('bo3-stop', 'P1', 'Player 1', { botId: 'B1', command: 'node', args: [] });
     await manager.registerParticipant('bo3-stop', 'P2', 'Player 2', { botId: 'B2', command: 'node', args: [] });
     await manager.openRegistration('bo3-stop');
@@ -173,7 +173,7 @@ describe('BO3 tournament series', () => {
       defaultMatchConfig: { bestOf: 2 },
       enableBo1MatchScheduler: true,
     });
-    await manager.createTournament('bo2', 'BO2');
+    await manager.createTournament('bo2', 'BO2', 'single_round_robin');
     await manager.registerParticipant('bo2', 'P1', 'Player 1', { botId: 'B1', command: 'node', args: [] });
     await manager.registerParticipant('bo2', 'P2', 'Player 2', { botId: 'B2', command: 'node', args: [] });
     await manager.openRegistration('bo2');
@@ -207,7 +207,7 @@ describe('BO3 tournament series', () => {
       };
       const config = { repository: crashRepository, executor, defaultMatchConfig: { bestOf: 2 as const } };
       const manager = new TournamentManager(config);
-      await manager.createTournament('bo2-recovery', 'BO2 recovery');
+      await manager.createTournament('bo2-recovery', 'BO2 recovery', 'single_round_robin');
       await manager.registerParticipant('bo2-recovery', 'P1', 'Player 1', { botId: 'B1', command: 'node', args: [] });
       await manager.registerParticipant('bo2-recovery', 'P2', 'Player 2', { botId: 'B2', command: 'node', args: [] });
       await manager.openRegistration('bo2-recovery');

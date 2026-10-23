@@ -13,6 +13,7 @@ const pageParts = [
   ['div', 'tournament-detail', 'views/pages/tournament-detail.html'],
   ['div', 'replay-view', 'views/pages/replay.html'],
   ['div', 'bot-playground', 'views/pages/bot-playground.html']
+  ,['div', 'player-guide', 'views/pages/player-guide.html']
 ];
 
 function findRootElement(source, tagName, id) {

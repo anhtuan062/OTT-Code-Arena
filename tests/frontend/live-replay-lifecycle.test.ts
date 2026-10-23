@@ -67,7 +67,7 @@ describe('LIVE.1H replay navigation lifecycle', () => {
     expect(app).toContain('winner: series.winner ?? null');
     expect(app).toContain('replayParticipantName(currentParticipants, latestMovePlayer)');
     expect(app).toContain('function replayMovePlayer(move)');
-    expect(app).toContain("move.pieceId.startsWith('A-')");
+    expect(app).toContain("move?.player === 'A' || move?.player === 'B'");
     expect(app).toContain('updateReplaySeriesSideColors(');
     expect(app).toContain('renderReplayPieceCounts(snapshot.state, {');
     expect(app).toContain('A: currentSideAId === fixedAId ? \'A\' : \'B\'');

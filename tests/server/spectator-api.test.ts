@@ -26,7 +26,7 @@ describe('authenticated tournament-wide spectator capability', () => {
   }
 
   async function writeFixture(status: 'running' | 'completed' = 'running') {
-    const tournament = createTournament(tournamentId, 'Spectator policy fixture');
+    const tournament = createTournament(tournamentId, 'Spectator policy fixture', 'single_round_robin');
     tournament.status = status;
     tournament.startedAt = new Date().toISOString();
     tournament.completedAt = status === 'completed' ? new Date().toISOString() : null;

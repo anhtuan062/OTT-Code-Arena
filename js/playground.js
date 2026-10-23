@@ -43,11 +43,11 @@ function initBotPlayground() {
   const container = $('#bot-playground');
   if (!container) return;
 
+  setupPlaygroundEvents();
   loadPlaygroundBotsList();
   setupPlaygroundCode();
   setupPlaygroundPiecePickerTokens();
   renderPlaygroundBoard();
-  setupPlaygroundEvents();
 }
 
 function setupPlaygroundPiecePickerTokens() {
@@ -91,21 +91,47 @@ async function loadPlaygroundBotsList(botsList = null) {
   const currentVal = select.value;
   select.replaceChildren(create('option', { value: '', text: '-- Chọn Bot để kiểm thử --' }));
 
-  bots.forEach(bot => {
-    select.appendChild(create('option', {
-      value: bot.id,
-      text: `${bot.name} (${bot.selectedRevision?.runtimeId === 'python3' ? 'Python 3' : 'C++17'})`
-    }));
-  });
+  if (bots.length > 0) {
+    const userGroup = create('optgroup', { label: 'Bot của bạn' });
+    bots.forEach(bot => {
+      userGroup.appendChild(create('option', {
+        value: bot.id,
+        text: `${bot.name || bot.id} (${bot.selectedRevision?.runtimeId === 'python3' ? 'Python 3' : 'C++17'})`
+      }));
+    });
+    select.appendChild(userGroup);
+  }
 
-  if (currentVal && bots.some(b => b.id === currentVal)) {
+  const sampleGroup = create('optgroup', { label: 'Bot mẫu có sẵn (Strategy SDK)' });
+  sampleGroup.appendChild(create('option', {
+    value: 'sample-cpp',
+    text: '🤖 Bot mẫu C++17 (Strategy SDK)'
+  }));
+  sampleGroup.appendChild(create('option', {
+    value: 'sample-python3',
+    text: '🐍 Bot mẫu Python 3 (Strategy SDK)'
+  }));
+  select.appendChild(sampleGroup);
+
+  const noBotsBanner = $('#playground-no-bots-banner');
+  if (noBotsBanner) {
+    noBotsBanner.hidden = (bots.length > 0);
+  }
+
+  if (currentVal && (bots.some(b => b.id === currentVal) || currentVal.startsWith('sample-'))) {
     select.value = currentVal;
-  } else if (!currentVal && bots.length > 0) {
-    const targetBot = (state.currentBot && bots.some(b => b.id === state.currentBot.id))
-      ? state.currentBot
-      : bots[0];
-    select.value = targetBot.id;
-    select.dispatchEvent(new Event('change'));
+  } else {
+    select.value = '';
+    const codeArea = $('#playground-code');
+    if (codeArea && !state.practiceDraft?.source) {
+      codeArea.value = '';
+      codeArea.readOnly = true;
+      updatePlaygroundCodeStats();
+    }
+    const runtimeSelect = $('#playground-runtime-selector');
+    if (runtimeSelect && !state.practiceDraft?.runtimeId) {
+      runtimeSelect.disabled = true;
+    }
   }
 }
 
@@ -358,7 +384,7 @@ async function runPlaygroundSingleTest() {
   const source = codeArea?.value || '';
   const runtimeId = $('#playground-runtime-selector')?.value || 'cpp';
   if (!selectedBotId || !source.trim()) {
-    setPlaygroundToast('Vui lòng chọn Bot từ danh sách trước khi kiểm thử.', 'error');
+    setPlaygroundToast('Vui lòng chọn Bot từ danh sách hoặc nạp Bot mẫu trước khi kiểm thử.', 'error');
     return;
   }
 
@@ -393,7 +419,7 @@ async function runPlaygroundSingleTest() {
     };
 
     let result;
-    if (selectedBotId) {
+    if (selectedBotId && !selectedBotId.startsWith('sample-')) {
       const selectedBot = (state.bots || []).find(b => b.id === selectedBotId);
       const revisionId = selectedBot?.selectedRevision?.revisionId;
       if (revisionId && !state.sourceDirty) {
@@ -441,14 +467,19 @@ async function runPlaygroundSingleTest() {
 
       if (resultBody) resultBody.hidden = false;
       switchPlaygroundTab('result');
-      setPlaygroundToast(`Test thành công! Bot đã chọn nước đi ${move.from} → ${move.to}.`, 'info');
+      const botLabel = selectedBotId === 'sample-cpp'
+        ? 'Bot mẫu C++17'
+        : selectedBotId === 'sample-python3'
+          ? 'Bot mẫu Python 3'
+          : (state.bots?.find(b => b.id === selectedBotId)?.name || 'Bot');
+      setPlaygroundToast(`Test thành công! ${botLabel} đã chọn nước đi ${move.from} → ${move.to}.`, 'info');
 
       // Kích hoạt animation nước đi trên bàn cờ
       animatePlaygroundMove(move.from, move.to, move.piece_id, result.capture);
 
       addPlaygroundHistoryEntry({
         success: true,
-        summary: `Đi từ ${move.from} → ${move.to}`,
+        summary: `${botLabel}: ${move.from} → ${move.to}`,
         detail: `Quân ${move.piece_id}${result.capture ? ` ăn ${result.capture}` : ''}`,
         at: new Date()
       });
@@ -654,10 +685,33 @@ function setupPlaygroundEvents() {
   $('#playground-code')?.addEventListener('input', updatePlaygroundCodeStats);
   $('#playground-code')?.addEventListener('scroll', syncPlaygroundCodeHighlight, { passive: true });
 
+  $('#playground-create-bot-btn')?.addEventListener('click', () => {
+    if (typeof navigate === 'function') {
+      navigate('bot-workspace');
+    }
+  });
+
+  $('#playground-load-sample-cpp')?.addEventListener('click', () => {
+    const select = $('#playground-bot-selector');
+    if (select) {
+      select.value = 'sample-cpp';
+      select.dispatchEvent(new Event('change'));
+    }
+  });
+
+  $('#playground-load-sample-py')?.addEventListener('click', () => {
+    const select = $('#playground-bot-selector');
+    if (select) {
+      select.value = 'sample-python3';
+      select.dispatchEvent(new Event('change'));
+    }
+  });
+
   $('#playground-bot-selector')?.addEventListener('change', async (e) => {
     const botId = e.target.value;
     const codeArea = $('#playground-code');
     const runtimeSelect = $('#playground-runtime-selector');
+    const codeNote = $('#playground-code-note');
 
     if (!botId) {
       if (codeArea) {
@@ -666,6 +720,27 @@ function setupPlaygroundEvents() {
         updatePlaygroundCodeStats();
       }
       if (runtimeSelect) runtimeSelect.disabled = true;
+      if (codeNote) {
+        codeNote.textContent = 'Chỉ hiển thị mã nguồn Bot được chọn. Để sửa code, hãy vào Không gian Bot.';
+      }
+      return;
+    }
+
+    if (botId === 'sample-cpp' || botId === 'sample-python3') {
+      const runtime = botId === 'sample-python3' ? 'python3' : 'cpp';
+      if (runtimeSelect) {
+        runtimeSelect.value = runtime;
+        runtimeSelect.disabled = true;
+      }
+      if (codeArea) {
+        codeArea.value = PLAYGROUND_STARTER_CODE[runtime] || PLAYGROUND_STARTER_CODE.cpp;
+        codeArea.readOnly = true;
+        updatePlaygroundCodeStats();
+      }
+      if (codeNote) {
+        codeNote.textContent = `Đang xem Bot mẫu ${runtime === 'cpp' ? 'C++17' : 'Python 3'} (Strategy SDK). Tạo Bot để tùy biến chiến thuật.`;
+      }
+      setPlaygroundToast('');
       return;
     }
 
@@ -712,6 +787,9 @@ function setupPlaygroundEvents() {
             codeArea.readOnly = true;
             updatePlaygroundCodeStats();
           }
+        }
+        if (codeNote) {
+          codeNote.textContent = 'Chỉ hiển thị mã nguồn Bot được chọn. Để sửa code, hãy vào Không gian Bot.';
         }
       }
     } catch (err) {

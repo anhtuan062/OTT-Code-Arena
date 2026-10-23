@@ -280,13 +280,15 @@ describe('Phase 3D - Large Tournament Reliability Test', () => {
       console.log(`Heap Used Delta: ${heapDeltaMB} MB`);
       console.log(`Peak Concurrency: ${executor.peakConcurrency}`);
 
-      // Verification: Exact match count formula for 256 bots (128 prelim + 192 group + 63 knockout = 383)
-      expect(totalMatches).toBe(383);
+      // The planner creates 383 series (128 prelim + 192 group + 63 knockout).
+      // The executor telemetry records individual games; decisive BO2/BO3
+      // series stop after two games in this deterministic fixture.
+      expect(totalMatches).toBe(766);
       expect(executor.peakConcurrency).toBe(1); // Pull-based sequential execution
 
       // Verification: Zero duplicate match executions
       const uniqueExecutedMatches = new Set(executedMatches);
-      expect(uniqueExecutedMatches.size).toBe(383);
+      expect(uniqueExecutedMatches.size).toBe(766);
 
       // Verification: Zero lost results in repository
       const savedMatchRecords = await repository.listMatchResults(tournamentId);
@@ -334,7 +336,7 @@ describe('Phase 3D - Large Tournament Reliability Test', () => {
       expect(completedTourney.standings).toBeDefined();
       expect(completedTourney.standings.length).toBe(256);
       expect(completedTourney.standings[0]?.participantId).toBe(championId);
-    }, 45_000);
+    }, 120_000);
   });
 
   describe('2. Independent Regional Qualifiers & Stage Barrier Synchronization', () => {

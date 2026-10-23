@@ -2,10 +2,10 @@
  * Match Runner - Types
  */
 
-import type { GameState, GameConfig, InitialPieceConfig, MoveOption, ApplyResult, WinReason, Piece } from '@engine/types.js';
+import type { GameState, GameConfig, InitialPieceConfig, MoveOption, ApplyResult, WinReason, Piece, RuleModifiers } from '@engine/types.js';
 import type { BotProcessConfig } from '@bot-runner/types.js';
 import type { BotRequest, BotResponse, BotMoveOption, BotPiece, BotError } from '@bot-protocol/types.js';
-import type { BotFailureStage } from '@bot-executor/types.js';
+import type { BotFailureStage, ResourceLimits } from '@bot-executor/types.js';
 
 export type Player = 'A' | 'B';
 export type SourceRuntimeId = 'cpp' | 'python3';
@@ -93,6 +93,10 @@ export interface MatchConfig {
   logRequests: boolean;
   logResponses: boolean;
   logStates: boolean;
+  /** Per-tournament source runtime limits, bounded by executor policy. */
+  resourceLimits?: ResourceLimits;
+  /** Immutable rules selected for this match; absent means standard. */
+  ruleModifiers?: RuleModifiers;
   /** Optional deterministic opening layout for this match/game. */
   initialPieces?: InitialPieceConfig[];
 }
@@ -123,6 +127,7 @@ export interface TurnLog {
     durationMs: number;
   };
   appliedMove?: {
+    player: Player;
     pieceId: string;
     from: { row: number; col: number };
     to: { row: number; col: number };
@@ -150,6 +155,7 @@ export interface MatchResult {
   finalState: GameState;
   initialState: GameState;
   turnLog: TurnLog[];
+  ruleModifiers?: RuleModifiers;
   metadata?: Record<string, unknown> & { executionDiagnostics?: ExecutionDiagnostic[] };
 }
 
@@ -169,6 +175,8 @@ export interface MatchReplay {
   finalState: GameState;
   winner: Player | 'draw' | null;
   terminationReason: TerminationReason | null;
+  /** New replays record the immutable modifier set; legacy replays omit it and are Standard. */
+  ruleModifiers?: RuleModifiers;
   metadata?: { sourceRevisions?: ExecutionProvenance[]; executionDiagnostics?: ExecutionDiagnostic[] };
   /** Authorized tournament projection; absent on legacy replay records. */
   participantIdentities?: {

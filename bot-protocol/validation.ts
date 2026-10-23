@@ -106,6 +106,10 @@ export function validateBotRequest(request: unknown): { valid: boolean; error?: 
     return { valid: false, error: { code: 'INVALID_BOARD_SIZE', message: `board_size must be ${BOARD_SIZE}` } };
   }
 
+  if (r.rules !== undefined && (typeof r.rules !== 'object' || r.rules === null || typeof (r.rules as Record<string, unknown>).conversion !== 'boolean')) {
+    return { valid: false, error: { code: 'INVALID_RULES', message: 'rules.conversion must be boolean' } };
+  }
+
   if (!Array.isArray(r.pieces)) {
     return { valid: false, error: { code: 'INVALID_PIECES', message: 'pieces must be an array' } };
   }
@@ -248,7 +252,8 @@ export function moveOptionToBotMoveOption(move: MoveOption): BotMoveOption {
 export function constructBotRequest(
   matchId: string,
   state: GameState,
-  legalMoves: MoveOption[]
+  legalMoves: MoveOption[],
+  ruleModifiers: { conversion: boolean } = { conversion: false },
 ): BotRequest {
   const pieces = state.pieces.map(pieceToBotPiece);
   const legal_moves = legalMoves.map(moveOptionToBotMoveOption);
@@ -261,6 +266,7 @@ export function constructBotRequest(
     board_size: state.boardSize,
     pieces,
     legal_moves,
+    rules: { conversion: Boolean(ruleModifiers.conversion) },
   };
 }
 

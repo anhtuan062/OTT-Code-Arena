@@ -71,8 +71,9 @@ if (mode === 'server' || mode === 'timeout') {
     const cookie = loginResponse.headers.get('set-cookie')?.split(';', 1)[0] ?? '';
     const csrf = login.csrfToken;
     const api = async (url, body) => fetch('http://127.0.0.1:' + port + url, { method: 'POST', headers: { 'content-type': 'application/json', cookie, 'x-csrf-token': csrf }, body: JSON.stringify(body) });
-    const created = await api('/api/tournaments', { name: 'Timeout BO3', format: 'single_round_robin' });
-    const tournament = await created.json();
+    const created = await manager.createTournament('child-timeout', 'Timeout BO3', 'single_round_robin');
+    const tournament = created.data;
+    await manager.updateMetadata(tournament.tournamentId, { ownerId: account.id });
     const bot = id => ({ botId: id, command: 'node', args: [] });
     await manager.registerParticipant(tournament.tournamentId, 'A', 'A', bot('a'));
     await manager.registerParticipant(tournament.tournamentId, 'B', 'B', bot('b'));
@@ -131,7 +132,7 @@ if (mode === 'server' || mode === 'timeout') {
     async isAvailable() { return true; },
   };
   const manager = new TournamentManager({ repository, executor, defaultMatchConfig: { bestOf: 3 } });
-  const created = await manager.createTournament('child-bo3', 'Child BO3');
+  const created = await manager.createTournament('child-bo3', 'Child BO3', 'single_round_robin');
   if (!created.success) throw new Error(created.error);
   const bot = id => ({ botId: id, command: 'node', args: [] });
   await manager.registerParticipant('child-bo3', 'A', 'A', bot('a'));

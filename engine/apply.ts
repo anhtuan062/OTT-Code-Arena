@@ -11,6 +11,8 @@ import type {
   ApplyResult,
   WinReason,
 } from './types.js';
+import type { RuleModifiers } from './types.js';
+import { DEFAULT_RULE_MODIFIERS } from './types.js';
 import { cloneState, getPieceById, getPieceAt, getPlayerPieces, opponent, isPlayerGoalSquare } from './state.js';
 import { validateMove } from './moves.js';
 
@@ -25,9 +27,9 @@ function checkGoalSquare(pos: Position, player: Player): WinReason | null {
   return null;
 }
 
-export function applyMove(state: GameState, move: MoveOption): ApplyResult {
+export function applyMove(state: GameState, move: MoveOption, ruleModifiers: RuleModifiers = DEFAULT_RULE_MODIFIERS): ApplyResult {
   // Validate first
-  const validation = validateMove(state, move.pieceId, move.to.row, move.to.col);
+  const validation = validateMove(state, move.pieceId, move.to.row, move.to.col, ruleModifiers);
   if (!validation.valid) {
     return {
       success: false,
@@ -50,8 +52,14 @@ export function applyMove(state: GameState, move: MoveOption): ApplyResult {
       const captured = newState.pieces[capturedIdx];
       if (captured) {
         capturedPiece = { id: captured.id, type: captured.type, player: captured.player, row: captured.row, col: captured.col };
+        if (ruleModifiers.conversion) {
+          captured.player = piece.player;
+          captured.row = fromPos.row;
+          captured.col = fromPos.col;
+        } else {
+          newState.pieces.splice(capturedIdx, 1);
+        }
       }
-      newState.pieces.splice(capturedIdx, 1);
     }
   }
 
@@ -99,8 +107,8 @@ export function applyMove(state: GameState, move: MoveOption): ApplyResult {
   };
 }
 
-export function applyMoveByCoords(state: GameState, pieceId: string, toRow: number, toCol: number): ApplyResult {
-  const moveOption = findMoveOptionForCoords(state, pieceId, toRow, toCol);
+export function applyMoveByCoords(state: GameState, pieceId: string, toRow: number, toCol: number, ruleModifiers: RuleModifiers = DEFAULT_RULE_MODIFIERS): ApplyResult {
+  const moveOption = findMoveOptionForCoords(state, pieceId, toRow, toCol, ruleModifiers);
   if (!moveOption) {
     return {
       success: false,
@@ -109,10 +117,10 @@ export function applyMoveByCoords(state: GameState, pieceId: string, toRow: numb
       winReason: null,
     };
   }
-  return applyMove(state, moveOption);
+  return applyMove(state, moveOption, ruleModifiers);
 }
 
-function findMoveOptionForCoords(state: GameState, pieceId: string, toRow: number, toCol: number): MoveOption | null {
+function findMoveOptionForCoords(state: GameState, pieceId: string, toRow: number, toCol: number, _ruleModifiers: RuleModifiers): MoveOption | null {
   const piece = getPieceById(state, pieceId);
   if (!piece) return null;
 

@@ -115,6 +115,7 @@ export class PublicReplayExporter {
       matchId: replay.matchId, protocolVersion: replay.protocolVersion, initialState: state(replay.initialState),
       moves: replay.moves.map(move => ({ turn: move.turn, player: move.player, pieceId: move.pieceId, from: { ...move.from }, to: { ...move.to }, captures: move.captures, timestamp: move.timestamp })),
       finalState: state(replay.finalState), winner: replay.winner, terminationReason: replay.terminationReason,
+      ...(replay.ruleModifiers ? { ruleModifiers: { ...replay.ruleModifiers } } : {}),
       participantIdentities: { A: identity(participantA), B: identity(participantB) },
     });
     const result = base(projected, pairing.participantA, pairing.participantB);

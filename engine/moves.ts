@@ -2,7 +2,7 @@
  * Move generation and validation
  */
 
-import { GameState, Piece, Position, Player, PieceType, MoveOption, ValidationResult, CAPTURE_RULES, DIRECTIONS, BOARD_SIZE } from './types.js';
+import { GameState, Piece, Position, Player, PieceType, MoveOption, ValidationResult, CAPTURE_RULES, DIRECTIONS, BOARD_SIZE, RuleModifiers, DEFAULT_RULE_MODIFIERS } from './types.js';
 import { getPieceById, getPieceAt, isInsideBoard, opponent } from './state.js';
 
 export function canCapture(attackerType: PieceType, defenderType: PieceType): boolean {
@@ -10,7 +10,7 @@ export function canCapture(attackerType: PieceType, defenderType: PieceType): bo
   return CAPTURE_RULES[attackerType] === defenderType;
 }
 
-export function generateLegalMovesForPiece(state: GameState, pieceId: string): MoveOption[] {
+export function generateLegalMovesForPiece(state: GameState, pieceId: string, _ruleModifiers: RuleModifiers = DEFAULT_RULE_MODIFIERS): MoveOption[] {
   const piece = getPieceById(state, pieceId);
   if (!piece) return [];
 
@@ -50,16 +50,16 @@ export function generateLegalMovesForPiece(state: GameState, pieceId: string): M
   return moves;
 }
 
-export function generateAllLegalMoves(state: GameState): MoveOption[] {
+export function generateAllLegalMoves(state: GameState, ruleModifiers: RuleModifiers = DEFAULT_RULE_MODIFIERS): MoveOption[] {
   const playerPieces = state.pieces.filter(p => p.player === state.currentPlayer);
   const allMoves: MoveOption[] = [];
   for (const piece of playerPieces) {
-    allMoves.push(...generateLegalMovesForPiece(state, piece.id));
+    allMoves.push(...generateLegalMovesForPiece(state, piece.id, ruleModifiers));
   }
   return allMoves;
 }
 
-export function validateMove(state: GameState, pieceId: string, toRow: number, toCol: number): ValidationResult {
+export function validateMove(state: GameState, pieceId: string, toRow: number, toCol: number, _ruleModifiers: RuleModifiers = DEFAULT_RULE_MODIFIERS): ValidationResult {
   const piece = getPieceById(state, pieceId);
   if (!piece) {
     return { valid: false, reason: 'Piece not found' };
@@ -99,11 +99,11 @@ export function validateMove(state: GameState, pieceId: string, toRow: number, t
   return { valid: true };
 }
 
-export function isMoveLegal(state: GameState, pieceId: string, toRow: number, toCol: number): boolean {
-  return validateMove(state, pieceId, toRow, toCol).valid;
+export function isMoveLegal(state: GameState, pieceId: string, toRow: number, toCol: number, ruleModifiers: RuleModifiers = DEFAULT_RULE_MODIFIERS): boolean {
+  return validateMove(state, pieceId, toRow, toCol, ruleModifiers).valid;
 }
 
-export function findMoveOption(state: GameState, pieceId: string, toRow: number, toCol: number): MoveOption | null {
-  const moves = generateLegalMovesForPiece(state, pieceId);
+export function findMoveOption(state: GameState, pieceId: string, toRow: number, toCol: number, ruleModifiers: RuleModifiers = DEFAULT_RULE_MODIFIERS): MoveOption | null {
+  const moves = generateLegalMovesForPiece(state, pieceId, ruleModifiers);
   return moves.find(m => m.to.row === toRow && m.to.col === toCol) ?? null;
 }

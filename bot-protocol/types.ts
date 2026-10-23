@@ -10,6 +10,10 @@ export type Player = 'A' | 'B';
 export type PieceType = 'dam' | 'la' | 'keo';
 export type GameStatus = 'playing' | 'finished';
 
+export interface BotRuleModifiers {
+  conversion: boolean;
+}
+
 export interface Position {
   row: number;  // 0-8
   col: number;  // 0-8
@@ -37,6 +41,8 @@ export interface BotRequest {
   board_size: number;
   pieces: BotPiece[];
   legal_moves: BotMoveOption[];
+  /** Optional for old bots; present on new match requests. */
+  rules?: BotRuleModifiers;
 }
 
 export interface BotMove {

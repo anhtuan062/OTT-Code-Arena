@@ -35,6 +35,7 @@ struct GameState {
     char player = 0;
     int board_size = 0;
     std::vector<Piece> pieces;
+    bool conversion = false;
 };
 
 namespace detail {
@@ -140,6 +141,7 @@ int run(Strategy choose_move) {
     const std::string player = detail::field(input, "player");
     state.player = player.size() == 1 ? player[0] : 0;
     state.board_size = detail::integerField(input, "board_size");
+    state.conversion = input.find("\"rules\":{\"conversion\":true") != std::string::npos;
     if (state.protocol_version != "0.1.0" || state.match_id.empty() ||
         (state.player != 'A' && state.player != 'B') || state.board_size != 9 || state.turn < 1) {
         std::cerr << "invalid game state\n";

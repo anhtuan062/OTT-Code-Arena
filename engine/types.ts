@@ -5,7 +5,7 @@
 export type Player = 'A' | 'B';
 export type PieceType = 'dam' | 'la' | 'keo';
 export type GameStatus = 'playing' | 'finished';
-export type WinReason = 'all_pieces_captured' | 'goal_reached';
+export type WinReason = 'all_pieces_captured' | 'goal_reached' | 'repetition';
 
 export const BOARD_SIZE = 9;
 export const COLS = 'abcdefghi' as const;
@@ -76,7 +76,17 @@ export interface GameConfig {
   maxTurns: number;
   turnTimeoutMs: number;
   initialPieces: InitialPieceConfig[];
+  /** Optional independent rule modifiers; omitted means the standard rules. */
+  ruleModifiers: RuleModifiers;
 }
+
+export interface RuleModifiers {
+  conversion: boolean;
+}
+
+export const DEFAULT_RULE_MODIFIERS: RuleModifiers = {
+  conversion: false,
+};
 
 export interface InitialPieceConfig {
   type: PieceType;
@@ -89,6 +99,7 @@ export const DEFAULT_CONFIG: GameConfig = {
   boardSize: BOARD_SIZE,
   maxTurns: 200,
   turnTimeoutMs: 2000,
+  ruleModifiers: DEFAULT_RULE_MODIFIERS,
   initialPieces: [
     // Player A (top)
     { type: 'dam', player: 'A', row: 0, col: 2 },

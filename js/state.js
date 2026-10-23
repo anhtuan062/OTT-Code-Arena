@@ -103,6 +103,7 @@ const state = {
   spectatorMode: false,
   detailStatus: null,
   detailRefreshInFlight: false,
+  tournamentLifecycleRefreshTimer: null,
   queueRefreshInFlight: false,
   conditionalResponseCache: new Map(),
   detailRequestBotNames: new Map(),

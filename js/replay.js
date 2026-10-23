@@ -442,7 +442,16 @@ function buildStateAt(moveIndex) {
     const move = state.replay.moves[index]; if (!move) continue;
     const piece = board.pieces.find(candidate => candidate.id === move.pieceId);
     if (!piece || !move.to) continue;
-    if (move.captures) board.pieces = board.pieces.filter(candidate => candidate.id !== move.captures);
+    if (move.captures) {
+      const captured = board.pieces.find(candidate => candidate.id === move.captures);
+      if (captured && state.replay.ruleModifiers?.conversion) {
+        captured.player = move.player;
+        captured.row = piece.row;
+        captured.col = piece.col;
+      } else {
+        board.pieces = board.pieces.filter(candidate => candidate.id !== move.captures);
+      }
+    }
     piece.row = move.to.row; piece.col = move.to.col;
     board.currentPlayer = move.player === 'A' ? 'B' : 'A';
     board.turn = Number(move.turn) + 1;

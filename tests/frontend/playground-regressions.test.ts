@@ -86,4 +86,13 @@ globalThis.createElement = create;`, context);
     expect(source).toContain("runtimeId === 'cpp' ? 'C++17' : 'Python 3'");
     expect(source).toContain('syncPlaygroundCodeHighlight');
   });
+
+  it('defaults playground-bot-selector to empty placeholder without auto-selecting existing bot', async () => {
+    const source = await readSource('js/playground.js');
+
+    // Ensures default option is '-- Chọn Bot để kiểm thử --'
+    expect(source).toMatch(/create\('option',\s*\{\s*value:\s*'',\s*text:\s*'-- Chọn Bot để kiểm thử --'\s*\}\)/);
+    // Verifies it does NOT auto-select targetBot when currentVal is empty
+    expect(source).not.toMatch(/else if \(!currentVal && bots\.length > 0\)/);
+  });
 });
