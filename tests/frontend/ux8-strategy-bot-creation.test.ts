@@ -112,4 +112,16 @@ describe('UX.8 Strategy SDK-only Bot creation', () => {
     expect(app).toContain('void restoreBotWorkspace()');
     expect(app).toContain("persistBotWorkspaceSelection(bot?.id || '')");
   });
+  it('provides visible onboarding and editing guidance banners in bot-workspace', async () => {
+    const [app, page] = await Promise.all([source('app.js'), source('views/pages/bot-workspace.html')]);
+    expect(page).toContain('id="bot-workspace-notice"');
+    expect(page).toContain('id="bot-workspace-notice-title"');
+    expect(page).toContain('id="bot-workspace-notice-text"');
+    expect(page).toContain('id="notice-create-draft-btn"');
+    expect(app).toContain('function syncBotWorkspaceNotice()');
+    expect(app).toContain('async function unlockDraftFromNotice()');
+    expect(app).toContain("notice.classList.add('is-readonly')");
+    expect(app).toContain("notice.classList.add('is-draft')");
+    expect(app).toContain("on('#notice-create-draft-btn', 'click'");
+  });
 });

@@ -140,6 +140,10 @@ export function getAllTournamentPairings(tournament: Tournament): TournamentPair
     }
   }
 
+  if (allPairings.length === 0 && Array.isArray(tournament.rounds) && tournament.rounds.length > 0) {
+    return tournament.rounds.flatMap(r => r.pairings);
+  }
+
   return allPairings;
 }
 
@@ -193,6 +197,15 @@ export function findPairingInTournament(
             return { stage, group, round, pairing: found };
           }
         }
+      }
+    }
+  }
+
+  if (tournament.rounds) {
+    for (const round of tournament.rounds) {
+      const found = round.pairings.find(p => p.pairingId === pairingId);
+      if (found) {
+        return { round, pairing: found };
       }
     }
   }

@@ -1555,8 +1555,7 @@ function renderDashboardBotList(bots) {
     addCopy.append(create('strong', { text: '+ Tạo Bot mới' }), create('small', { text: 'Thêm chiến thuật thi đấu' }));
     addItem.append(plusIcon, addCopy);
     addItem.addEventListener('click', () => {
-      openModal('create-bot-modal');
-      const input = $('#bot-name'); if (input) { input.value = ''; input.focus(); }
+      openBotWorkspace();
     });
     list.appendChild(addItem);
   }
@@ -1963,6 +1962,7 @@ function setSourceDirty(dirty) {
   if (dirty) persistBotWorkspaceDraft();
   updatePracticeButton();
   syncWorkspaceStatus();
+  if (typeof syncBotWorkspaceNotice === 'function') syncBotWorkspaceNotice();
 }
 
 function currentPracticeRevision() {
@@ -2064,6 +2064,68 @@ async function deleteRevision() {
   }
 }
 
+function syncBotWorkspaceNotice() {
+  const notice = $('#bot-workspace-notice');
+  const title = $('#bot-workspace-notice-title');
+  const text = $('#bot-workspace-notice-text');
+  const actions = $('#bot-workspace-notice-actions');
+  const shell = $('.bot-editor-panel .source-editor-shell');
+  const editor = $('#bot-source-editor');
+  if (!notice || !title || !text) return;
+  const mode = state.botWorkspaceMode;
+  const isReadOnly = Boolean(state.botWorkspaceReadOnly);
+  notice.classList.remove('is-readonly', 'is-draft');
+  if (shell) shell.classList.toggle('is-readonly', isReadOnly);
+  if (editor) editor.title = isReadOnly ? 'Nhấp vào khung mã nguồn để tạo bản nháp và bắt đầu chỉnh sửa' : '';
+  clear(text);
+  if (mode === 'create') {
+    title.textContent = 'Hướng dẫn tạo Bot mới';
+    text.append(
+      document.createTextNode('Nhập '),
+      create('strong', { text: 'Tên Bot' }),
+      document.createTextNode(', nhấp trực tiếp vào khung mã nguồn bên dưới để tùy biến chiến thuật (hoặc tải file / nạp từ GitHub), sau đó nhấn '),
+      create('strong', { text: 'Tạo Bot' }),
+      document.createTextNode('.')
+    );
+    if (actions) actions.hidden = true;
+  } else if (isReadOnly) {
+    notice.classList.add('is-readonly');
+    title.textContent = 'Phiên bản đã lưu (Chế độ chỉ đọc)';
+    text.append(
+      document.createTextNode('Phiên bản này đang ở chế độ chỉ đọc. '),
+      create('strong', { text: 'Nhấp vào khung mã nguồn' }),
+      document.createTextNode(' hoặc bấm nút bên phải để tạo bản nháp và bắt đầu chỉnh sửa.')
+    );
+    if (actions) actions.hidden = false;
+  } else {
+    notice.classList.add('is-draft');
+    title.textContent = 'Đang chỉnh sửa bản nháp';
+    text.append(
+      document.createTextNode('Bạn đang chỉnh sửa mã nguồn cho phiên bản tiếp theo. Nhấp vào khung soạn thảo để viết code. Khi hoàn tất, nhấn '),
+      create('strong', { text: 'Lưu phiên bản' }),
+      document.createTextNode(' ở góc trên.')
+    );
+    if (actions) actions.hidden = true;
+  }
+}
+async function unlockDraftFromNotice() {
+  const revision = typeof currentPracticeRevision === 'function' ? currentPracticeRevision() : null;
+  if (revision) {
+    await loadRevisionSource(revision, 'draft', false);
+    if (typeof showToast === 'function') showToast('Đã kích hoạt chế độ tạo bản nháp. Bạn có thể chỉnh sửa mã nguồn ngay.', 'info');
+    $('#bot-source-editor')?.focus();
+  } else {
+    state.botWorkspaceReadOnly = false;
+    const editor = $('#bot-source-editor');
+    if (editor) {
+      editor.readOnly = false;
+      editor.focus();
+    }
+    setWorkspaceStatus('Bản nháp mới');
+    syncBotWorkspaceNotice();
+  }
+}
+
 async function loadRevisionSource(revision, mode = 'view', confirmBeforeReplace = true) {
   if (confirmBeforeReplace && hasUnsavedBotWorkspaceChanges() && !window.confirm('Bạn có thay đổi chưa lưu. Tiếp tục sẽ thay thế nội dung hiện tại?')) return;
   setSourceError();
@@ -2082,6 +2144,7 @@ async function loadRevisionSource(revision, mode = 'view', confirmBeforeReplace 
     state.botWorkspaceDraftBase = mode === 'draft' ? revision.revisionId : null;
     $('#bot-source-editor').readOnly = state.botWorkspaceReadOnly;
     setWorkspaceStatus(state.botWorkspaceReadOnly ? 'Chỉ đọc · Phiên bản bất biến' : 'Bản nháp từ phiên bản đã lưu');
+    if (typeof syncBotWorkspaceNotice === 'function') syncBotWorkspaceNotice();
     // Opening a revision as an editable draft does not itself change the
     // source. Mark it dirty only after the editor emits an input event.
     setSourceDirty(false);
@@ -2106,6 +2169,7 @@ async function loadBotRevisions(bot) {
     // input/runtime changes should make the workspace dirty.
     setSourceDirty(false);
   }
+  if (typeof syncBotWorkspaceNotice === 'function') syncBotWorkspaceNotice();
 }
 
 function enhanceBotWorkspaceIcons() {
@@ -2210,6 +2274,7 @@ async function openBotWorkspace(bot = null) {
     updateEditorMetrics();
     setSourceDirty(true);
   }
+  if (typeof syncBotWorkspaceNotice === 'function') syncBotWorkspaceNotice();
   (bot ? $('#bot-source-editor') : $('#bot-workspace-name')).focus();
 }
 
@@ -4871,7 +4936,7 @@ function renderPhase1Creation(container, tournament) {
       form.append(create('div', { className: 'phase-settings-grid', children: [createFormGroup('Giới hạn lượt', phase1Number('edit-t-maxTurns', draft.matchConfig.maxTurns, 1, 10000, 1, settingsLocked)), createFormGroup('Timeout mỗi lượt (ms)', phase1Number('edit-t-turnTimeoutMs', draft.matchConfig.turnTimeoutMs, 1, 120000, 1, settingsLocked))] }), create('div', { className: 'phase-settings-grid', children: [createFormGroup('Source tối đa (bytes)', phase1Number('edit-t-maxSourceBytes', draft.botLimits.maxSourceBytes, 1, 65536, 1, settingsLocked)), createFormGroup('Memory (MB)', phase1Number('edit-t-memoryLimitMb', draft.botLimits.memoryLimitMb, 64, 256, 1, settingsLocked)), createFormGroup('CPU', phase1Number('edit-t-cpuLimit', draft.botLimits.cpuLimit, 0.1, 1, 0.1, settingsLocked)), createFormGroup('Process tối đa', phase1Number('edit-t-maxProcesses', draft.botLimits.maxProcesses, 1, 64, 1, settingsLocked)), createFormGroup('Bot tối đa mỗi competitor', phase1Number('edit-t-maxBotsPerCompetitor', draft.botLimits.maxBotsPerCompetitor, 1, 64, 1, settingsLocked))] }), createFormGroup('Runtime', create('input', { className: 'dialog-input', value: 'C++17, Python 3', attrs: { id: 'edit-t-runtime', type: 'text', readonly: 'true' } }), 'Runtime được quản lý bởi Bot registration và không phải tùy chọn tự do của giải đấu.'), create('p', { className: 'phase-settings-capacity', text: `Số Bot tối đa theo thể thức hiện tại: ${phase1MaxBots(draft.format)}.` }));
       pane.appendChild(form);
     }
-    pane.appendChild(phase1RuntimeNote('Các giới hạn Bot được lưu qua API nhưng chưa được áp dụng động vào Match Runner trong giai đoạn này. Không hiển thị tùy chọn ngoài contract Backend.'));
+    pane.appendChild(phase1RuntimeNote('Các giới hạn Bot được lưu qua API và được áp dụng khi đăng ký, preflight và thực thi trận. Không hiển thị tùy chọn ngoài contract Backend.'));
   }
   card.appendChild(pane);
   grid.appendChild(card);
@@ -12008,6 +12073,9 @@ function bindEvents() {
     const bot = state.bots.find(item => item.id === event.target.value);
     void openBotWorkspace(bot || null);
   });
+  on('#notice-create-draft-btn', 'click', () => {
+    if (typeof unlockDraftFromNotice === 'function') void unlockDraftFromNotice();
+  });
   on('#bot-search', 'input', event => { state.botSearch = event.target.value; state.botPage = 1; renderBotList(); });
   on('#bot-workspace-name', 'input', () => {
     const nameChanged = ($('#bot-workspace-name')?.value.trim() || '') !== state.sourceInitialName;
@@ -12033,6 +12101,17 @@ function bindEvents() {
   on('#load-github-source', 'click', () => void loadGitHubSourceIntoEditor(), { feature: 'bot-github-source-load' });
   on('#bot-source-editor', 'keydown', event => {
     if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Home', 'End', 'PageUp', 'PageDown'].includes(event.key)) event.stopPropagation();
+    if (state.botWorkspaceReadOnly) {
+      const revision = typeof currentPracticeRevision === 'function' ? currentPracticeRevision() : null;
+      if (revision && typeof loadRevisionSource === 'function') {
+        event.preventDefault();
+        void loadRevisionSource(revision, 'draft', false).then(() => {
+          if (typeof showToast === 'function') showToast('Đã kích hoạt chế độ tạo bản nháp. Bạn có thể chỉnh sửa mã nguồn ngay.', 'info');
+          $('#bot-source-editor')?.focus();
+        });
+      }
+      return;
+    }
     if (event.key === 'Enter' && !event.shiftKey && !event.ctrlKey && !event.metaKey && !event.target.readOnly) {
       event.preventDefault();
       sourceIndentOnEnter(event.target);
@@ -12092,7 +12171,18 @@ function bindEvents() {
   });
   on('#bot-source-editor', 'input', updateEditorMetrics, { feature: 'bot-source-editor-metrics' });
   on('#bot-source-editor', 'keyup', syncSourceEditorTools, { feature: 'bot-source-editor-cursor' });
-  on('#bot-source-editor', 'click', syncSourceEditorTools, { feature: 'bot-source-editor-cursor-click' });
+  on('#bot-source-editor', 'click', () => {
+    syncSourceEditorTools();
+    if (state.botWorkspaceReadOnly) {
+      const revision = typeof currentPracticeRevision === 'function' ? currentPracticeRevision() : null;
+      if (revision && typeof loadRevisionSource === 'function') {
+        void loadRevisionSource(revision, 'draft', false).then(() => {
+          if (typeof showToast === 'function') showToast('Đã kích hoạt chế độ tạo bản nháp. Bạn có thể chỉnh sửa mã nguồn ngay.', 'info');
+          $('#bot-source-editor')?.focus();
+        });
+      }
+    }
+  }, { feature: 'bot-source-editor-cursor-click' });
   on('#bot-source-editor', 'scroll', updateEditorMetrics, { options: { passive: true } });
   on('#source-format', 'click', formatSourceCode);
   on('#source-theme', 'click', () => {

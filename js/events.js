@@ -99,6 +99,9 @@ function bindEvents() {
     const bot = state.bots.find(item => item.id === event.target.value);
     void openBotWorkspace(bot || null);
   });
+  on('#notice-create-draft-btn', 'click', () => {
+    if (typeof unlockDraftFromNotice === 'function') void unlockDraftFromNotice();
+  });
   on('#bot-search', 'input', event => { state.botSearch = event.target.value; state.botPage = 1; renderBotList(); });
   on('#bot-workspace-name', 'input', () => {
     const nameChanged = ($('#bot-workspace-name')?.value.trim() || '') !== state.sourceInitialName;
@@ -124,6 +127,17 @@ function bindEvents() {
   on('#load-github-source', 'click', () => void loadGitHubSourceIntoEditor(), { feature: 'bot-github-source-load' });
   on('#bot-source-editor', 'keydown', event => {
     if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Home', 'End', 'PageUp', 'PageDown'].includes(event.key)) event.stopPropagation();
+    if (state.botWorkspaceReadOnly) {
+      const revision = typeof currentPracticeRevision === 'function' ? currentPracticeRevision() : null;
+      if (revision && typeof loadRevisionSource === 'function') {
+        event.preventDefault();
+        void loadRevisionSource(revision, 'draft', false).then(() => {
+          if (typeof showToast === 'function') showToast('Đã kích hoạt chế độ tạo bản nháp. Bạn có thể chỉnh sửa mã nguồn ngay.', 'info');
+          $('#bot-source-editor')?.focus();
+        });
+      }
+      return;
+    }
     if (event.key === 'Enter' && !event.shiftKey && !event.ctrlKey && !event.metaKey && !event.target.readOnly) {
       event.preventDefault();
       sourceIndentOnEnter(event.target);
@@ -183,7 +197,18 @@ function bindEvents() {
   });
   on('#bot-source-editor', 'input', updateEditorMetrics, { feature: 'bot-source-editor-metrics' });
   on('#bot-source-editor', 'keyup', syncSourceEditorTools, { feature: 'bot-source-editor-cursor' });
-  on('#bot-source-editor', 'click', syncSourceEditorTools, { feature: 'bot-source-editor-cursor-click' });
+  on('#bot-source-editor', 'click', () => {
+    syncSourceEditorTools();
+    if (state.botWorkspaceReadOnly) {
+      const revision = typeof currentPracticeRevision === 'function' ? currentPracticeRevision() : null;
+      if (revision && typeof loadRevisionSource === 'function') {
+        void loadRevisionSource(revision, 'draft', false).then(() => {
+          if (typeof showToast === 'function') showToast('Đã kích hoạt chế độ tạo bản nháp. Bạn có thể chỉnh sửa mã nguồn ngay.', 'info');
+          $('#bot-source-editor')?.focus();
+        });
+      }
+    }
+  }, { feature: 'bot-source-editor-cursor-click' });
   on('#bot-source-editor', 'scroll', updateEditorMetrics, { options: { passive: true } });
   on('#source-format', 'click', formatSourceCode);
   on('#source-theme', 'click', () => {

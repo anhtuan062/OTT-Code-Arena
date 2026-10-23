@@ -19,9 +19,25 @@
           <button id="save-bot-source" class="primary-btn workspace-save-action" type="button" disabled>Tạo Bot</button>
         </div>
       </div>
+      <div id="bot-workspace-notice" class="bot-workspace-notice" role="status" aria-live="polite">
+        <div class="bot-workspace-notice-icon">
+          <svg class="ui-icon" aria-hidden="true"><use href="#icon-info"></use></svg>
+        </div>
+        <div class="bot-workspace-notice-body">
+          <strong id="bot-workspace-notice-title" class="bot-workspace-notice-title">Hướng dẫn tạo Bot mới</strong>
+          <p id="bot-workspace-notice-text" class="bot-workspace-notice-text">
+            Nhập <strong>Tên Bot</strong>, nhấp trực tiếp vào khung mã nguồn bên dưới để tùy biến chiến thuật (hoặc tải file / nạp từ GitHub), sau đó nhấn <strong>Tạo Bot</strong>.
+          </p>
+        </div>
+        <div id="bot-workspace-notice-actions" class="bot-workspace-notice-actions" hidden>
+          <button id="notice-create-draft-btn" class="secondary-btn notice-draft-action" type="button">
+            <svg class="ui-icon" aria-hidden="true"><use href="#icon-file-edit"></use></svg>Tạo bản nháp để chỉnh sửa
+          </button>
+        </div>
+      </div>
       <div class="bot-workspace-info-row">
         <label class="workspace-name-field" for="bot-workspace-name"><span>Tên Bot</span><input id="bot-workspace-name"
-            class="input-shell" type="text" maxlength="50" autocomplete="off" placeholder="Bot của tôi"
+            class="input-shell" type="text" maxlength="50" autocomplete="off" placeholder="Nhập tên Bot của bạn (ví dụ: AlphaBot)"
             aria-describedby="bot-name-error bot-source-error"><span id="bot-name-error" class="form-error" role="alert" hidden></span></label>
         <label class="source-runtime-picker" for="bot-source-runtime"><span>Ngôn ngữ</span><select
             id="bot-source-runtime" class="input-shell">
@@ -49,7 +65,7 @@
             <div class="source-code-layer"><pre id="bot-source-highlight" class="source-highlight" aria-hidden="true"></pre><textarea
               id="bot-source-editor" class="source-editor" spellcheck="false" rows="24" wrap="off"
               aria-describedby="bot-source-help bot-source-error"
-              placeholder="// Viết mã nguồn Bot của bạn ở đây"></textarea></div>
+              placeholder="// Nhấp vào đây để chỉnh sửa mã nguồn chiến thuật Bot của bạn..."></textarea></div>
           </div>
           <span id="bot-source-lines" hidden aria-hidden="true"></span>
           <div class="editor-footer"><span id="bot-source-help" class="field-help">C++17 · UTF-8 · Tối đa 64 KiB</span><span id="source-cursor-position" class="field-help">Dòng 1, cột 1</span><span id="source-byte-count" class="field-help">0 / 64 KiB</span><span id="source-syntax-status" class="field-help">Cú pháp hợp lệ</span><span class="editor-sandbox">Docker Sandbox</span></div>

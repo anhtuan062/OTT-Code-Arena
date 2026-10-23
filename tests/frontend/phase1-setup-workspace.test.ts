@@ -166,7 +166,7 @@ describe('Phase 1 Tournament Setup Workspace', () => {
     expect(tournaments).toContain('botLimits: current.botLimits');
     expect(tournaments).toContain('registrationClosesAt');
     expect(tournaments).toContain('phase-runtime-note');
-    expect(tournaments).toContain('Match Runner');
+    expect(tournaments).toContain('thực thi trận');
   });
 
   it('renders server-authoritative lifecycle countdowns and preserves pending review semantics', async () => {
