@@ -55,6 +55,7 @@ def choose_move(state: GameState, legal_moves: list[Move]) -&gt; Move:
           <p class="bot-guide-help"><strong>GameState:</strong> <code>protocol_version</code>, <code>match_id</code>, <code>turn</code> (bắt đầu từ 1), <code>player</code> (<code>A</code>/<code>B</code>), <code>board_size</code> (9), <code>pieces</code>.</p>
           <p class="bot-guide-help"><strong>Piece:</strong> <code>id</code>, <code>type</code> (<code>dam</code>/<code>la</code>/<code>keo</code>), <code>player</code>, <code>pos</code> dạng <code>a1</code>–<code>i9</code>. <strong>Move C++:</strong> <code>piece_id</code>, <code>from</code>, <code>to</code>, <code>captures</code>, <code>has_capture</code>. <strong>Move Python:</strong> <code>piece_id</code>, <code>from_position</code>, <code>to</code>, <code>captures</code>.</p>
           <p class="bot-guide-help">Nước không ăn quân có <code>has_capture == false</code> ở C++ và <code>captures is None</code> ở Python. Khi có ăn quân, <code>captures</code> là ID quân bị ăn.</p>
+          <p class="bot-guide-help">Nếu giải bật <strong>Conversion</strong>, quân bị ăn không biến mất: quân giữ nguyên loại/ID, đổi phe và được đặt vào ô trống gần ô bị ăn nhất theo thứ tự cố định; replay dùng <code>conversionTo</code> để hiển thị đúng vị trí.</p>
         </section>
         <section class="bot-guide-section">
           <h3>Luật bàn cờ cần biết</h3>

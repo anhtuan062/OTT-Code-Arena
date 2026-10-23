@@ -71,10 +71,15 @@ Khi người chơi di chuyển quân vào ô đang có quân của đối phươ
 - **Quân phe mình**: Không thể ăn quân cùng màu.
 
 ### Cơ chế xử lý ăn quân trong Game Engine hiện tại:
-- Khi ăn quân thành công (`move.captures !== null`):
+- Khi ăn quân thành công (`move.captures !== null`) và **Conversion tắt**:
   - Quân phòng thủ của đối phương bị **xóa hoàn toàn** khỏi mảng quân cờ của ván đấu (`newState.pieces.splice(capturedIdx, 1)`).
   - Quân tấn công chiếm giữ ô đích vừa di chuyển tới.
   - Lực lượng của đối phương giảm đi 1 quân.
+- Khi **Conversion bật**:
+  - Quân bị ăn giữ nguyên loại và ID, đổi sang phe của quân tấn công.
+  - Quân chuyển phe được đặt vào ô trống gần ô bị ăn nhất theo khoảng cách Chebyshev.
+  - Các ô được xét theo thứ tự cố định từ phía trên theo chiều kim đồng hồ; không random, không dùng ô đích, goal hoặc ô xuất phát của quân tấn công.
+  - Nếu không còn ô hợp lệ, nước ăn bị từ chối.
 
 ---
 

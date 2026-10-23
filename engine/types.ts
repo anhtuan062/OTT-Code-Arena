@@ -48,6 +48,8 @@ export interface MoveRecord {
   from: Position;
   to: Position;
   captures: string | null;
+  /** Destination of the converted piece, when Conversion is enabled. */
+  conversionTo?: Position;
   player: Player;
   turn: number;
 }
@@ -68,6 +70,8 @@ export interface ApplyResult {
   success: boolean;
   state: GameState;
   capturedPiece: Piece | null;
+  /** Deterministic placement selected for the converted piece, when applicable. */
+  conversionTo?: Position;
   winReason: WinReason | null;
 }
 

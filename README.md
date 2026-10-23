@@ -125,7 +125,8 @@ c:\test\
 - **Bàn cờ**: $9 \times 9$ ô (`a1` đến `i9`).
 - **Lực lượng**: Mỗi bên có 9 quân: 3 Búa (`dam`), 3 Bao (`la`), 3 Kéo (`keo`).
 - **Di chuyển**: Quân đi 1 ô theo 8 hướng (ngang, dọc, chéo).
-- **Ăn quân**: Búa ăn Kéo, Kéo ăn Bao, Bao ăn Búa. Quân bị ăn bị loại khỏi bàn cờ. Không được ăn quân cùng phe hoặc cùng loại.
+- **Ăn quân**: Búa ăn Kéo, Kéo ăn Bao, Bao ăn Búa. Ở OTT Standard, quân bị ăn bị loại khỏi bàn cờ. Không được ăn quân cùng phe hoặc cùng loại.
+- **Conversion (tùy chọn)**: Khi bật, quân bị ăn giữ nguyên loại và ID, đổi phe rồi được đặt vào ô trống gần ô bị ăn nhất theo khoảng cách Chebyshev. Nếu có nhiều ô cùng khoảng cách, chọn theo thứ tự cố định từ phía trên theo chiều kim đồng hồ; không random, không đặt vào ô đích hoặc ô xuất phát của quân tấn công. Nếu không còn ô hợp lệ, nước ăn không hợp lệ.
 - **Điều kiện thắng**:
   1. Đưa một quân bất kỳ của mình tới ô đích: Phe A tới **`i9`**, Phe B tới **`a1`**.
   2. Ăn hết sạch toàn bộ 9 quân của đối phương trên bàn cờ.

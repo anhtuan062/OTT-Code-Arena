@@ -535,7 +535,8 @@ function animatePlaygroundMove(fromAlg, toAlg, pieceId, capturedId) {
     movingPiece.col = toPos.col;
   }
 
-  // Nếu có quân bị ăn, xoá quân đó khỏi bàn cờ
+  // Playground mô phỏng OTT Standard; Conversion chỉ áp dụng trong tournament snapshot.
+  // Nếu có quân bị ăn, xoá quân đó khỏi bàn cờ.
   if (capturedId) {
     playgroundPieces = playgroundPieces.filter(p => !(p.player === 'B' && p.row === toPos.row && p.col === toPos.col));
   }

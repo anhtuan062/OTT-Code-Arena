@@ -80,7 +80,7 @@ Là nơi định nghĩa luật chơi authoritative duy nhất của trò chơi O
 - **Bàn cờ**: $9 \times 9$ ô, tọa độ đại số từ `a1` đến `i9`.
 - **Lực lượng**: Mỗi bên khởi đầu với 9 quân cờ (3 Búa `dam`, 3 Bao `la`, 3 Kéo `keo`).
 - **Bố cục hạt giống (Seed Layouts)**: `engine/initial-layout.ts` cung cấp 3 biến thể bố cục khởi đầu, được suy ra tất định theo mã hash SHA-256 của ván đấu trong loạt trận BO3.
-- **Di chuyển & Ăn quân**: Quân đi 1 ô theo 8 hướng. Búa ăn Kéo, Kéo ăn Bao, Bao ăn Búa. Quân bị ăn bị loại khỏi bàn cờ.
+- **Di chuyển & Ăn quân**: Quân đi 1 ô theo 8 hướng. Búa ăn Kéo, Kéo ăn Bao, Bao ăn Búa. Ở OTT Standard, quân bị ăn bị loại khỏi bàn cờ. Khi bật Conversion, quân bị ăn giữ nguyên loại/ID, đổi phe và được đặt vào ô trống gần ô bị ăn nhất theo thứ tự cố định từ phía trên theo chiều kim đồng hồ; không random, không đặt vào goal hoặc ô xuất phát của quân tấn công.
 - **Phân định Thắng/Hòa**: `engine/win.ts` kiểm tra điều kiện tới ô đích (`i9` cho phe A, `a1` cho phe B), ăn hết toàn bộ quân đối phương, quá giới hạn lượt (mặc định 200), lặp lại thế cờ 3 lần, hoặc thiếu lực lượng tiếp tục thi đấu.
 - **Bot Hệ thống**: `engine/system-opponent.ts` cung cấp bot mẫu dùng cho màn hình Chạy thử (Practice).
 

@@ -50,6 +50,7 @@ function safeMove(move: LiveMatchSnapshot['latestMove']) {
     from: move.from,
     to: move.to,
     captures: move.captures ?? null,
+    ...(move.conversionTo ? { conversionTo: { ...move.conversionTo } } : {}),
   };
 }
 

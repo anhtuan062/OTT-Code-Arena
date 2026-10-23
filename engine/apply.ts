@@ -14,7 +14,7 @@ import type {
 import type { RuleModifiers } from './types.js';
 import { DEFAULT_RULE_MODIFIERS } from './types.js';
 import { cloneState, getPieceById, getPieceAt, getPlayerPieces, opponent, isPlayerGoalSquare } from './state.js';
-import { validateMove } from './moves.js';
+import { findConversionDestination, validateMove } from './moves.js';
 
 function checkAllPiecesCaptured(state: GameState, player: Player): WinReason | null {
   return getPlayerPieces(state, player).length === 0 ? 'all_pieces_captured' : null;
@@ -43,6 +43,12 @@ export function applyMove(state: GameState, move: MoveOption, ruleModifiers: Rul
   const newState = cloneState(state);
   const piece = getPieceById(newState, move.pieceId)!;
   const fromPos: Position = { row: piece.row, col: piece.col };
+  const conversionTo = ruleModifiers.conversion && move.captures
+    ? findConversionDestination(state, fromPos, move.to)
+    : undefined;
+  if (ruleModifiers.conversion && move.captures && !conversionTo) {
+    return { success: false, state, capturedPiece: null, winReason: null };
+  }
 
   // Handle capture
   let capturedPiece: Piece | null = null;
@@ -54,8 +60,8 @@ export function applyMove(state: GameState, move: MoveOption, ruleModifiers: Rul
         capturedPiece = { id: captured.id, type: captured.type, player: captured.player, row: captured.row, col: captured.col };
         if (ruleModifiers.conversion) {
           captured.player = piece.player;
-          captured.row = fromPos.row;
-          captured.col = fromPos.col;
+          captured.row = conversionTo!.row;
+          captured.col = conversionTo!.col;
         } else {
           newState.pieces.splice(capturedIdx, 1);
         }
@@ -73,6 +79,7 @@ export function applyMove(state: GameState, move: MoveOption, ruleModifiers: Rul
     from: fromPos,
     to: move.to,
     captures: move.captures,
+    ...(conversionTo ? { conversionTo } : {}),
     player: piece.player,
     turn: newState.turn,
   };
@@ -103,6 +110,7 @@ export function applyMove(state: GameState, move: MoveOption, ruleModifiers: Rul
     success: true,
     state: newState,
     capturedPiece,
+    ...(conversionTo ? { conversionTo } : {}),
     winReason,
   };
 }

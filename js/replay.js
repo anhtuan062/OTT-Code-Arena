@@ -446,8 +446,11 @@ function buildStateAt(moveIndex) {
       const captured = board.pieces.find(candidate => candidate.id === move.captures);
       if (captured && state.replay.ruleModifiers?.conversion) {
         captured.player = move.player;
-        captured.row = piece.row;
-        captured.col = piece.col;
+        // New replays record the deterministic relocation. Legacy replays
+        // fall back to the historical attacker-origin behavior.
+        const conversionTo = move.conversionTo || { row: piece.row, col: piece.col };
+        captured.row = conversionTo.row;
+        captured.col = conversionTo.col;
       } else {
         board.pieces = board.pieces.filter(candidate => candidate.id !== move.captures);
       }

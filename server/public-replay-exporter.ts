@@ -110,10 +110,10 @@ export class PublicReplayExporter {
       if (!participant) throw new PublicReplayExportError('integrity', `Unknown replay participant ${participantId}`);
       return { participantId, participantName: participant.name };
     };
-    const state = (value: GameState): GameState => ({ boardSize: value.boardSize, currentPlayer: value.currentPlayer, turn: value.turn, pieces: value.pieces.map(piece => ({ id: piece.id, type: piece.type, player: piece.player, row: piece.row, col: piece.col })), status: value.status, winner: value.winner, winReason: value.winReason, lastMove: value.lastMove ? { pieceId: value.lastMove.pieceId, from: { ...value.lastMove.from }, to: { ...value.lastMove.to }, captures: value.lastMove.captures, player: value.lastMove.player, turn: value.lastMove.turn } : null });
+    const state = (value: GameState): GameState => ({ boardSize: value.boardSize, currentPlayer: value.currentPlayer, turn: value.turn, pieces: value.pieces.map(piece => ({ id: piece.id, type: piece.type, player: piece.player, row: piece.row, col: piece.col })), status: value.status, winner: value.winner, winReason: value.winReason, lastMove: value.lastMove ? { pieceId: value.lastMove.pieceId, from: { ...value.lastMove.from }, to: { ...value.lastMove.to }, captures: value.lastMove.captures, player: value.lastMove.player, turn: value.lastMove.turn, ...(value.lastMove.conversionTo ? { conversionTo: { ...value.lastMove.conversionTo } } : {}) } : null });
     const base = (replay: MatchReplay, participantA: string | null, participantB: string | null): MatchReplay => ({
       matchId: replay.matchId, protocolVersion: replay.protocolVersion, initialState: state(replay.initialState),
-      moves: replay.moves.map(move => ({ turn: move.turn, player: move.player, pieceId: move.pieceId, from: { ...move.from }, to: { ...move.to }, captures: move.captures, timestamp: move.timestamp })),
+      moves: replay.moves.map(move => ({ turn: move.turn, player: move.player, pieceId: move.pieceId, from: { ...move.from }, to: { ...move.to }, captures: move.captures, ...(move.conversionTo ? { conversionTo: { ...move.conversionTo } } : {}), timestamp: move.timestamp })),
       finalState: state(replay.finalState), winner: replay.winner, terminationReason: replay.terminationReason,
       ...(replay.ruleModifiers ? { ruleModifiers: { ...replay.ruleModifiers } } : {}),
       participantIdentities: { A: identity(participantA), B: identity(participantB) },

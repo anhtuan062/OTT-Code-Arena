@@ -264,6 +264,7 @@ export class MatchRunner {
         from: { row: fromPosition.row, col: fromPosition.col },
         to: { row: coords.toRow, col: coords.toCol },
         captures: applyResult.capturedPiece?.id ?? null,
+      ...(applyResult.conversionTo ? { conversionTo: { ...applyResult.conversionTo } } : {}),
       };
       turnLog.engineResult = applyResult;
       turnLog.resultingState = this.config.logStates ? { ...currentState } : undefined;
@@ -413,7 +414,12 @@ export class MatchRunner {
         pieces: state.pieces.map(piece => ({ ...piece })),
         lastMove: state.lastMove ? { ...state.lastMove, from: { ...state.lastMove.from }, to: { ...state.lastMove.to } } : null,
       },
-      latestMove: latestMove ? { ...latestMove, from: { ...latestMove.from }, to: { ...latestMove.to } } : null,
+      latestMove: latestMove ? {
+        ...latestMove,
+        from: { ...latestMove.from },
+        to: { ...latestMove.to },
+        ...(latestMove.conversionTo ? { conversionTo: { ...latestMove.conversionTo } } : {}),
+      } : null,
       updatedAt: new Date().toISOString(),
       ...(error ? { error } : {}),
     };
@@ -429,6 +435,7 @@ export class MatchRunner {
       from: log.appliedMove?.from ?? { row: 0, col: 0 },
       to: log.appliedMove?.to ?? { row: 0, col: 0 },
       captures: log.appliedMove?.captures ?? null,
+      ...(log.appliedMove?.conversionTo ? { conversionTo: { ...log.appliedMove.conversionTo } } : {}),
       timestamp: log.timestamp,
     }));
 

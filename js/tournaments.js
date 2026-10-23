@@ -1252,7 +1252,7 @@ function renderCompetitorPublicInfo(container, tournament) {
     ['Luật mở rộng', conversionEnabled ? 'Conversion đang bật' : 'Không bật Conversion'],
     ...(conversionEnabled ? [
       ['Khi ăn quân', 'Quân A di chuyển vào ô của quân B.'],
-      ['Quân bị ăn', 'Giữ nguyên loại và ID, đổi sang phe A rồi trở về ô xuất phát của quân A.'],
+      ['Quân bị ăn', 'Giữ nguyên loại và ID, đổi phe rồi được đặt vào ô trống gần ô bị ăn nhất theo thứ tự cố định; không random và không dùng ô xuất phát.'],
       ['Chuyển phe nhiều lần', 'Một quân có thể tiếp tục đổi phe qua các lần bị ăn tiếp theo.'],
     ] : []),
     ['Quyền xem', 'Kết quả và replay hiển thị khi dữ liệu trận đã sẵn sàng.'],
@@ -2095,7 +2095,7 @@ function renderPhase1Creation(container, tournament) {
         createFormGroup('Luật gốc', phase1Select('edit-t-ruleset', 'ott-standard', [{ value: 'ott-standard', label: 'OTT Standard' }], true), 'Luật OTT tiêu chuẩn luôn được áp dụng.'),
         createFormGroup('Phiên bản luật', phase1Select('edit-t-ruleset-version', draft.rulesConfig.rulesetVersion, [{ value: 1, label: 'Version 1' }], true)),
         createFormGroup('Số ván mỗi cặp', seriesControl, isCurrentTournament ? 'Cố định theo từng giai đoạn thi đấu.' : 'Giá trị legacy được giữ nguyên và chỉ hiển thị.'),
-        create('fieldset', { className: 'phase-rule-modifiers', children: [create('legend', { text: 'Luật mở rộng' }), create('label', { className: 'phase-rule-checkbox', children: [create('input', { attrs: { id: 'edit-t-rule-conversion', type: 'checkbox', ...(conversionEnabled ? { checked: 'true' } : {}), ...(settingsLocked ? { disabled: 'true' } : {}) } }), create('span', { children: [create('strong', { text: 'Conversion' }), create('small', { text: 'Quân bị ăn đổi phe và trở về ô xuất phát của quân ăn.' })] })] })] }),
+        create('fieldset', { className: 'phase-rule-modifiers', children: [create('legend', { text: 'Luật mở rộng' }), create('label', { className: 'phase-rule-checkbox', children: [create('input', { attrs: { id: 'edit-t-rule-conversion', type: 'checkbox', ...(conversionEnabled ? { checked: 'true' } : {}), ...(settingsLocked ? { disabled: 'true' } : {}) } }), create('span', { children: [create('strong', { text: 'Conversion' }), create('small', { text: 'Quân bị ăn đổi phe và chuyển tới ô trống gần ô bị ăn nhất theo thứ tự cố định, không random.' })] })] })] }),
         scoreControls,
         createFormGroup('Điều lệ bổ sung', create('textarea', { className: 'dialog-input phase-textarea', text: draft.rulesNotes, attrs: { id: 'edit-t-rules', rows: '4', maxlength: '2000', ...(settingsLocked ? { disabled: 'true' } : {}) } }), 'Nội dung này chỉ bổ sung thông tin, không thay đổi luật Engine.'),
         createFormGroup('Chính sách tham gia', create('textarea', { className: 'dialog-input phase-textarea', text: draft.policyNotes, attrs: { id: 'edit-t-policy', rows: '4', maxlength: '2000', ...(settingsLocked ? { disabled: 'true' } : {}) } }))

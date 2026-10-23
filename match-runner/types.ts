@@ -132,6 +132,8 @@ export interface TurnLog {
     from: { row: number; col: number };
     to: { row: number; col: number };
     captures: string | null;
+    /** Destination of a captured piece converted under the Conversion rule. */
+    conversionTo?: { row: number; col: number };
   };
   resultingState?: GameState;
   engineResult?: ApplyResult;
@@ -170,6 +172,8 @@ export interface MatchReplay {
     from: { row: number; col: number };
     to: { row: number; col: number };
     captures: string | null;
+    /** Destination of a captured piece converted under the Conversion rule. */
+    conversionTo?: { row: number; col: number };
     timestamp: string;
   }>;
   finalState: GameState;
