@@ -644,6 +644,7 @@ describe('TournamentCommitCoordinator - Real FileTournamentRepository Contract',
         name: 'Multi-Stage File Test',
         participants,
       });
+      tournament.stageGating = 'manual';
       await repository.save(tournament);
 
       const groupStage = tournament.stages!.find(s => s.stageType === 'group_stage')!;

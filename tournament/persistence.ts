@@ -741,6 +741,7 @@ export function createTournament(
     completedAt: null,
     resultsPublishedAt: null,
     participationRequests: [],
+    ...(isCurrentMultiStage ? { stageGating: 'manual' as const } : {}),
   };
 }
 

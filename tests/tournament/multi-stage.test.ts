@@ -351,6 +351,7 @@ describe('Tournament Multi-Stage Model & Compatibility (Phase 2A)', () => {
         name: 'Flow Test',
         participants,
       });
+      tournament.stageGating = 'manual';
 
       // Initially in Group Stage:
       // Group Stage has 2 groups (A and B), each with 4 bots -> 6 matches per group = 12 matches.
@@ -469,6 +470,7 @@ describe('Tournament Multi-Stage Model & Compatibility (Phase 2A)', () => {
         name: 'Regional Advancement Test',
         participants,
       });
+      tournament.stageGating = 'manual';
 
       const prelimStage = tournament.stages![0]!;
       const groupStage = tournament.stages![1]!;
@@ -544,6 +546,7 @@ describe('Tournament Multi-Stage Model & Compatibility (Phase 2A)', () => {
         name: 'Asynchronous Regions Test',
         participants,
       });
+      tournament.stageGating = 'manual';
 
       const prelimStage = tournament.stages![0]!;
       const groupStage = tournament.stages![1]!;

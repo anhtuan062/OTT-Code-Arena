@@ -285,7 +285,7 @@ describe('Tournament Manager - Multi-Stage Integration (Phase 2C)', () => {
         enableMultiStage: true,
       });
 
-      await manager.createTournament('tourney-8bot', '8 Bot Championship', 'multi_stage', undefined, 'manual');
+      await manager.createTournament('tourney-8bot', '8 Bot Championship', 'multi_stage');
       for (let i = 1; i <= 8; i++) {
         await manager.registerParticipant('tourney-8bot', `P${i}`, `Player ${i}`, createBot(`bot-${i}`));
       }

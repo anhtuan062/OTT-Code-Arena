@@ -70,6 +70,7 @@ function multiStageTournament(tournamentId: string, participantCount = 8): Tourn
   });
   value.status = 'running';
   value.startedAt = new Date().toISOString();
+  value.stageGating = 'manual';
   return value;
 }
 

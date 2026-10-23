@@ -385,6 +385,17 @@ export function getTournamentManager(): Awaited<ReturnType<typeof createTourname
   return manager;
 }
 
+/**
+ * Internal-only dependencies for controlled administrative tooling.
+ * This is intentionally not mounted as an HTTP endpoint.
+ */
+export function getBulkBotSeederDependencies() {
+  if (!manager || !userRepository || !botRepository || !botRevisionRepository || !botPreflightService) {
+    throw new Error('Server is not initialized for bulk Bot seeding');
+  }
+  return { manager, userRepository, botRepository, botRevisionRepository, preflightService: botPreflightService };
+}
+
 export function closeServer(): Promise<ShutdownResult> {
   return shutdownServer();
 }
