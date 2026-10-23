@@ -49,6 +49,15 @@ export interface BulkBotSeedSummary {
   results: BulkBotSeedResult[];
 }
 
+export class BulkBotSeedBusyError extends Error {
+  constructor() {
+    super('Another bulk Bot seed operation is already running');
+    this.name = 'BulkBotSeedBusyError';
+  }
+}
+
+let activeBulkBotSeed: Promise<BulkBotSeedSummary> | undefined;
+
 const MAX_BULK_COUNT = 4096;
 
 export function parseBulkBotRuntime(value: unknown): BulkBotRuntime {
@@ -274,6 +283,25 @@ export async function seedBulkBots(
     summary.results.push(result);
   }
   return summary;
+}
+
+/**
+ * Serialize administrative seed operations inside the live Backend process.
+ * This prevents two internal callers from racing on the same SQLite/repository
+ * state while leaving the pure seeding function easy to test.
+ */
+export async function seedBulkBotsExclusive(
+  dependencies: BulkBotSeederDependencies,
+  options: BulkBotSeederOptions,
+): Promise<BulkBotSeedSummary> {
+  if (activeBulkBotSeed) throw new BulkBotSeedBusyError();
+  const operation = seedBulkBots(dependencies, options);
+  activeBulkBotSeed = operation;
+  try {
+    return await operation;
+  } finally {
+    if (activeBulkBotSeed === operation) activeBulkBotSeed = undefined;
+  }
 }
 
 export const BULK_BOT_SEED_LIMIT = MAX_BULK_COUNT;

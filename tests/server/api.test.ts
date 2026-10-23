@@ -189,6 +189,8 @@ describe('Server API Security', () => {
       const statuses = [res1.status, res2.status];
       expect(statuses).toContain(200);
       expect(statuses).toContain(409);
+      const accepted = res1.status === 200 ? res1 : res2;
+      expect(accepted.body.taskId).toBe(`run_all_${tId}`);
     });
 
     it('stops only an active execution task without cancelling the tournament', async () => {

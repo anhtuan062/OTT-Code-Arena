@@ -27,6 +27,6 @@
       "@tournament/*": ["tournament/*"]
     }
   },
-  "include": ["engine/**/*", "bot-protocol/**/*", "bot-runner/**/*", "bot-executor/**/*", "match-runner/**/*", "tournament/**/*", "server/**/*", "functions/**/*"],
+  "include": ["engine/**/*", "bot-protocol/**/*", "bot-runner/**/*", "bot-executor/**/*", "match-runner/**/*", "tournament/**/*", "server/**/*", "functions/**/*", "scripts/bulk-bot-seeder.ts"],
   "exclude": ["node_modules", "dist", "examples", "tests"]
 }

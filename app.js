@@ -4265,21 +4265,98 @@ function renderCompetitorPublicLive(container, tournament) {
   const runningPairings = getAllTournamentPairings(tournament)
     .filter(pairing => (pairing?.status === 'in_progress' || pairing?.status === 'running') && pairing.matchId);
   const panel = create('section', { className: 'tournament-panel phase-card competitor-public-live' });
-  const head = create('div', { className: 'competitor-public-section-head' });
-  head.append(
-    create('div', { children: [create('h3', { text: 'Đang thi đấu trực tiếp' }), create('p', { text: runningPairings.length ? 'Các trận đang chạy có thể được theo dõi trực tiếp.' : 'Hiện chưa có trận nào đang chạy.' })] }),
-    create('span', { className: 'competitor-public-access-note', text: 'Live' })
-  );
+  const head = create('div', { className: 'competitor-public-section-head competitor-public-live-header' });
+  
+  const titleGroup = create('div', { className: 'competitor-public-live-title-group' });
+  const titleRow = create('div', { className: 'competitor-public-live-title-row' });
+  const beacon = create('span', { className: 'competitor-live-beacon', attrs: { 'aria-hidden': 'true' } });
+  const heading = create('h3', { text: 'Đang thi đấu trực tiếp' });
+  const countBadge = create('span', {
+    className: 'competitor-public-live-count',
+    text: runningPairings.length ? `${runningPairings.length} trận đang chạy` : '0 trận'
+  });
+  titleRow.append(beacon, heading, countBadge);
+  const subtitle = create('p', {
+    text: runningPairings.length
+      ? 'Các trận đấu đang chạy trên bàn cờ ảo, cập nhật nước đi và diễn biến trực tiếp.'
+      : 'Hiện chưa có trận nào đang chạy.'
+  });
+  titleGroup.append(titleRow, subtitle);
+
+  const liveBadge = create('span', {
+    className: 'competitor-public-access-note competitor-public-live-badge',
+    children: [
+      create('span', { className: 'competitor-live-pulse-dot', attrs: { 'aria-hidden': 'true' } }),
+      create('span', { text: 'Live' })
+    ]
+  });
+  head.append(titleGroup, liveBadge);
   panel.appendChild(head);
+
   if (runningPairings.length) {
     const list = create('div', { className: 'competitor-public-live-list' });
     runningPairings.forEach((pairing, index) => {
       const item = create('article', { className: 'competitor-public-live-item' });
-      const names = create('strong', { text: `${resolveParticipantName(tournament, pairing.participantA, pairing.slotA)} vs ${resolveParticipantName(tournament, pairing.participantB, pairing.slotB)}` });
-      item.append(names, actionButton('Xem trực tiếp', () => openLiveMatch(tournament.tournamentId, pairing.matchId, pairing.pairingId), `competitor-live:${pairing.pairingId || index}`, 'primary-btn'));
+      
+      const pAName = resolveParticipantName(tournament, pairing.participantA, pairing.slotA);
+      const pBName = resolveParticipantName(tournament, pairing.participantB, pairing.slotB);
+      
+      const prog = pairing.seriesProgress || {};
+      const isRegionalPairing = Boolean(pairing.regionId) || /^R\d+-r\d+-m\d+$/i.test(String(pairing.pairingId || ''));
+      const format = isRegionalPairing ? 'BO3' : (pairing.format || (tournament.format === 'multi_stage' ? 'BO2' : 'BO1'));
+      const bestOf = isRegionalPairing ? 3 : (prog.bestOf || (format === 'BO2' ? 2 : 1));
+      const gameInfo = prog.nextGame ? `Ván ${prog.nextGame}/${bestOf}` : (bestOf > 1 ? `Ván 1/${bestOf}` : 'BO1');
+
+      const main = create('div', { className: 'competitor-public-live-main' });
+      
+      const meta = create('div', { className: 'competitor-public-live-meta' });
+      const matchPill = create('span', {
+        className: 'competitor-public-live-pill',
+        text: `Trận ${pairing.pairingId || index + 1}`
+      });
+      const formatPill = create('span', {
+        className: 'competitor-public-live-format',
+        text: `${format} · ${gameInfo}`
+      });
+      const liveChip = create('span', {
+        className: 'competitor-public-live-chip',
+        children: [
+          create('span', { className: 'competitor-live-ping', attrs: { 'aria-hidden': 'true' } }),
+          create('span', { text: 'ĐANG ĐẤU' })
+        ]
+      });
+      meta.append(matchPill, formatPill, liveChip);
+
+      const matchup = create('div', { className: 'competitor-public-live-matchup' });
+      const nameA = create('strong', { className: 'competitor-public-live-name', text: pAName });
+      const vsSpan = create('span', { className: 'competitor-public-live-vs', text: 'vs' });
+      const nameB = create('strong', { className: 'competitor-public-live-name', text: pBName });
+      matchup.append(nameA, vsSpan, nameB);
+
+      main.append(meta, matchup);
+
+      const actionWrap = create('div', { className: 'competitor-public-live-action' });
+      const liveBtn = actionButton(
+        'Xem trực tiếp',
+        () => openLiveMatch(tournament.tournamentId, pairing.matchId, pairing.pairingId),
+        `competitor-live:${pairing.pairingId || index}`,
+        'primary-btn competitor-public-live-btn'
+      );
+      actionWrap.appendChild(liveBtn);
+
+      item.append(main, actionWrap);
       list.appendChild(item);
     });
     panel.appendChild(list);
+  } else {
+    const emptyState = create('div', { className: 'competitor-public-live-empty-state' });
+    const emptyIcon = create('div', { className: 'competitor-public-empty-icon', text: '📡' });
+    const emptyTitle = create('h4', { text: 'Hiện chưa có trận nào đang chạy' });
+    const emptyDesc = create('p', {
+      text: 'Khi các trận đấu bước vào lượt chơi, bàn cờ thời gian thực sẽ xuất hiện tại đây để bạn có thể theo dõi trực tiếp.'
+    });
+    emptyState.append(emptyIcon, emptyTitle, emptyDesc);
+    panel.appendChild(emptyState);
   }
   container.appendChild(panel);
 }
@@ -10153,6 +10230,7 @@ function confirmTournamentAction(tournamentId, authRevision, viewRevision, actio
 }
 
 async function tournamentAction(tournamentId, authRevision, viewRevision, action, payload = {}) {
+  let executionStatus = null;
   if (action === 'edit') {
     const tournament = await request(`/tournaments/${tournamentId}`);
     if (isCurrentView('tournament-detail', authRevision, viewRevision, tournamentId)) openEditTournamentDialog(tournament);
@@ -10162,14 +10240,60 @@ async function tournamentAction(tournamentId, authRevision, viewRevision, action
     await api(`/tournaments/${tournamentId}`, { method: 'DELETE' });
   } else {
     const endpoint = action === 'publish' ? `/tournaments/${tournamentId}/publish` : `/tournaments/${tournamentId}/action`;
-    await api(endpoint, { method: 'POST', body: action === 'publish' ? undefined : JSON.stringify({ action, ...payload }) });
+    const result = await api(endpoint, { method: 'POST', body: action === 'publish' ? undefined : JSON.stringify({ action, ...payload }) });
+    if (action === 'stop_execution') await waitForTournamentExecutionStop(result?.taskIds, tournamentId, authRevision, viewRevision);
+    if (action === 'run_all' && result?.taskId) {
+      executionStatus = await waitForTournamentExecutionStart(result.taskId, tournamentId, authRevision, viewRevision);
+    }
   }
   if (isCurrentView('tournament-detail', authRevision, viewRevision, tournamentId)) {
-    showToast(action === 'delete' ? 'Đã xóa giải đấu.' : ACTION_SUCCESS_MESSAGES[action] || 'Đã cập nhật giải đấu.', 'success');
+    if (action === 'run_all' && ['failed', 'cancelled'].includes(executionStatus)) {
+      showToast('Scheduler đã dừng vì trận lỗi khi chuẩn bị thực thi. Mở chi tiết pairing để xem nguyên nhân.', 'error');
+    } else {
+      const message = action === 'run_all' && executionStatus === 'active'
+        ? 'Đã bắt đầu thực thi trận đấu.'
+        : action === 'delete' ? 'Đã xóa giải đấu.' : ACTION_SUCCESS_MESSAGES[action] || 'Đã cập nhật giải đấu.';
+      showToast(message, 'success');
+    }
     if (action === 'delete') navigate('tournaments'); else await refreshTournamentDetail({ force: true });
   } else if (action === 'delete' && isCurrentView('tournaments', authRevision, viewRevision)) {
     showToast('Đã xóa giải đấu.', 'success');
     await loadTournaments();
+  }
+}
+
+async function waitForTournamentExecutionStart(taskId, tournamentId, authRevision, viewRevision) {
+  const deadline = Date.now() + 5000;
+  let lastStatus = 'queued';
+  while (Date.now() < deadline) {
+    if (!isCurrentView('tournament-detail', authRevision, viewRevision, tournamentId)) return lastStatus;
+    try {
+      const queue = await request(`/system/queue?id=${encodeURIComponent(taskId)}`);
+      lastStatus = queue?.status || lastStatus;
+      if (['active', 'failed', 'completed', 'cancelled'].includes(lastStatus)) return lastStatus;
+    } catch {
+      return lastStatus;
+    }
+    await new Promise(resolve => setTimeout(resolve, 250));
+  }
+  return lastStatus;
+}
+
+async function waitForTournamentExecutionStop(taskIds, tournamentId, authRevision, viewRevision) {
+  const ids = Array.isArray(taskIds) ? taskIds.filter(Boolean) : [];
+  const deadline = Date.now() + 15_000;
+  while (Date.now() < deadline && ids.length > 0) {
+    if (!isCurrentView('tournament-detail', authRevision, viewRevision, tournamentId)) return;
+    const statuses = await Promise.all(ids.map(async taskId => {
+      try {
+        const queue = await request(`/system/queue?id=${encodeURIComponent(taskId)}`);
+        return queue?.status;
+      } catch {
+        return 'unknown';
+      }
+    }));
+    if (statuses.every(status => !['queued', 'active'].includes(status))) return;
+    await new Promise(resolve => setTimeout(resolve, 250));
   }
 }
 

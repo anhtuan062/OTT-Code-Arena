@@ -3,13 +3,13 @@ import cors from 'cors';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { createTournamentManager, resolveSeriesSchedulerRuntimeConfig } from '../tournament/manager.js';
-import { createExecutor, clearExecutorCache, configuredRuntimeImageRegistry, RevisionDockerExecutor, createRevisionDockerExecutor, resolveCppCompilationBackend } from '../bot-executor/index.js';
+import { createExecutor, clearExecutorCache, configuredRuntimeImageRegistry, isTrustedStrategySdkDigest, RevisionDockerExecutor, createRevisionDockerExecutor, resolveCppCompilationBackend } from '../bot-executor/index.js';
 import { configuredDockerImage } from '../bot-executor/image-config.js';
 import { createExecutionQueue } from '../bot-executor/execution-queue.js';
 import * as fs from 'fs/promises';
 import { existsSync } from 'node:fs';
 import bcrypt from 'bcryptjs';
-import { createHash, randomBytes, randomUUID } from 'crypto';
+import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'crypto';
 import { closeSharedDatabase, initializeDatabase, setSharedDatabase } from './db.js';
 import { SqlBotRepository, type BotRecord } from './repositories/bot-repository.js';
 import { SqlBotRevisionRepository, SUPPORTED_SOURCE_RUNTIMES, MAX_SOURCE_BYTES, isSupportedSourceRuntime } from './repositories/bot-revision-repository.js';
@@ -48,6 +48,12 @@ import {
   resolveQaFixtureTiebreaker,
   requeueQaFixturePairing,
 } from './qa-fixtures.js';
+import {
+  BulkBotSeedBusyError,
+  parseBulkBotRuntime,
+  seedBulkBotsExclusive,
+  validateBulkBotCount,
+} from './admin/bulk-bot-seeder.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -233,6 +239,7 @@ export async function initServer(storageDir?: string) {
   fairMatchDispatcher = new FairMatchDispatcher<ExecutedMatchResult>(2, 2);
   projectionCache.clear();
   activeTournamentRuns.clear();
+  activeTournamentTaskIds.clear();
   tournamentRunOwners.clear();
   sourceRevisionExecutor?.close?.();
   sourceRevisionExecutor = undefined;
@@ -283,7 +290,12 @@ export async function initServer(storageDir?: string) {
       const revision = botRevisionRepository?.findOwned(execution.botId, execution.revisionId, execution.competitorId);
       if (!revision || revision.runtime_id !== execution.runtimeId || revision.source_digest !== execution.sourceDigest) return null;
       if ((execution.executionMode ?? 'raw') !== revision.execution_mode) return null;
-      if (revision.execution_mode === 'strategy' && (execution.sdkVersion !== revision.sdk_version || execution.sdkDigest !== revision.sdk_digest)) return null;
+      if (revision.execution_mode === 'strategy') {
+        const sdkMatches = execution.sdkVersion === revision.sdk_version
+          && Boolean(execution.sdkDigest && revision.sdk_digest
+            && isTrustedStrategySdkDigest(execution.runtimeId, execution.sdkDigest, revision.sdk_digest));
+        if (!sdkMatches) return null;
+      }
       try {
         const source = await botRevisionRepository!.readSource(revision);
         return Buffer.from(source, 'utf8');
@@ -491,6 +503,7 @@ async function finalizeShutdown(): Promise<ShutdownResult> {
   if (shutdownFinalized) return { closed: true, timedOut: false };
 
   activeTournamentRuns.clear();
+  activeTournamentTaskIds.clear();
   tournamentRunOwners.clear();
   activePracticeExecutions.clear();
   activePracticeByUser.clear();
@@ -566,6 +579,73 @@ function requireCsrf(req: express.Request, res: express.Response, next: express.
   if (req.get('x-csrf-token') !== req.auth?.csrf) return res.status(403).json({ error: 'Invalid CSRF token' });
   next();
 }
+
+function isLoopbackRequest(req: express.Request): boolean {
+  const address = req.socket.remoteAddress?.replace(/^::ffff:/, '');
+  return address === '127.0.0.1' || address === '::1';
+}
+
+function isLoopbackHost(req: express.Request): boolean {
+  const host = req.get('host')?.trim().toLowerCase() ?? '';
+  return /^(?:localhost|127\.0\.0\.1)(?::\d+)?$/.test(host)
+    || /^\[::1\](?::\d+)?$/.test(host);
+}
+
+function hasValidInternalAdminToken(req: express.Request): boolean {
+  const configured = process.env.OTT_INTERNAL_ADMIN_TOKEN?.trim();
+  const supplied = req.get('x-ott-internal-token')?.trim();
+  if (!configured || !supplied) return false;
+  const configuredBytes = Buffer.from(configured, 'utf8');
+  const suppliedBytes = Buffer.from(supplied, 'utf8');
+  return configuredBytes.length === suppliedBytes.length
+    && timingSafeEqual(configuredBytes, suppliedBytes);
+}
+
+/**
+ * Loopback-only administrative endpoint. It deliberately bypasses the public
+ * session API but is still protected by an operator-provided secret and the
+ * Seeder's QA/ownership/lifecycle/preflight checks.
+ */
+app.post('/internal/admin/bulk-bot-seed', async (req, res) => {
+  if (!isLoopbackRequest(req) || !isLoopbackHost(req)) return res.status(404).json({ error: 'Not found' });
+  if (!hasValidInternalAdminToken(req)) return res.status(401).json({ error: 'Internal admin authentication required' });
+  if (process.env.NODE_ENV?.trim().toLowerCase() !== 'production'
+    || process.env.EXECUTION_POLICY?.trim().toLowerCase() !== 'sandbox-required'
+    || process.env.ENABLE_SOURCE_REVISION_EXECUTION?.trim().toLowerCase() !== 'true') {
+    return res.status(503).json({ error: 'Production sandbox configuration is required' });
+  }
+
+  const body = req.body ?? {};
+  const tournamentId = typeof body.tournamentId === 'string' ? body.tournamentId.trim() : '';
+  const qaConfirmation = typeof body.qaConfirmation === 'string' ? body.qaConfirmation : '';
+  if (!tournamentId || qaConfirmation !== tournamentId) {
+    return res.status(400).json({ error: 'qaConfirmation must exactly match tournamentId' });
+  }
+
+  let count: number;
+  let runtime: 'cpp' | 'python3' | 'mixed';
+  try {
+    count = validateBulkBotCount(body.count);
+    runtime = parseBulkBotRuntime(body.runtime);
+  } catch (error) {
+    return res.status(400).json({ error: error instanceof Error ? error.message : String(error) });
+  }
+
+  try {
+    const summary = await seedBulkBotsExclusive(getBulkBotSeederDependencies(), {
+      tournamentId,
+      count,
+      runtime,
+      dryRun: body.dryRun === true,
+      qaConfirmation,
+    });
+    return res.json(summary);
+  } catch (error) {
+    if (error instanceof BulkBotSeedBusyError) return res.status(409).json({ error: error.message });
+    console.error('Internal bulk Bot seed failed:', error);
+    return res.status(400).json({ error: error instanceof Error ? error.message : String(error) });
+  }
+});
 function apiBot(bot: BotRecord) {
   const revisionId = bot.current_revision_id;
   const revision = revisionId && bot.owner_id
@@ -2387,7 +2467,86 @@ app.post('/api/tournaments/:id/register', requireAuth, requireRole('organizer'),
 
 // Track active tournament runs to prevent duplicate run_all tasks
 const activeTournamentRuns = new Set<string>();
+const activeTournamentTaskIds = new Map<string, Set<string>>();
 const tournamentRunOwners = new Map<string, string>();
+
+function registerTournamentTask(tournamentId: string, taskId: string): void {
+  const taskIds = activeTournamentTaskIds.get(tournamentId) ?? new Set<string>();
+  taskIds.add(taskId);
+  activeTournamentTaskIds.set(tournamentId, taskIds);
+}
+
+function unregisterTournamentTask(tournamentId: string, taskId: string): void {
+  const taskIds = activeTournamentTaskIds.get(tournamentId);
+  if (!taskIds) return;
+  taskIds.delete(taskId);
+  if (taskIds.size === 0) activeTournamentTaskIds.delete(tournamentId);
+}
+
+function activeTournamentExecutionDetails(tournamentId: string) {
+  return [...(activeTournamentTaskIds.get(tournamentId) ?? [])].map(taskId => ({
+    taskId,
+    status: executionQueue.getStatus(taskId),
+    queued: executionQueue.isTaskQueued(taskId),
+    active: executionQueue.isTaskActive(taskId),
+  }));
+}
+
+/**
+ * The set is only a duplicate-submission guard. The queue is authoritative for
+ * whether work still occupies a slot; clean stale bookkeeping before rejecting
+ * a new run so a completed/failed task cannot block the tournament forever.
+ */
+function isTournamentExecutionActive(tournamentId: string): boolean {
+  if (!activeTournamentRuns.has(tournamentId)) return false;
+  const taskIds = activeTournamentTaskIds.get(tournamentId);
+  if (!taskIds || taskIds.size === 0) {
+    activeTournamentRuns.delete(tournamentId);
+    return false;
+  }
+
+  const hasLiveTask = [...taskIds].some(taskId =>
+    executionQueue.isTaskQueued(taskId) || executionQueue.isTaskActive(taskId)
+  );
+  if (hasLiveTask) return true;
+
+  for (const taskId of taskIds) tournamentRunOwners.delete(taskId);
+  activeTournamentTaskIds.delete(tournamentId);
+  activeTournamentRuns.delete(tournamentId);
+  return false;
+}
+
+function cancelTournamentExecution(tournamentId: string): string[] {
+  const registered = [...(activeTournamentTaskIds.get(tournamentId) ?? [])];
+  const knownTaskIds = [`run_all_${tournamentId}`, `run_next_stage_${tournamentId}`];
+  const taskIds = [...new Set([...registered, ...knownTaskIds])];
+  const activeTaskIds = taskIds.filter(taskId => {
+    const status = executionQueue.getStatus(taskId);
+    return status === 'queued' || status === 'active';
+  });
+  for (const taskId of activeTaskIds) {
+    const status = executionQueue.getStatus(taskId);
+    executionQueue.cancel(taskId);
+    // Queued tasks never enter their callback. Active tasks release ownership
+    // from the callback's finally block after the worker has really stopped.
+    if (status === 'queued') {
+      unregisterTournamentTask(tournamentId, taskId);
+      tournamentRunOwners.delete(taskId);
+    }
+  }
+  if (!activeTournamentTaskIds.has(tournamentId)) activeTournamentRuns.delete(tournamentId);
+  return activeTaskIds;
+}
+
+async function waitForTournamentExecutionSettled(tournamentId: string, taskIds: string[], timeoutMs = 15_000): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const remaining = activeTournamentTaskIds.get(tournamentId);
+    if (!remaining || !taskIds.some(taskId => remaining.has(taskId))) return true;
+    await new Promise(resolve => setTimeout(resolve, 50));
+  }
+  return false;
+}
 
 function queueStatsForOrganizer(ownerId: string) {
   const ownedTaskIds: string[] = [];
@@ -2447,14 +2606,15 @@ app.post('/api/tournaments/:id/action', requireAuth, requireRole('organizer'), r
         result = await manager.startTournament(tournamentId);
         break;
       case 'start_next_stage':
-        if (activeTournamentRuns.has(tournamentId)) {
-          return res.status(409).json({ error: 'Tournament is already running' });
+        if (isTournamentExecutionActive(tournamentId)) {
+          return res.status(409).json({ error: 'Tournament is already running', tasks: activeTournamentExecutionDetails(tournamentId) });
         }
         result = await manager.startNextStage(tournamentId);
         if (!result.success) break;
         activeTournamentRuns.add(tournamentId);
         {
           const nextStageTaskId = `run_next_stage_${tournamentId}`;
+          registerTournamentTask(tournamentId, nextStageTaskId);
           tournamentRunOwners.set(nextStageTaskId, req.auth!.id);
           executionQueue.submit(nextStageTaskId, async signal => {
             try {
@@ -2464,11 +2624,15 @@ app.post('/api/tournaments/:id/action', requireAuth, requireRole('organizer'), r
               }
             } finally {
               activeTournamentRuns.delete(tournamentId);
+              unregisterTournamentTask(tournamentId, nextStageTaskId);
               tournamentRunOwners.delete(nextStageTaskId);
             }
           }).catch(error => {
-            activeTournamentRuns.delete(tournamentId);
-            tournamentRunOwners.delete(nextStageTaskId);
+            if (executionQueue.getStatus(nextStageTaskId) !== 'cancelled') {
+              activeTournamentRuns.delete(tournamentId);
+              unregisterTournamentTask(tournamentId, nextStageTaskId);
+              tournamentRunOwners.delete(nextStageTaskId);
+            }
             console.error(`Next stage execution queue error for ${tournamentId}:`, error);
           });
         }
@@ -2499,11 +2663,12 @@ app.post('/api/tournaments/:id/action', requireAuth, requireRole('organizer'), r
       }
       case 'run_all':
         // 4. Prevent duplicate run_all tasks
-        if (activeTournamentRuns.has(tournamentId)) {
-          return res.status(409).json({ error: 'Tournament is already running' });
+        if (isTournamentExecutionActive(tournamentId)) {
+          return res.status(409).json({ error: 'Tournament is already running', tasks: activeTournamentExecutionDetails(tournamentId) });
         }
         activeTournamentRuns.add(tournamentId);
         const taskId = `run_all_${tournamentId}`;
+        registerTournamentTask(tournamentId, taskId);
         tournamentRunOwners.set(taskId, req.auth!.id);
 
         executionQueue.submit(taskId, async (signal) => {
@@ -2517,17 +2682,21 @@ app.post('/api/tournaments/:id/action', requireAuth, requireRole('organizer'), r
             }
           } finally {
             activeTournamentRuns.delete(tournamentId);
+            unregisterTournamentTask(tournamentId, taskId);
             tournamentRunOwners.delete(taskId);
           }
         }).catch(err => {
-          tournamentRunOwners.delete(taskId);
-          activeTournamentRuns.delete(tournamentId);
+          if (executionQueue.getStatus(taskId) !== 'cancelled') {
+            tournamentRunOwners.delete(taskId);
+            activeTournamentRuns.delete(tournamentId);
+            unregisterTournamentTask(tournamentId, taskId);
+          }
           if (!(err instanceof Error && err.message.includes('cancelled'))) {
             console.error(`Execution queue error for ${tournamentId}:`, err);
           }
         });
 
-        return res.json({ message: 'Match execution started in background' });
+        return res.json({ message: 'Match execution started in background', taskId });
       case 'retry_match':
       case 'retry_pairing':
       case 'run_pairing':
@@ -2537,41 +2706,46 @@ app.post('/api/tournaments/:id/action', requireAuth, requireRole('organizer'), r
           if (!requestedPairing) return res.status(404).json({ error: 'Pairing not found' });
           if (requestedPairing.status !== 'failed' && requestedPairing.status !== 'in_progress') return res.status(409).json({ error: `Pairing cannot be requeued (current: ${requestedPairing.status})` });
         }
-        if (activeTournamentRuns.has(tournamentId)) return res.status(409).json({ error: 'Tournament is already running' });
+        if (isTournamentExecutionActive(tournamentId)) return res.status(409).json({ error: 'Tournament is already running', tasks: activeTournamentExecutionDetails(tournamentId) });
         const requeued = await manager.requeuePairing(tournamentId, pairingId.trim());
         if (!requeued.success) return res.status(409).json({ error: requeued.error ?? 'Pairing cannot be requeued' });
         activeTournamentRuns.add(tournamentId);
         const pairingTaskId = `run_pairing_${tournamentId}_${pairingId}`;
+        registerTournamentTask(tournamentId, pairingTaskId);
         tournamentRunOwners.set(pairingTaskId, req.auth!.id);
-        executionQueue.submit(pairingTaskId, async () => {
+        executionQueue.submit(pairingTaskId, async signal => {
           try {
-            const executionResult = await manager.runPairingById(tournamentId, pairingId.trim());
+            const executionResult = await manager.runPairingById(tournamentId, pairingId.trim(), signal);
             if (!executionResult.success) throw new Error(executionResult.error ?? 'Pairing requeue execution failed');
           } finally {
             activeTournamentRuns.delete(tournamentId);
+            unregisterTournamentTask(tournamentId, pairingTaskId);
             tournamentRunOwners.delete(pairingTaskId);
           }
         }).catch(err => {
-          tournamentRunOwners.delete(pairingTaskId);
-          activeTournamentRuns.delete(tournamentId);
+          if (executionQueue.getStatus(pairingTaskId) !== 'cancelled') {
+            tournamentRunOwners.delete(pairingTaskId);
+            activeTournamentRuns.delete(tournamentId);
+            unregisterTournamentTask(tournamentId, pairingTaskId);
+          }
           console.error(`Pairing retry queue error for ${tournamentId}/${pairingId}:`, err);
         });
         return res.json({ message: 'Match retry started in background' });
       case 'cancel':
-        executionQueue.cancel(`run_all_${tournamentId}`);
-        activeTournamentRuns.delete(tournamentId);
+        cancelTournamentExecution(tournamentId);
         result = await manager.cancelTournament(tournamentId);
         break;
       case 'stop_execution': {
-        const executionTaskId = `run_all_${tournamentId}`;
-        const taskStatus = executionQueue.getStatus(executionTaskId);
-        if (taskStatus !== 'queued' && taskStatus !== 'active') {
+        const cancelledTaskIds = cancelTournamentExecution(tournamentId);
+        if (cancelledTaskIds.length === 0) {
           return res.status(409).json({ error: 'Tournament execution is not active' });
         }
-        executionQueue.cancel(executionTaskId);
-        activeTournamentRuns.delete(tournamentId);
-        tournamentRunOwners.delete(executionTaskId);
-        return res.json({ message: 'Match execution stopped' });
+        const settled = await waitForTournamentExecutionSettled(tournamentId, cancelledTaskIds);
+        return res.json({
+          message: settled ? 'Match execution stopped' : 'Match execution is stopping',
+          taskIds: cancelledTaskIds,
+          settled,
+        });
       }
       default:
         return res.status(400).json({ error: 'Invalid action' });
@@ -2604,22 +2778,27 @@ async function handlePairingRequeue(req: express.Request, res: express.Response)
     if (existingTask === 'queued' || existingTask === 'active') {
       return res.json({ message: 'Match retry is already queued' });
     }
-    if (activeTournamentRuns.has(tournamentId)) return res.status(409).json({ error: 'Tournament is already running' });
+    if (isTournamentExecutionActive(tournamentId)) return res.status(409).json({ error: 'Tournament is already running', tasks: activeTournamentExecutionDetails(tournamentId) });
     const prepared = await manager.requeuePairing(tournamentId, pairingId);
     if (!prepared.success) return res.status(409).json({ error: prepared.error ?? 'Pairing cannot be requeued' });
     activeTournamentRuns.add(tournamentId);
+    registerTournamentTask(tournamentId, taskId);
     tournamentRunOwners.set(taskId, req.auth!.id);
-    executionQueue.submit(taskId, async () => {
+    executionQueue.submit(taskId, async signal => {
       try {
-        const result = await manager.runPairingById(tournamentId, pairingId);
+        const result = await manager.runPairingById(tournamentId, pairingId, signal);
         if (!result.success) throw new Error(result.error ?? 'Pairing requeue execution failed');
       } finally {
         activeTournamentRuns.delete(tournamentId);
+        unregisterTournamentTask(tournamentId, taskId);
         tournamentRunOwners.delete(taskId);
       }
     }).catch(error => {
-      activeTournamentRuns.delete(tournamentId);
-      tournamentRunOwners.delete(taskId);
+      if (executionQueue.getStatus(taskId) !== 'cancelled') {
+        activeTournamentRuns.delete(tournamentId);
+        unregisterTournamentTask(tournamentId, taskId);
+        tournamentRunOwners.delete(taskId);
+      }
       console.error(`Dedicated pairing requeue failed for ${tournamentId}/${pairingId}:`, error);
     });
     return res.json({ message: 'Pairing requeued and execution started in background' });
@@ -3120,11 +3299,13 @@ app.get('/api/tournaments/:id/replays/:matchId', requireAuth, async (req, res) =
 // ---------------------------------------------------------
 app.get('/api/system/queue', requireAuth, requireRole('organizer'), async (req, res) => {
   const taskId = typeof req.query.id === 'string' ? req.query.id : undefined;
-  if (taskId && !taskId.startsWith('run_all_')) {
+  const taskPrefixes = ['run_all_', 'run_next_stage_', 'run_pairing_', 'requeue_pairing_'];
+  const taskPrefix = taskId ? taskPrefixes.find(prefix => taskId.startsWith(prefix)) : undefined;
+  if (taskId && !taskPrefix) {
     return res.status(400).json({ error: 'A tournament queue task id is required' });
   }
   if (taskId) {
-    const tournamentId = taskId.slice('run_all_'.length);
+    const tournamentId = taskId.slice(taskPrefix!.length);
     if (!tournamentId || !await ownedTournament(tournamentId, req.auth!.id)) {
       return res.status(404).json({ error: 'Tournament queue task not found' });
     }

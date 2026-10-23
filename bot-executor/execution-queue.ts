@@ -60,6 +60,16 @@ export class ExecutionQueue extends EventEmitter {
     return this.accepting && !this._disposed;
   }
 
+  /** Return whether a task is still occupying an execution slot. */
+  isTaskActive(id: string): boolean {
+    return this.active.has(id);
+  }
+
+  /** Return whether a task is waiting for an execution slot. */
+  isTaskQueued(id: string): boolean {
+    return this.queue.some(task => task.id === id);
+  }
+
   async submit<T>(id: string, execute: (signal: AbortSignal) => Promise<T>): Promise<T> {
     if (this._disposed) {
       throw new Error('Queue is disposed');
@@ -69,7 +79,13 @@ export class ExecutionQueue extends EventEmitter {
     }
 
     if (this.cancelled.has(id)) {
-      throw new Error(`Task ${id} was cancelled before submission`);
+      // A cancelled task ID can be reused after the previous task has fully
+      // left the queue. Keep the marker while cancellation is still unwinding
+      // so a duplicate submission cannot race the old execution.
+      if (this.active.has(id) || this.queue.some(task => task.id === id)) {
+        throw new Error(`Task ${id} was cancelled before submission`);
+      }
+      this.cancelled.delete(id);
     }
 
     if (this.queue.length >= this.config.maxQueueLength && this.active.size >= this.config.maxConcurrent) {

@@ -3,6 +3,7 @@ import {
   isExplicitQaTournament,
   parseBulkBotRuntime,
   seedBulkBots,
+  seedBulkBotsExclusive,
   validateBulkBotCount,
 } from '../../server/admin/bulk-bot-seeder.js';
 import type { Tournament } from '../../tournament/types.js';
@@ -123,5 +124,25 @@ describe('bulk Bot seeder', () => {
     expect(result.results.map(item => item.runtime)).toEqual(['cpp', 'python3']);
     expect(calls.review).toHaveBeenCalledTimes(2);
     expect(calls.review.mock.calls.every(call => call[3] === 'approve')).toBe(true);
+  });
+
+  it('serializes concurrent administrative seed operations', async () => {
+    const first = dependencies();
+    let release!: () => void;
+    const held = new Promise<void>(resolve => { release = resolve; });
+    first.deps.manager.loadTournament = async () => {
+      await held;
+      return { success: true, data: qaTournament() };
+    };
+
+    const running = seedBulkBotsExclusive(first.deps as any, {
+      tournamentId: 'qa-seeder-test', count: 1, runtime: 'cpp', qaConfirmation: 'qa-seeder-test',
+    });
+    await new Promise(resolve => setTimeout(resolve, 0));
+    await expect(seedBulkBotsExclusive(dependencies().deps as any, {
+      tournamentId: 'qa-seeder-test', count: 1, runtime: 'cpp', qaConfirmation: 'qa-seeder-test',
+    })).rejects.toThrow('already running');
+    release();
+    await expect(running).resolves.toMatchObject({ seeded: 1 });
   });
 });

@@ -1403,6 +1403,7 @@ export class TournamentManager {
         signal,
       );
       if (dispatched.cancelled || this.shuttingDown || signal?.aborted || this.cancelledTournaments.has(tournamentId)) {
+        await this.reconcileInterruptedTournament(tournamentId);
         return { success: false, error: 'Tournament execution cancelled' };
       }
       if (dispatched.failures.length > 0) {
@@ -1805,6 +1806,7 @@ export class TournamentManager {
     }
 
     if (scheduleResult.cancelled || this.shuttingDown || signal?.aborted || this.cancelledTournaments.has(tournamentId)) {
+      await this.reconcileInterruptedTournament(tournamentId);
       return { success: false, error: 'Tournament execution cancelled' };
     }
 
@@ -1844,8 +1846,9 @@ export class TournamentManager {
   /**
    * Run a specific pairing by ID
    */
-  async runPairingById(tournamentId: string, pairingId: string): Promise<TournamentOperationResult<ExecutedMatchResult>> {
+  async runPairingById(tournamentId: string, pairingId: string, signal?: AbortSignal): Promise<TournamentOperationResult<ExecutedMatchResult>> {
     if (this.shuttingDown) return { success: false, error: 'Tournament execution paused for shutdown' };
+    if (signal?.aborted) return { success: false, error: 'Tournament execution cancelled' };
     const loadResult = await this.loadTournament(tournamentId);
     if (!loadResult.success || !loadResult.data) {
       return { success: false, error: loadResult.error };
@@ -1877,7 +1880,18 @@ export class TournamentManager {
       }
     }
 
-    return this.runPairing(tournament, pairing);
+    const result = await this.runPairing(tournament, pairing, signal);
+    if (signal?.aborted || result.error === 'Tournament execution cancelled') {
+      await this.reconcileInterruptedTournament(tournamentId);
+    }
+    return result;
+  }
+
+  private async reconcileInterruptedTournament(tournamentId: string): Promise<void> {
+    const loaded = await this.loadTournament(tournamentId);
+    if (!loaded.success || !loaded.data) return;
+    await this.reconcileInterruptedPairings(loaded.data);
+    await this.saveTournament(loaded.data);
   }
 
   /** Retry one failed pairing without changing the rest of the schedule. */

@@ -82,6 +82,38 @@ describe('ExecutionQueue', () => {
   });
 
   describe('cancellation', () => {
+    it('distinguishes task occupancy from a remembered terminal status', async () => {
+      const queue = new ExecutionQueue({ maxConcurrent: 1 });
+      let release!: () => void;
+      const blocker = queue.submit('occupying', () => new Promise<void>(resolve => { release = resolve; }));
+
+      await new Promise(resolve => setImmediate(resolve));
+      expect(queue.isTaskActive('occupying')).toBe(true);
+      expect(queue.isTaskQueued('occupying')).toBe(false);
+      release();
+      await blocker;
+      await new Promise(resolve => setImmediate(resolve));
+
+      expect(queue.getStatus('occupying')).toBe('completed');
+      expect(queue.isTaskActive('occupying')).toBe(false);
+      expect(queue.isTaskQueued('occupying')).toBe(false);
+    });
+
+    it('allows a cancelled task id to be submitted again after cleanup', async () => {
+      queue = createExecutionQueue({ maxConcurrent: 1 });
+      let release!: () => void;
+      const first = queue.submit('reusable', () => new Promise<void>(resolve => { release = resolve; }));
+      await new Promise(resolve => setImmediate(resolve));
+      expect(queue.isTaskActive('reusable')).toBe(true);
+
+      expect(queue.cancel('reusable')).toBe(true);
+      release();
+      await expect(first).rejects.toThrow('cancelled');
+      await new Promise(resolve => setImmediate(resolve));
+
+      await expect(queue.submit('reusable', async () => 'reused')).resolves.toBe('reused');
+    });
+
     it('stops admission and drains active work without aborting it', async () => {
       queue = createExecutionQueue({ maxConcurrent: 1, maxQueueLength: 10 });
       let signal!: AbortSignal;

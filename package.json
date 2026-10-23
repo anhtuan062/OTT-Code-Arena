@@ -14,7 +14,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
-    "seed:bulk-bots": "tsx scripts/bulk-bot-seeder.ts",
+    "seed:bulk-bots": "node dist/scripts/bulk-bot-seeder.js",
     "lint": "eslint . --ext .ts",
     "predev": "node scripts/build-html.js",
     "dev": "tsx watch server/index.ts",
