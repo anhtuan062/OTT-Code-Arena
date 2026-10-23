@@ -1352,7 +1352,7 @@ export class TournamentManager {
       return { success: false, error: loadResult.error };
     }
 
-    const tournament = loadResult.data;
+    let tournament = loadResult.data;
 
     if (tournament.status !== 'running') {
       return { success: false, error: `Tournament not running (status: ${tournament.status})` };
@@ -1436,6 +1436,11 @@ export class TournamentManager {
         if (this.shuttingDown || signal?.aborted || this.cancelledTournaments.has(tournamentId)) {
           return { success: false, error: 'Tournament execution cancelled' };
         }
+        // A series commit resolves dependent slots and stage transitions on a
+        // fresh repository snapshot. Refresh before selecting the next pairing
+        // so knockout finals and later stages are not skipped by stale slots.
+        const fresh = await this.repository.load(tournamentId);
+        if (fresh) tournament = fresh;
         pairing = this.getNextPairing(tournament);
       } else {
         if (signal?.aborted || this.cancelledTournaments.has(tournamentId) || result.error === 'Tournament execution cancelled') {
@@ -1455,8 +1460,10 @@ export class TournamentManager {
       return { success: false, error: `${failures.length} match(es) failed. Review the failed pairings and run execution again to retry.` };
     }
 
-    // Check if tournament is complete
-    if (!signal?.aborted && !this.cancelledTournaments.has(tournamentId) && this.isTournamentFinished(tournament)) {
+    // Series commits use the coordinator's fresh snapshot, so the local
+    // object may still show the last pairing as in progress.
+    const authoritative = await this.repository.load(tournamentId);
+    if (!signal?.aborted && !this.cancelledTournaments.has(tournamentId) && authoritative && this.isTournamentFinished(authoritative)) {
       await this.completeTournament(tournamentId);
     }
 
@@ -1468,6 +1475,7 @@ export class TournamentManager {
     const loaded = await this.loadTournament(tournamentId);
     if (!loaded.success || !loaded.data) return { done: true, error: loaded.error ?? `Tournament ${tournamentId} not found` };
     const tournament = loaded.data;
+    if (tournament.status === 'completed') return { done: true };
     if (tournament.status !== 'running') return { done: true, error: `Tournament not running (status: ${tournament.status})` };
     if (this.matchAdmissionController && !this.matchAdmissionController(0)) {
       return { done: false, deferred: true, retryAfterMs: 250 };
@@ -1476,7 +1484,18 @@ export class TournamentManager {
     if (!pairing) {
       const pendingTiebreakers = this.getAllPairings(tournament).filter(p => p.status === 'pending_tiebreaker' || p.tiebreakerStatus === 'pending');
       if (pendingTiebreakers.length > 0) return { done: true, error: `${pendingTiebreakers.length} match(es) require tiebreaker resolution` };
-      if (!this.cancelledTournaments.has(tournamentId) && this.isTournamentFinished(tournament)) await this.completeTournament(tournamentId);
+      // A concurrent quantum can have loaded its snapshot while another
+      // pairing is still committing. Do not terminate from that stale view.
+      const hasLocalWork = this.getAllPairings(tournament).some(candidate =>
+        candidate.status === 'in_progress' || this.isPairingLocallyBusy(tournamentId, candidate.pairingId)
+      );
+      if (hasLocalWork || this.commitCoordinator.isLocked(tournamentId)) {
+        return { done: false, deferred: true, retryAfterMs: 25 };
+      }
+      const authoritative = await this.repository.load(tournamentId);
+      if (!this.cancelledTournaments.has(tournamentId) && authoritative && this.isTournamentFinished(authoritative)) {
+        await this.completeTournament(tournamentId);
+      }
       return { done: true };
     }
     const dispatchKey = `${tournamentId}:${pairing.pairingId}`;
