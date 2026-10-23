@@ -1,191 +1,121 @@
-# Luật chơi OTTv2
+# Luật OTTv2 trên OTT Code Arena
 
-Tài liệu này mô tả chi tiết và chính xác các quy tắc vận hành trò chơi OTTv2 theo triển khai thực tế của Game Engine (`engine/`) và Match Runner (`match-runner/`).
+Tài liệu này mô tả luật đang được `engine/`, Match Runner và series implementation thực thi.
 
----
+## 1. Bàn cờ và quân
 
-## 1. Bàn cờ và Thiết lập quân cờ
+- Bàn cờ có 9×9 ô. Tọa độ cột là `a`–`i`, hàng là `1`–`9`; trong code dùng `row`/`col` từ 0 đến 8.
+- Hai phía là A và B.
+- Ba loại quân: Đấm (`dam`), Lá (`la`) và Kéo (`keo`). Một số màn hình cũ hiển thị Đấm là **Búa** và Lá là **Bao**; đó là hai tên hiển thị cho cùng mã quân, không phải loại quân khác.
+- Mỗi bên bắt đầu với 9 quân: 3 quân mỗi loại.
+- A ở phía trên và nhắm ô đích `i9`; B ở phía dưới và nhắm ô đích `a1`.
 
-### 1.1. Bàn cờ và Hệ tọa độ
-- **Kích thước**: Bàn cờ hình vuông $9 \times 9$ ô (`BOARD_SIZE = 9`).
-- **Tọa độ hiển thị (Algebraic notation)**: Từ `a1` đến `i9`. Cột biểu diễn bằng chữ cái `a` đến `i` (trái sang phải), hàng biểu diễn bằng số `1` đến `9` (trên xuống dưới).
-- **Tọa độ nội bộ (Internal coordinates)**: Sử dụng cặp chỉ số nguyên 0-indexed:
-  - `row`: $0 \le \text{row} \le 8$
-  - `col`: $0 \le \text{col} \le 8$
-  - Ánh xạ: Ô `a1` tương ứng với `(row: 0, col: 0)`; ô `i9` tương ứng với `(row: 8, col: 8)`.
+### Vị trí mặc định
 
-### 1.2. Quân cờ và Lực lượng khởi đầu
-Mỗi ván đấu có 2 người chơi (hoặc 2 bot): **Người chơi A** (đi trước) và **Người chơi B** (đi sau).
+| Phía | Đấm | Lá | Kéo |
+| --- | --- | --- | --- |
+| A | `c1`, `g2`, `h3` | `f1`, `i2`, `b3` | `i1`, `d2`, `e3` |
+| B | `g9`, `c8`, `b7` | `d9`, `a8`, `h7` | `a9`, `f8`, `e7` |
 
-Mỗi bên khởi đầu với **9 quân cờ** thuộc 3 loại theo quy tắc Oẳn Tù Tì (OTT):
-- **3 quân Búa** (`dam` - Rock)
-- **3 quân Bao** (`la` - Paper)
-- **3 quân Kéo** (`keo` - Scissors)
+## 2. Di chuyển
 
-Tổng cộng có **18 quân cờ** trên bàn đấu. Quân của phe A xuất phát ở 3 hàng trên cùng (`row` 0, 1, 2); quân của phe B xuất phát đối xứng ở 3 hàng dưới cùng (`row` 6, 7, 8).
+Ở lượt của mình, người chơi chọn một quân và đi đúng một ô theo một trong tám hướng: ngang, dọc hoặc chéo.
 
-### 1.3. Bố cục khởi tạo (Initial Layouts)
-Trong `engine/initial-layout.ts`, hệ thống định nghĩa 3 biến thể bố cục quân cờ (`A_LAYOUTS`):
-- **Layout 0 (Bố cục chuẩn)**:
-  - Phe A:
-    - Búa (`dam`): `(0, 2)`, `(1, 6)`, `(2, 7)`
-    - Bao (`la`): `(0, 5)`, `(1, 8)`, `(2, 1)`
-    - Kéo (`keo`): `(0, 8)`, `(1, 3)`, `(2, 4)`
-- **Layout 1 & Layout 2**: Hoán đổi vị trí chiến thuật nhưng bảo toàn tổng số lượng quân và khoảng cách tới ô đích.
-- **Tính đối xứng của Phe B**: Tọa độ của phe B được sinh bằng hàm phản chiếu đối xứng qua tâm bàn cờ:
-  $$\text{row}_B = 8 - \text{row}_A, \quad \text{col}_B = 8 - \text{col}_A$$
-- **Trong loạt trận BO3**: Chỉ số layout cho từng ván được suy ra một cách tất định (deterministic) từ chuỗi `seed` của trận đấu:
-  $$\text{index} = (\text{SHA256}(seed\text{":board-layout"})[0] + \text{gameNumber} - 1) \pmod 3$$
-  Điều này đảm bảo Ván 1, Ván 2 và Ván 3 luôn sử dụng bố cục khác nhau nhưng hoàn toàn có thể tái lập khi replay hoặc server restart.
+Nước đi không hợp lệ nếu:
 
----
+- ra ngoài bàn;
+- đứng yên hoặc đi xa hơn một ô;
+- chọn quân của đối phương;
+- đi vào ô có quân cùng phía;
+- cố ăn quân không đúng quan hệ;
+- khi Conversion bật, engine không tìm được ô hợp lệ cho quân chuyển hóa.
 
-## 2. Quy tắc Di chuyển (Movement)
+Bot không cần tự suy đoán toàn bộ luật: request cung cấp danh sách `legalMoves`. Response phải chọn đúng một phần tử trong danh sách này.
 
-Ở mỗi lượt đi của mình, người chơi chọn **đúng một quân cờ** của phe mình và di chuyển **đúng 1 ô** theo một trong 8 hướng:
-- Ngang: Trái, Phải
-- Dọc: Lên, Xuống
-- Chéo: 4 góc chéo
+## 3. Ăn quân
 
-### Các ràng buộc di chuyển hợp lệ:
-1. **Không ra ngoài biên**: Ô đích phải thỏa mãn $0 \le \text{row} \le 8$ và $0 \le \text{col} \le 8$.
-2. **Khoảng cách di chuyển**: $|\Delta \text{row}| \le 1$ và $|\Delta \text{col}| \le 1$, đồng thời không được đứng yên ($|\Delta \text{row}| + |\Delta \text{col}| > 0$).
-3. **Ô đích trống**: Nếu ô đích không có quân nào, nước đi luôn hợp lệ.
-4. **Không ăn quân cùng phe**: Tuyệt đối không được di chuyển vào ô đang có quân của phe mình.
+Quan hệ ăn quân:
 
----
+| Quân tấn công | Ăn được |
+| --- | --- |
+| Đấm (`dam`) | Kéo (`keo`) |
+| Kéo (`keo`) | Lá (`la`) |
+| Lá (`la`) | Đấm (`dam`) |
 
-## 3. Quy tắc Ăn quân (Capture)
+Không được ăn quân cùng loại hoặc quân không bị khắc chế. Khi luật chuẩn được dùng, quân bị ăn bị loại và quân tấn công đi vào ô đó.
 
-Khi người chơi di chuyển quân vào ô đang có quân của đối phương, hành động ăn quân xảy ra nếu tuân theo quan hệ khắc chế vòng tròn:
+## 4. Rule modifier Conversion
 
-| Quân tấn công | Quân phòng thủ bị ăn | Kết quả |
-| :--- | :--- | :--- |
-| **Búa** (`dam`) | **Kéo** (`keo`) | Hợp lệ (Búa đập Kéo) |
-| **Kéo** (`keo`) | **Bao** (`la`) | Hợp lệ (Kéo cắt Bao) |
-| **Bao** (`la`) | **Búa** (`dam`) | Hợp lệ (Bao bọc Búa) |
+Conversion mặc định tắt. Khi bật, một nước ăn hợp lệ không loại quân bị ăn mà:
 
-### Các trường hợp cấm ăn quân:
-- **Cùng loại**: Búa không thể ăn Búa, Kéo không thể ăn Kéo, Bao không thể ăn Bao.
-- **Bị khắc ngược**: Kéo không thể ăn Búa, Bao không thể ăn Kéo, Búa không thể ăn Bao.
-- **Quân phe mình**: Không thể ăn quân cùng màu.
+1. đổi quân đó sang phía của quân tấn công;
+2. di chuyển quân tấn công vào ô bị ăn;
+3. đặt quân chuyển hóa vào ô trống gần ô bị ăn nhất theo khoảng cách Chebyshev;
+4. nếu nhiều ô cùng khoảng cách, chọn deterministic theo thứ tự theo chiều kim đồng hồ bắt đầu từ phía trên;
+5. loại ô đã có quân, hai ô đích và ô xuất phát của quân tấn công.
 
-### Cơ chế xử lý ăn quân trong Game Engine hiện tại:
-- Khi ăn quân thành công (`move.captures !== null`) và **Conversion tắt**:
-  - Quân phòng thủ của đối phương bị **xóa hoàn toàn** khỏi mảng quân cờ của ván đấu (`newState.pieces.splice(capturedIdx, 1)`).
-  - Quân tấn công chiếm giữ ô đích vừa di chuyển tới.
-  - Lực lượng của đối phương giảm đi 1 quân.
-- Khi **Conversion bật**:
-  - Quân bị ăn giữ nguyên loại và ID, đổi sang phe của quân tấn công.
-  - Quân chuyển phe được đặt vào ô trống gần ô bị ăn nhất theo khoảng cách Chebyshev.
-  - Các ô được xét theo thứ tự cố định từ phía trên theo chiều kim đồng hồ; không random, không dùng ô đích, goal hoặc ô xuất phát của quân tấn công.
-  - Nếu không còn ô hợp lệ, nước ăn bị từ chối.
+Nếu không có ô đặt hợp lệ, nước ăn không được tạo trong `legalMoves`. Replay mới ghi vị trí bằng `conversionTo`.
 
----
+## 5. Thắng
 
-## 4. Điều kiện Chiến thắng (Win Conditions)
+Một phía thắng ngay khi:
 
-Một bên giành chiến thắng ngay lập tức (`winReason`) khi đạt được một trong các điều kiện sau:
+- **Ăn hết toàn bộ quân đối phương** (`all_pieces_captured`); hoặc
+- **Đạt ô đích** (`goal_reached`): A tới `i9`, B tới `a1`.
 
-1. **Đạt ô đích (`goal_reached`)**:
-   - **Phe A** đưa bất kỳ quân cờ nào của mình tới ô đích **`i9`** (`row: 8, col: 8`).
-   - **Phe B** đưa bất kỳ quân cờ nào của mình tới ô đích **`a1`** (`row: 0, col: 0`).
-   - *Lưu ý*: Ô đích được kiểm tra ngay sau khi nước đi được áp dụng.
-2. **Ăn hết toàn bộ quân đối phương (`all_pieces_captured`)**:
-   - Một phe ăn hết sạch toàn bộ 9 quân cờ của đối thủ, khiến số quân đối phương trên bàn bằng 0 trong khi phe mình còn ít nhất 1 quân.
-   - *Lưu ý*: Chỉ tiêu diệt hết 1 hoặc 2 loại quân (ví dụ ăn hết Búa của đối thủ) **không** tạo thành chiến thắng.
-3. **Đối phương lặp nước đi 3 lần (`repetition`)**:
-   - Khi bot đối phương thực hiện nước đi khiến quân cờ dao động qua lại 3 lần (ví dụ $d3 \to d4 \to d3 \to d4 \to d3$, tức 4 nước đi lặp lại khiến ô $d3$ được viếng thăm 3 lần mà không có nước ăn quân ở giữa), hoặc thực hiện cùng 1 nước đi 3 lần, hoặc làm tái lặp thế cờ toàn cục 3 lần, bot lặp nước đi sẽ **bị xử thua ngay lập tức** và bot còn lại giành **chiến thắng**.
+Ăn hết một hoặc hai loại quân nhưng đối phương vẫn còn quân không phải điều kiện thắng.
 
----
+## 6. Hòa
 
-## 5. Điều kiện Hòa (Draw Conditions)
+Game Engine trả hòa khi:
 
-Ván đấu được xử hòa (`winner: 'draw'`) khi xảy ra một trong các trường hợp sau:
+- `state.turn > maxTurns` (`turn_limit`); mặc định `maxTurns=200`;
+- cả hai bên chỉ còn đúng một loại quân và đó là cùng một loại (`insufficient_material`);
+- Match Runner không còn legal move và không xác định được winner; nó kết thúc với lý do `insufficient_material`.
 
-1. **Vượt giới hạn số lượt (`turn_limit`)**:
-   - Số lượt đấu (`state.turn`) vượt quá cấu hình `maxTurns` của ván đấu (giá trị mặc định trong hệ thống là **200** lượt).
-2. **Không đủ lực lượng thi đấu (`insufficient_material`)**:
-   - Cả hai bên chỉ còn lại duy nhất 1 loại quân trên bàn cờ và loại quân đó **giống hệt nhau** (ví dụ cả hai bên chỉ còn Kéo). Khi đó không bên nào có khả năng ăn quân đối phương.
-3. **Hết nước đi hợp lệ (`insufficient_material` fallback)**:
-   - Đến lượt đi nhưng mảng `legalMoves` rỗng và engine không xác định được người thắng.
+`checkDraw` trong engine có nhánh threefold-position `repetition`, nhưng authoritative Match Runner còn áp dụng repetition-loss riêng như phần dưới.
 
----
+## 7. Thua do lặp
 
-## 6. Xử thua do lỗi Bot & Lặp nước đi (Forfeit & Repetition Loss)
+Sau nước của một Bot, Match Runner xử Bot đó thua và đối phương thắng với lý do `repetition` nếu xảy ra một trong các trường hợp:
 
-Bot bị xử thua ngay lập tức (đối thủ thắng ván) nếu vi phạm một trong các trường hợp sau:
+- cùng một quân dao động giữa hai ô qua bốn nước liên tiếp của quân đó, ví dụ `d3-d4-d3-d4-d3`;
+- cùng một quân thực hiện cùng một nước có hướng ba lần;
+- cùng một board-state hash xuất hiện ba lần.
 
-| Mã kết thúc (`TerminationReason`) | Phân loại | Nguyên nhân |
-| :--- | :--- | :--- |
-| `repetition` | Luật thi đấu | Bot lặp nước đi / thế cờ 3 lần (ví dụ dao động 1 quân qua lại $d3 \to d4 \to d3 \to d4 \to d3$). Bot thực hiện nước đi lặp lần 3 bị xử thua, đối phương thắng. |
-| `bot_timeout` | Vi phạm kỹ thuật | Quá thời gian suy nghĩ mỗi nước đi (`turnTimeoutMs`, mặc định 2000ms; tối thiểu 5000ms đối với Docker source revision). |
-| `bot_crash` | Vi phạm kỹ thuật | Tiến trình bot thoát bất thường (non-zero exit code), bị kill do vượt giới hạn RAM/CPU, hoặc crash runtime. |
-| `bot_empty_output` | Vi phạm kỹ thuật | Bot kết thúc mà không in bất kỳ dữ liệu nào ra stdout. |
-| `bot_invalid_json` | Vi phạm kỹ thuật | Dữ liệu bot gửi về stdout không phải là một chuỗi JSON hợp lệ. |
-| `bot_illegal_move` | Vi phạm kỹ thuật | Bot gửi nước đi không nằm trong danh sách `legal_moves` do Engine cung cấp ở lượt đó, hoặc vi phạm tọa độ/khoảng cách. |
+Các kiểm tra cấp quân chỉ xét chuỗi sau lần ăn quân gần nhất; một nước ăn sẽ cắt chuỗi lặp.
 
-*Lưu ý*: Nếu xảy ra lỗi hạ tầng (ví dụ Docker daemon không phản hồi, file hệ thống bị lỗi), trạng thái pairing được gán mã `failed` hoặc `engine_error` để Ban tổ chức có thể thực hiện chạy lại (retry) mà không tính thua oan cho bot.
+## 8. Thua do Bot
 
----
+| Termination reason | Trường hợp |
+| --- | --- |
+| `bot_timeout` | Timeout preparation/compile/runtime được map theo policy |
+| `bot_compilation_failed` | Compilation failure trong prewarm/series authoritative |
+| `bot_crash` | Process/container crash hoặc vượt resource limit |
+| `bot_empty_output` | Không có output |
+| `bot_invalid_json` | Output không phải JSON hợp lệ |
+| `bot_invalid_response` | Thiếu/sai field hoặc tọa độ/response không hợp lệ |
+| `bot_illegal_move` | Nước không thuộc legal moves hoặc security violation được map theo policy |
 
-## 7. Cấu trúc Loạt trận (BO1, BO2, BO3) và Điểm số
+Lỗi hạ tầng `EXECUTOR_UNAVAILABLE`/`EXECUTOR_ERROR` được map `engine_error` và được tầng tournament xử lý như lỗi có thể retry, không tự động quy thua Bot.
 
-### 7.1. Loạt trận
-- **BO1 (Best of 1)**: Thi đấu đúng 1 ván. Kết quả trận là kết quả của ván đó.
-- **BO2 (Best of 2)**: Thi đấu 2 ván. Ván 2 đổi bên (A/B đảo ngược). Được sử dụng trong vòng bảng của thể thức Multi-stage.
-- **BO3 (Best of 3)**: Thi đấu tối đa 3 ván:
-  - **Ván 1**: Phe A và Phe B theo thứ tự bốc thăm ban đầu.
-  - **Ván 2**: Đảo bên thi đấu (B đi trước làm A, A đi sau làm B).
-  - **Ván 3** (nếu cần): Quyết định bên đi trước một cách tất định dựa trên hash SHA-256 của `seed` (`digest[0] % 2 === 0`).
-  - *Quy tắc dừng sớm*: Loạt trận dừng ngay khi một bên giành được 2 ván thắng (ví dụ tỷ số 2-0). Nếu sau 2 ván tỷ số là 1-0 kèm 1 ván hòa, ván 3 vẫn được tổ chức để xác định kết quả cuối cùng.
-  - *Phân định ván 3*: Nếu ván 3 hòa, bên còn nhiều quân hơn thắng ván 3. Nếu hai bên còn số quân bằng nhau, phe A thua và phe B thắng.
-  - *Phân định ván 3*: Nếu ván 3 hòa, bên còn nhiều quân hơn thắng ván 3. Nếu hai bên còn số quân bằng nhau, phe A thua và phe B thắng.
-  - Giữa các ván đấu trong một series có khoảng nghỉ trễ 2.5 giây phía server để chuẩn bị môi trường.
+## 9. BO1, BO2 và BO3
 
-### 7.2. Điểm số Bảng xếp hạng (Standings Scoring)
-Điểm số được tính trên toàn bộ loạt trận (series) theo cấu hình `DEFAULT_SCORING_CONFIG`:
-- **Thắng trận**: **3 điểm**
-- **Hòa trận**: **1 điểm**
-- **Thua trận**: **0 điểm**
-- **Miễn đấu (Bye)**: **0 điểm** (Miễn đấu chỉ giúp tiến vào vòng sau, không cộng điểm).
-- **Tiêu chí xếp hạng**: Ưu tiên tổng điểm $\rightarrow$ Thành tích đối đầu trực tiếp (Head-to-head, khi đúng 2 bot bằng điểm) $\rightarrow$ Mã định danh đăng ký (đảm bảo thứ tự ổn định).
+- **BO1:** một ván; dùng trong các luồng/dữ liệu tương thích.
+- **BO2:** hai ván, đổi phía ở ván 2; series có thể hòa. Group stage của multi-stage dùng BO2.
+- **BO3:** tối đa ba ván, dừng khi một participant đạt hai thắng. Ván 2 đổi phía; phía ở ván 3 được chọn deterministic từ series seed.
 
----
+Nếu ván 3 BO3 hòa, participant còn nhiều quân hơn thắng ván. Nếu vẫn bằng quân, participant ở phía A của ván 3 thua và phía B thắng. Quy tắc này chỉ áp dụng tiebreak ván 3 BO3, không đổi kết quả hòa của BO1/BO2.
 
-## 6. Xử thua do lỗi Bot (Forfeit)
+## 10. Điểm bảng
 
-Bot bị xử thua ngay lập tức (đối thủ thắng ván) nếu vi phạm một trong các lỗi sau:
+Cấu hình mặc định cho giải mới:
 
-| Mã lỗi (`TerminationReason`) | Nguyên nhân |
-| :--- | :--- |
-| `bot_timeout` | Quá thời gian suy nghĩ mỗi nước đi (`turnTimeoutMs`, mặc định 2000ms; tối thiểu 5000ms đối với Docker source revision). |
-| `bot_crash` | Tiến trình bot thoát bất thường (non-zero exit code), bị kill do vượt giới hạn RAM/CPU, hoặc crash runtime. |
-| `bot_empty_output` | Bot kết thúc mà không in bất kỳ dữ liệu nào ra stdout. |
-| `bot_invalid_json` | Dữ liệu bot gửi về stdout không phải là một chuỗi JSON hợp lệ. |
-| `bot_illegal_move` | Bot gửi nước đi không nằm trong danh sách `legal_moves` do Engine cung cấp ở lượt đó, hoặc vi phạm tọa độ/khoảng cách. |
+- thắng series: 3 điểm;
+- hòa series: 1 điểm;
+- thua: 0 điểm;
+- bye: 0 điểm.
 
-*Lưu ý*: Nếu xảy ra lỗi hạ tầng (ví dụ Docker daemon không phản hồi, file hệ thống bị lỗi), trạng thái pairing được gán mã `failed` hoặc `engine_error` để Ban tổ chức có thể thực hiện chạy lại (retry) mà không tính thua oan cho bot.
+Thứ tự xếp hạng dùng tổng điểm, đối đầu trực tiếp khi đúng hai participant bằng điểm, rồi participant ID để có thứ tự ổn định. Cấu hình scoring được lưu trong tournament; dữ liệu legacy có normalization riêng.
 
----
-
-## 7. Cấu trúc Loạt trận (BO1, BO2, BO3) và Điểm số
-
-### 7.1. Loạt trận
-- **BO1 (Best of 1)**: Thi đấu đúng 1 ván. Kết quả trận là kết quả của ván đó.
-- **BO2 (Best of 2)**: Thi đấu 2 ván. Ván 2 đổi bên (A/B đảo ngược). Được sử dụng trong vòng bảng của thể thức Multi-stage.
-- **BO3 (Best of 3)**: Thi đấu tối đa 3 ván:
-  - **Ván 1**: Phe A và Phe B theo thứ tự bốc thăm ban đầu.
-  - **Ván 2**: Đảo bên thi đấu (B đi trước làm A, A đi sau làm B).
-  - **Ván 3** (nếu cần): Quyết định bên đi trước một cách tất định dựa trên hash SHA-256 của `seed` (`digest[0] % 2 === 0`).
-  - *Quy tắc dừng sớm*: Loạt trận dừng ngay khi một bên giành được 2 ván thắng (ví dụ tỷ số 2-0). Nếu sau 2 ván tỷ số là 1-0 kèm 1 ván hòa, ván 3 vẫn được tổ chức để xác định kết quả cuối cùng.
-  - Giữa các ván đấu trong một series có khoảng nghỉ trễ 2.5 giây phía server để chuẩn bị môi trường.
-
-### 7.2. Điểm số Bảng xếp hạng (Standings Scoring)
-Điểm số được tính trên toàn bộ loạt trận (series) theo cấu hình `DEFAULT_SCORING_CONFIG`:
-- **Thắng trận**: **3 điểm**
-- **Hòa trận**: **1 điểm**
-- **Thua trận**: **0 điểm**
-- **Miễn đấu (Bye)**: **0 điểm** (Miễn đấu chỉ giúp tiến vào vòng sau, không cộng điểm).
-- **Tiêu chí xếp hạng**: Ưu tiên tổng điểm $\rightarrow$ Thành tích đối đầu trực tiếp (Head-to-head, khi đúng 2 bot bằng điểm) $\rightarrow$ Mã định danh đăng ký (đảm bảo thứ tự ổn định).
-
+Xem thêm [Strategy SDK](strategy-sdk.md), [Trận đấu và replay](match-and-replay.md) và [Vòng đời giải](tournament-lifecycle.md).

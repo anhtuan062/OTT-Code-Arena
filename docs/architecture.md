@@ -1,15 +1,16 @@
-# Kiến trúc Hệ thống OTT Code Arena
+# Kiến trúc hệ thống OTT Code Arena
 
 Tài liệu này mô tả tổng thể kiến trúc phần mềm, các phân hệ thành phần và luồng dữ liệu của nền tảng OTT Code Arena dựa trên mã nguồn thực tế tại repository.
 
 ---
 
-## 1. Tổng quan Kiến trúc
+## 1. Tổng quan kiến trúc
 
-OTT Code Arena được thiết kế theo mô hình **Modular Monolith** viết bằng **TypeScript** chạy trên nền tảng **Node.js (>= 20)**:
-- **Tập trung và Nhất quán**: Toàn bộ các phân hệ (Game Engine, Protocol, Bot Executor, Match Runner, Tournament Subsystem, Server API, và Giao diện người dùng) được phân định ranh giới module rõ ràng nhưng cùng được biên dịch và vận hành trong một tiến trình server duy nhất.
-- **Bảo mật Đa tầng**: Mã nguồn bot không tin cậy của thí sinh bị cô lập hoàn toàn trong Linux Docker Container với chính sách hạn chế tài nguyên nghiêm ngặt, cách ly mạng và chạy dưới quyền non-root.
-- **Lưu trữ Lai (Hybrid Persistence)**: Kết hợp giữa SQLite (dữ liệu quan hệ, tài khoản, phiên làm việc, hàng đợi job) và File Repository (dữ liệu JSON giải đấu, kết quả trận đấu và file Replay được ký băm SHA-256).
+OTT Code Arena là một **modular monolith** viết bằng **TypeScript** và chạy trên **Node.js 20 trở lên**:
+
+- Các phân hệ Game Engine, Protocol, Bot Executor, Match Runner, Tournament, Server API và giao diện có ranh giới module riêng nhưng được biên dịch và vận hành trong cùng ứng dụng server.
+- Mã Bot được chạy trong Linux Docker container với giới hạn tài nguyên, mạng bị tắt, root filesystem chỉ đọc và người dùng non-root. Đây là các lớp giảm thiểu rủi ro, không phải bảo đảm tuyệt đối chống container escape.
+- Dữ liệu được lưu kết hợp: SQLite cho dữ liệu quan hệ/hàng đợi và file JSON cho giải, kết quả, replay cùng commit evidence chứa SHA-256.
 
 ---
 
@@ -62,12 +63,12 @@ OTT Code Arena được thiết kế theo mô hình **Modular Monolith** viết 
 │ - Trạng thái bàn cờ 9x9      │        │ - Revision Docker Executor     │
 │ - Luật Oẳn Tù Tì (dam,la,keo)│        │ - GCC C++17 Compiler Container │
 │ - Nước đi hợp lệ 8 hướng     │        │ - Python 3 Runtime Container   │
-│ - Điều kiện thắng:           │        │ - Warm Container Reuse         │
+│ - Điều kiện thắng:           │        │ - Artifact reuse, runtime mới  │
 │   * goal_reached (i9 / a1)   │        │ - Ràng buộc: --network none,   │
 │   * all_pieces_captured      │        │   --read-only, cap-drop=ALL,   │
-│ - Điều kiện hòa:             │        │   limit RAM 256MB / CPU 1.0    │
-│   * turn_limit, repetition,  │        └────────────────────────────────┘
-│     insufficient_material    │
+│ - Hòa: turn_limit,           │        │   limit RAM 256MB / CPU 1.0    │
+│   insufficient_material      │        └────────────────────────────────┘
+│ - Thua do repetition         │
 └──────────────────────────────┘
 ```
 
@@ -78,11 +79,11 @@ OTT Code Arena được thiết kế theo mô hình **Modular Monolith** viết 
 ### 3.1. Phân hệ Game Engine (`engine/`)
 Là nơi định nghĩa luật chơi authoritative duy nhất của trò chơi OTTv2:
 - **Bàn cờ**: $9 \times 9$ ô, tọa độ đại số từ `a1` đến `i9`.
-- **Lực lượng**: Mỗi bên khởi đầu với 9 quân cờ (3 Búa `dam`, 3 Bao `la`, 3 Kéo `keo`).
+- **Lực lượng**: Mỗi bên khởi đầu với 9 quân cờ (3 Búa/Đấm `dam`, 3 Bao/Lá `la`, 3 Kéo `keo`). Tài liệu luật dùng tên Đấm, Lá và Kéo; một số nhãn giao diện cũ dùng Búa và Bao cho cùng hai mã quân.
 - **Bố cục hạt giống (Seed Layouts)**: `engine/initial-layout.ts` cung cấp 3 biến thể bố cục khởi đầu, được suy ra tất định theo mã hash SHA-256 của ván đấu trong loạt trận BO3.
 - **Di chuyển & Ăn quân**: Quân đi 1 ô theo 8 hướng. Búa ăn Kéo, Kéo ăn Bao, Bao ăn Búa. Ở OTT Standard, quân bị ăn bị loại khỏi bàn cờ. Khi bật Conversion, quân bị ăn giữ nguyên loại/ID, đổi phe và được đặt vào ô trống gần ô bị ăn nhất theo thứ tự cố định từ phía trên theo chiều kim đồng hồ; không random, không đặt vào goal hoặc ô xuất phát của quân tấn công.
-- **Phân định Thắng/Hòa**: `engine/win.ts` kiểm tra điều kiện tới ô đích (`i9` cho phe A, `a1` cho phe B), ăn hết toàn bộ quân đối phương, quá giới hạn lượt (mặc định 200), lặp lại thế cờ 3 lần, hoặc thiếu lực lượng tiếp tục thi đấu.
-- **Bot Hệ thống**: `engine/system-opponent.ts` cung cấp bot mẫu dùng cho màn hình Chạy thử (Practice).
+- **Kết thúc ván**: `engine/win.ts` kiểm tra tới ô đích (`i9` cho phe A, `a1` cho phe B), ăn hết quân đối phương, quá giới hạn lượt (mặc định 200) và thiếu lực lượng tiếp tục thi đấu. Engine có nhánh hòa do lặp thế, nhưng luồng Match Runner có thẩm quyền áp dụng luật thua do lặp cho Bot vừa tạo chuỗi lặp.
+- **Bot hệ thống**: `engine/system-opponent.ts` vẫn phục vụ luồng trận thử/kiểm thử tương thích. Nút **Chạy thử** trong giao diện chính hiện gọi endpoint kiểm tra một lượt và không dùng Bot hệ thống.
 
 ### 3.2. Phân hệ Giao thức Bot (`bot-protocol/`)
 Quy chuẩn hóa hợp đồng dữ liệu JSON (`ProtocolVersion = '0.1.0'`) giữa Match Runner và Bot:
@@ -90,11 +91,11 @@ Quy chuẩn hóa hợp đồng dữ liệu JSON (`ProtocolVersion = '0.1.0'`) gi
 - Kiểm thực phản hồi chặt chẽ (`bot-protocol/validation.ts`): kiểm tra cấu trúc JSON, định dạng tọa độ `^[a-i][1-9]$`, khoảng cách di chuyển và bảo đảm nước đi nằm trong danh sách `legal_moves`.
 
 ### 3.3. Phân hệ Thực thi Bot Sandbox (`bot-executor/`)
-Chịu trách nhiệm thực thi mã nguồn bot của thí sinh một cách an toàn tuyệt đối:
+Chịu trách nhiệm thực thi mã nguồn Bot trong môi trường có các lớp cô lập:
 - **`RevisionDockerExecutor`**: Thực thi bot C++17 và Python 3 trong Docker container.
 - **Cơ chế biên dịch C++**: Biên dịch tĩnh `-std=c++17 -O2 -pipe -s -static` trong container GCC (`BOT_CPP_COMPILER_IMAGE`), sau đó mount binary sang container runtime debian tối giản (`BOT_CPP_RUNTIME_IMAGE`).
-- **Cơ chế Warm Container**: Duy trì container chạy ngầm trong phạm vi cả trận đấu (`match scope`), gửi dữ liệu qua stdin và nhận nước đi từ stdout để loại bỏ overhead khởi tạo lại container mỗi lượt.
-- **Giới hạn an toàn**: Cách ly mạng hoàn toàn (`--network none`), hệ thống tệp chỉ đọc (`--read-only`), tmpfs 10MB `noexec`, drop toàn bộ capabilities, non-root user, trần RAM 256 MiB, CPU 1.0, tối đa 64 tiến trình.
+- **Cô lập từng lượt**: Có thể tái sử dụng source/binary đã chuẩn bị trong match scope, nhưng authoritative execution tạo runtime container mới cho mỗi lượt. Cách này ngăn process và `/tmp` ghi được rò sang lượt sau.
+- **Giới hạn an toàn**: Container Bot không nối mạng (`--network none`), hệ thống tệp gốc chỉ đọc (`--read-only`), tmpfs 10MB `noexec`, bỏ toàn bộ capabilities, dùng người dùng non-root, trần RAM 256 MiB, CPU 1.0 và tối đa 64 tiến trình.
 
 ### 3.4. Phân hệ Trọng tài Ván đấu (`match-runner/`)
 - Quản lý vòng lặp ván đấu từ lượt 1 đến tối đa 200 lượt.
@@ -106,7 +107,7 @@ Chịu trách nhiệm thực thi mã nguồn bot của thí sinh một cách an 
 Chịu trách nhiệm quản lý toàn bộ vòng đời giải đấu, xếp lịch và tính toán kết quả:
 - **Hai thể thức thi đấu**:
   1. `single_round_robin`: Thi đấu vòng tròn tính điểm (tối đa 64 bot).
-  2. `multi_stage`: Thể thức chuyên nghiệp nâng cao hỗ trợ quy mô tới 4096 bot (`tournament/multi-stage.ts`), gồm Vòng sơ loại (Preliminary), Vòng loại khu vực (Regional Qualifiers), Vòng bảng (Group Stage, mỗi bảng 4–8 bot), và Nhánh loại trực tiếp (Knockout Stage).
+  2. `multi_stage`: Thể thức nhiều giai đoạn hỗ trợ quy mô tới 4096 Bot (`tournament/multi-stage.ts`), gồm vòng sơ loại, vòng loại khu vực, vòng bảng (mỗi bảng 4–8 Bot) và nhánh loại trực tiếp.
 - **Điều phối thực thi công bằng (`FairMatchDispatcher`)**: Kết hợp với bảng SQLite `tournament_match_jobs` để phân bổ trận đấu theo hàng đợi, kiểm soát hạn giữ khóa (lease) và token hàng rào (fencing token) chống chạy trùng lặp.
 - **Loạt trận (Series)**: Quản lý BO1, BO2 và BO3 (`tournament/series.ts`), tự động đổi bên ở ván 2 và xác định bên đi trước ở ván 3 theo seed.
 - **Commit Coordinator (`commit-coordinator.ts`)**: Ghi nhận kết quả trận đấu nguyên tử (atomic) kèm mã băm SHA-256 (`.commit.json`), bảo đảm tính toàn vẹn khi server gặp sự cố.
@@ -115,11 +116,11 @@ Chịu trách nhiệm quản lý toàn bộ vòng đời giải đấu, xếp l�
 Xây dựng trên nền tảng **Express 5**:
 - Quản lý tài khoản, xác thực mật khẩu bcrypt, phát hành session token qua cookie `HttpOnly` an toàn và xác thực token CSRF trên các request làm thay đổi dữ liệu.
 - Phân quyền vai trò: `competitor` (quản lý bot cá nhân, nộp đơn tham gia giải) và `organizer` (tạo giải, duyệt đơn, tạo lịch, chạy giải, công bố kết quả).
-- Kiểm tra Preflight (`server/bot-preflight.ts`): Bắt buộc bot phải chạy thử thành công trong môi trường kiểm tra trước khi Ban tổ chức phê duyệt đơn đăng ký hoặc lập lịch thi đấu.
-- Live Spectator & Replay Exporter: Cung cấp Server-Sent Events (SSE) và polling để khán giả theo dõi trực tiếp các trận đang đấu, đồng thời trích xuất replay công khai cho cộng đồng sau khi giải hoàn tất.
+- Kiểm tra preflight (`server/bot-preflight.ts`): Tự chuẩn bị và chạy kiểm tra phiên bản mã nguồn trong sandbox trước khi ban tổ chức được phép duyệt hồ sơ hoặc lập lịch. Đây là luồng backend riêng, không đồng nghĩa người chơi đã bấm **Chạy thử** trên UI.
+- Live Spectator & Replay Exporter: Cung cấp Server-Sent Events (SSE) và polling để người dùng đủ quyền theo dõi trận đang đấu; replay dành cho người dùng đã xác thực được mở sau khi ban tổ chức công bố kết quả.
 
 ### 3.7. Giao diện Người dùng Phía Client (SPA)
-Xây dựng theo mô hình Single Page Application không sử dụng framework cồng kềnh (Vanilla JavaScript ES6+):
-- Mã nguồn module hóa tại thư mục `js/` (`tournaments.js`, `bots.js`, `playground.js`, `practice.js`, `replay.js`, `live.js`, ...) và được đóng gói thành file bundle duy nhất [app.js](file:///c:/test/app.js) thông qua `scripts/build-frontend.js`.
-- Template giao diện chia thành các phân đoạn trong `views/pages/`, `views/layout/`, `views/modals/` và được biên dịch vào [index.html](file:///c:/test/index.html) thông qua `scripts/build-html.js`.
+Giao diện là Single Page Application viết bằng Vanilla JavaScript ES6+, không dùng framework phía client:
+- Mã nguồn module hóa tại thư mục `js/` (`tournaments.js`, `bots.js`, `playground.js`, `practice.js`, `replay.js`, `live.js`, ...) và được đóng gói thành [`app.js`](../app.js) qua `scripts/build-frontend.js`.
+- Template giao diện chia thành `views/pages/`, `views/layout/`, `views/modals/` và được biên dịch vào [`index.html`](../index.html) qua `scripts/build-html.js`.
 - Bố cục responsive hiển thị tiến trình 7 giai đoạn của giải đấu, sơ đồ bảng đấu và bàn cờ tua trận đấu.

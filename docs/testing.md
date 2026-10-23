@@ -1,12 +1,12 @@
-# Hướng dẫn Kiểm thử (Testing Guide)
+# Hướng dẫn kiểm thử
 
-Tài liệu này quy chuẩn toàn bộ quy trình kiểm thử tự động, cấu trúc test suite và các nguyên tắc bảo vệ an toàn dữ liệu trong nền tảng OTT Code Arena.
+Tài liệu này mô tả các lệnh và bộ kiểm thử hiện có trong repository. Kết quả phụ thuộc Docker, image cục bộ và các biến môi trường của từng bộ kiểm thử.
 
 ---
 
-## 1. Công cụ và Lệnh Kiểm thử Chính
+## 1. Công cụ và lệnh kiểm thử chính
 
-Hệ thống sử dụng **Vitest** làm test runner chính thức kết hợp với TypeScript và ESLint:
+Hệ thống dùng **Vitest** cho test suite và TypeScript compiler cho kiểm tra kiểu.
 
 ### 1.1. Các lệnh kiểm thử cơ bản
 ```powershell
@@ -19,12 +19,11 @@ npm.cmd run test:watch
 # Chạy kiểm thử đo độ bao phủ mã nguồn (Coverage)
 npm.cmd run test:coverage
 
-# Chạy kiểm tra cú pháp và định dạng mã nguồn
-npm.cmd run lint
-
 # Build toàn bộ hệ thống (HTML, Bundle JS, TypeScript và alias)
 npm.cmd run build
 ```
+
+`package.json` có script `npm.cmd run lint`, nhưng repository hiện không chứa file cấu hình ESLint. Với trạng thái hiện tại, lệnh này dừng vì không tìm thấy cấu hình; không được tính là bước kiểm tra đã hoạt động cho đến khi dự án bổ sung cấu hình phù hợp.
 
 ### 1.2. Chạy kiểm thử theo từng phân hệ (Scattered Suites)
 ```powershell
@@ -61,7 +60,7 @@ npx vitest run tests/frontend
 - Nước đi 8 hướng, cấm đi ra ngoài bàn cờ, cấm đứng yên, cấm đi vào ô có quân cùng màu.
 - Quan hệ ăn quân Oẳn Tù Tì: Búa ăn Kéo, Kéo ăn Bao, Bao ăn Búa.
 - Điều kiện thắng: Ăn hết toàn bộ quân đối phương; phe A tới ô `i9`; phe B tới ô `a1`.
-- Điều kiện hòa: Quá 200 lượt (`turn_limit`); lặp lại thế cờ 3 lần (`repetition`); cả 2 bên chỉ còn cùng 1 loại quân (`insufficient_material`).
+- Điều kiện hòa của luồng có thẩm quyền: quá giới hạn lượt (`turn_limit`) và hai bên chỉ còn cùng một loại quân (`insufficient_material`). Engine có nhánh hòa do lặp thế, nhưng Match Runner xử Bot tạo chuỗi lặp là bên thua với lý do `repetition`.
 - Tính tất định của layout theo hạt giống (`seed`) trong loạt trận BO3.
 
 ### 2.2. Phân hệ Giao thức (`tests/protocol/`)
@@ -73,7 +72,7 @@ npx vitest run tests/frontend
 - Môi trường Production bắt buộc chính sách Fail-Closed (`EXECUTION_POLICY=sandbox-required`).
 - Kiểm tra tính bất biến của Docker image ghim qua mã băm SHA-256 digest.
 - Giới hạn tài nguyên: RAM 256MB, CPU 1.0, PID 64, ngắt mạng `--network none`, rootfs `--read-only`, tmpfs 10MB `noexec`.
-- Cơ chế Warm Container: Giữ container sống giữa các lượt đi trong cùng ván đấu, kiểm tra cô lập thư mục `/tmp` giữa các lượt.
+- Cô lập từng lượt: tái sử dụng artifact đã chuẩn bị nhưng tạo runtime container mới; kiểm tra `/tmp` và process state không rò giữa các lượt.
 - Kiểm tra biên dịch C++17 và timeout biên dịch (mặc định 120s).
 - Kiểm tra hủy ván đấu (`abort signal`) và dọn sạch container, volume tạm thời.
 
@@ -86,7 +85,7 @@ npx vitest run tests/frontend
 ### 2.5. Phân hệ Giải đấu (`tests/tournament/`)
 - Thuật toán xếp lịch Vòng tròn một lượt (`single_round_robin`, tối đa 64 bot).
 - Thể thức Đa tầng (`multi_stage`, tối đa 4096 bot): Vòng loại, Vòng bảng (Group Stage), Nhánh loại trực tiếp (Knockout), và mô hình Dependency Slot.
-- Phân định hòa trong các trận sinh tử (`resolveTiebreaker`).
+- BO3 mới tự phân định ván 3 hòa theo số quân còn lại, rồi chọn phía B của ván 3 nếu số quân bằng nhau. Các test recovery/compatibility vẫn bao phủ `pending_tiebreaker` và `resolveTiebreaker` cho dữ liệu cũ.
 - Commit Coordinator: Ghi kết quả và replay nguyên tử (atomic) kèm mã băm SHA-256 (`.commit.json`).
 - Khả năng phục hồi sự cố: Server restart giữ nguyên kết quả đã commit, reset pairing đang chạy dở dang về trạng thái sẵn sàng để chạy lại mà không bị tính trùng điểm.
 

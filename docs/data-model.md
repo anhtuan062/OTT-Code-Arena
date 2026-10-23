@@ -219,4 +219,4 @@ File đánh dấu hoàn thành và chống giả mạo ghi nhận:
   "committedAt": "2026-10-23T..."
 }
 ```
-Mỗi khi server khởi động lại hoặc đọc replay từ bộ nhớ đệm (`ReplayReadCache`), hệ thống so khớp lại mã băm để đảm bảo tính toàn vẹn tuyệt đối.
+Khi phục hồi hoặc đọc replay qua `ReplayReadCache`, hệ thống so khớp mã băm để phát hiện file thiếu hoặc nội dung không còn khớp commit evidence. Cơ chế này không phải chữ ký số và không bảo vệ trước tác nhân có thể sửa đồng thời cả dữ liệu lẫn file commit.

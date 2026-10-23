@@ -1,6 +1,6 @@
 # Strategy SDK 1.0.0
 
-Strategy SDK (phiên bản `1.0.0`) là bộ thư viện tiêu chuẩn giúp người tham gia giải đấu tập trung hoàn toàn vào thuật toán ra quyết định (`chooseMove` / `choose_move`) mà không phải xử lý giao thức I/O, phân tích chuỗi JSON, hay vòng lặp stdin/stdout.
+Strategy SDK phiên bản `1.0.0` cung cấp kiểu dữ liệu và runner để Bot triển khai hàm ra quyết định (`chooseMove` / `choose_move`) mà không phải tự xử lý giao thức JSON qua stdin/stdout.
 
 Toàn bộ mã nguồn SDK nằm tại thư mục `bot-sdk/`:
 - Phiên bản: `bot-sdk/VERSION` (giá trị: `1.0.0`)
@@ -162,4 +162,4 @@ Khi giải đấu diễn ra, Revision Docker Executor đọc lại mã nguồn t
 - **Thời gian suy nghĩ mỗi nước đi**: Được cấp tối thiểu **5,000 ms** (5 giây) thời gian thực thi container cho bot dạng mã nguồn (`SOURCE_REVISION_MIN_TURN_TIMEOUT_MS`), ngay cả khi giải đấu cấu hình `turnTimeoutMs` thấp hơn.
 - **Thời gian biên dịch C++**: Timeout biên dịch mặc định là **120 giây** (`BOT_CPP_COMPILE_TIMEOUT_MS`).
 - **Thời gian chuẩn bị workspace**: Tối đa **10 giây**.
-- **Cơ chế Warm Container**: Sau khi biên dịch hoặc nạp mã nguồn, container runtime được duy trì trong suốt phạm vi ván đấu (`match scope`) để tái sử dụng giữa các lượt đi, loại bỏ độ trễ khởi tạo container lặp lại.
+- **Tái sử dụng artifact, không tái sử dụng trạng thái ghi**: Source/binary đã chuẩn bị có thể được giữ trong `match scope`; mỗi lượt authoritative chạy trong runtime container mới để cô lập process và `/tmp`.

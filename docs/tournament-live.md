@@ -1,4 +1,4 @@
-# Giải đấu, Điều phối Trận đấu và Xem Trực tiếp (Tournament & Live)
+# Nội bộ giải đấu, điều phối trận và theo dõi trực tiếp
 
 Tài liệu này mô tả chi tiết quy trình tổ chức giải đấu, điều phối thực thi trận đấu, phát sóng trực tiếp (Live Spectator) và quản lý Replay trong hệ thống OTT Code Arena.
 
@@ -30,7 +30,7 @@ Hệ thống phân biệt giữa **Trạng thái cốt lõi phía Server** (6 tr
 - **Thuật toán xếp lịch**: Áp dụng thuật toán xoay vòng vòng tròn (Circle method). Mỗi bot gặp tất cả các bot còn lại đúng một lần qua các vòng đấu (`rounds`).
 - **Xếp hạng**: Tính theo tổng điểm từ các trận đấu tổng hợp (aggregate matches).
 
-### 2.2. Thể thức Đa tầng Nâng cao (`multi_stage`)
+### 2.2. Thể thức nhiều giai đoạn (`multi_stage`)
 Hỗ trợ giải đấu quy mô lớn lên tới **4,096 bot** (`tournament/multi-stage.ts`):
 - **Quy hoạch theo số lượng Bot**:
   - *Dưới 4 bot*: Tự động phân nhánh loại trực tiếp (Knockout Bracket 2–3 bot).
@@ -38,8 +38,8 @@ Hỗ trợ giải đấu quy mô lớn lên tới **4,096 bot** (`tournament/mul
   - *Trên 200 bot*: Bổ sung **Vòng loại khu vực (Regional Qualifiers)** trước khi vào Vòng bảng và Nhánh loại trực tiếp.
 - **Mô hình Dependency Slot**:
   Các cặp đấu ở nhánh loại trực tiếp sử dụng mô hình vị trí động (`PairingSlot`). Khi các trận vòng trước hoặc vòng bảng có kết quả commit, hệ thống tự động giải quyết (`resolve`) danh tính bot vào slot kế tiếp (`preliminary_winner`, `group_rank`, `knockout_winner`).
-- **Phân định Hòa (Tiebreaker Resolution)**:
-  Trong các trận nhánh loại trực tiếp (Knockout) nếu kết thúc hòa sau loạt trận, cặp đấu chuyển sang trạng thái `pending_tiebreaker`. Ban tổ chức thực hiện phân định qua endpoint:
+- **Phân định hòa cho dữ liệu tương thích**:
+  BO3 mới tự phân định ván 3 hòa theo số quân còn lại; nếu số quân bằng nhau, phía B của ván 3 thắng. Trạng thái `pending_tiebreaker` chỉ còn dành cho dữ liệu cũ hoặc kết quả cũ được phục hồi. Ban tổ chức có thể xử lý trạng thái đó qua endpoint:
   ```text
   POST /api/tournaments/:id/pairings/:pairingId/resolve-tiebreaker
   ```
@@ -89,7 +89,7 @@ Hệ thống sử dụng bộ điều phối `FairMatchDispatcher` kết hợp v
 
 ## 6. Theo dõi Trực tiếp (Live Spectator)
 
-Bất kỳ người dùng nào đã đăng nhập đều có thể xem trực tiếp các trận đấu đang diễn ra khi giải ở trạng thái `running`:
+Người dùng đã đăng nhập có thể xem trực tiếp khi giải ở trạng thái `running` và nằm trong phạm vi được phép hiển thị:
 - **Server-Sent Events (SSE) - Khuyến nghị**:
   ```text
   GET /api/tournaments/:id/spectator/matches/:matchId/live/stream
@@ -109,7 +109,7 @@ Bất kỳ người dùng nào đã đăng nhập đều có thể xem trực ti
 
 - **Quyền xem Replay riêng tư**: Khi giải chưa công bố kết quả (`resultsPublishedAt === null`), chỉ có tài khoản Ban tổ chức sở hữu giải đấu mới có quyền xem replay của các trận đấu.
 - **Quyền xem Replay công khai**: Khi Ban tổ chức thực hiện công bố kết quả (`POST /api/tournaments/:id/publish`), dịch vụ `PublicReplayExporter` xác thực tính toàn vẹn và cấp quyền xem lại cho tất cả người dùng trong hệ thống.
-- **Bảo vệ mã nguồn**: Dữ liệu replay chỉ chứa tọa độ nước đi, bàn cờ ban đầu và thông tin định danh công khai. Toàn bộ mã nguồn bot, log biên dịch, stderr và thông số hệ thống nội bộ đều bị loại bỏ hoàn toàn khỏi Replay DTO.
+- **Bảo vệ mã nguồn**: Replay DTO dành cho người xem không chứa mã nguồn Bot, log biên dịch, stderr hoặc thông số hệ thống nội bộ.
 
 ---
 
@@ -122,6 +122,6 @@ Bất kỳ người dùng nào đã đăng nhập đều có thể xem trực ti
   ```
   Server hủy bỏ attempt cũ, làm sạch hàng đợi job và đưa cặp đấu về trạng thái sẵn sàng thực thi lại. Bảng xếp hạng không bao giờ bị tính điểm hai lần.
 - **Phục hồi khi Server khởi động lại (Server Restart Reconciliation)**:
-  - Các trận đấu đã commit kết quả (`.commit.json`) được bảo toàn tuyệt đối.
+  - Kết quả có bộ result/replay/commit hợp lệ được giữ và không chạy lại chỉ vì trạng thái trong bộ nhớ bị mất.
   - Các job đang ở trạng thái `in_progress` / `running` chưa commit được reset an toàn về trạng thái `scheduled` / `queued`.
   - Tiến độ loạt trận BO3 đang dở dang tiếp tục thi đấu từ ván kế tiếp mà không phải hủy kết quả các ván đã xong.

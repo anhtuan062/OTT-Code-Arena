@@ -1,15 +1,15 @@
-# Mô hình An toàn và Bảo mật (Security Architecture)
+# Mô hình an toàn và bảo mật
 
-Tài liệu này mô tả chi tiết các chính sách, cơ chế kiểm soát và giải pháp bảo mật được triển khai trên toàn bộ hệ thống OTT Code Arena.
+Tài liệu này mô tả các biện pháp bảo mật có bằng chứng trong mã nguồn. Các biện pháp cô lập làm giảm rủi ro nhưng không phải cam kết rằng container hoặc host không thể bị khai thác.
 
 ---
 
-## 1. Mục tiêu và Tài sản Cần Bảo vệ
+## 1. Mục tiêu và tài sản cần bảo vệ
 
-1. **Hạ tầng Máy chủ và Docker Host**: Ngăn chặn tuyệt đối việc mã nguồn không tin cậy của thí sinh thoát khỏi container (container escape), tấn công mạng nội bộ, hoặc tiêu hao cạn kiệt tài nguyên máy chủ.
-2. **Mã nguồn và Chiến thuật của Thí sinh**: Đảm bảo bí mật mã nguồn thuật toán giữa các thí sinh với nhau; không làm lộ mã nguồn qua API, Spectator stream hay Replay.
-3. **Tính Toàn vẹn của Kết quả Giải đấu**: Ngăn chặn việc sửa đổi mã nguồn sau khi đã chốt danh sách, chống gian lận trong quá trình thi đấu, và lưu trữ kết quả có chữ ký mã băm chống giả mạo.
-4. **Phiên làm việc và Tài khoản Người dùng**: Bảo vệ thông tin đăng nhập, ngăn chặn các cuộc tấn công CSRF, XSS, Brute-force và giả mạo quyền hạn.
+1. **Máy chủ và Docker host:** giảm khả năng mã không tin cậy truy cập mạng, ghi vào hệ thống tệp hoặc làm cạn tài nguyên; giới hạn hậu quả nếu Bot lỗi hoặc có hành vi xấu.
+2. **Mã nguồn và chiến thuật:** không đưa mã nguồn, log biên dịch chi tiết hoặc đường dẫn nội bộ vào dữ liệu dành cho người xem.
+3. **Tính toàn vẹn kết quả:** ghim phiên bản mã nguồn, kiểm tra SHA-256 và lưu commit evidence để phát hiện dữ liệu trận thiếu hoặc bị thay đổi. Đây là kiểm tra mã băm, không phải chữ ký số.
+4. **Phiên và tài khoản:** giảm rủi ro chiếm phiên, CSRF, thử mật khẩu hàng loạt và vượt quyền. Cookie `HttpOnly` làm JavaScript không đọc được cookie nhưng không tự ngăn mọi dạng XSS.
 
 ---
 
@@ -30,20 +30,20 @@ Hệ thống triển khai mô hình xác thực dựa trên Cookie Session kết
 
 ### 2.2. Phòng chống Tấn công CSRF (Cross-Site Request Forgery)
 - Mọi session đều được gắn kèm một mã `csrf_token` độc lập.
-- Middleware `requireCsrf` ([server/index.ts](file:///c:/test/server/index.ts)) bắt buộc mọi HTTP request có khả năng thay đổi trạng thái hệ thống (`POST`, `PUT`, `PATCH`, `DELETE`) phải gửi kèm header `x-csrf-token` khớp chính xác với `csrf_token` của session hiện tại.
+- Middleware `requireCsrf` trong [`server/index.ts`](../server/index.ts) kiểm tra header `x-csrf-token` trên các route ghi dùng session công khai. Endpoint quản trị nội bộ có cơ chế xác thực riêng, được mô tả tại mục [Vận hành](api.md#vận-hành).
 
 ### 2.3. Phân quyền Vai trò (`requireRole`)
 Hệ thống định nghĩa 2 vai trò tách biệt rõ ràng thông qua ràng buộc cơ sở dữ liệu `CHECK (role IN ('competitor', 'organizer'))`:
 - **`competitor` (Thí sinh)**:
   - Chỉ có quyền xem, tạo, sửa, xóa các Bot và Phiên bản mã nguồn thuộc sở hữu của chính mình (`owner_id === req.auth.id`).
   - Được quyền nộp đơn đăng ký Bot vào các giải đấu đang mở đăng ký.
-  - Được quyền chạy thử nghiệm (Practice) Bot cá nhân với Bot hệ thống.
+  - Được quyền chạy thử mã Bot cá nhân trong một lượt với thế cờ đã chọn; luồng UI hiện tại không đấu một trận đầy đủ với Bot hệ thống.
   - Không có quyền duyệt giải, tạo lịch, hoặc chạy giải đấu.
 - **`organizer` (Ban tổ chức)**:
   - Quyền tạo giải đấu mới, chỉnh sửa thông tin giải đấu do mình sở hữu.
   - Quyền duyệt/từ chối đơn nộp bot của thí sinh sau khi kiểm tra preflight.
   - Quyền phát sinh lịch thi đấu (sinh vòng bảng/loại trực tiếp), bắt đầu giải, chạy giải và công bố kết quả.
-  - Quyền giải quyết hòa phân định (`resolveTiebreaker`) và chạy lại cặp đấu lỗi (`retry`).
+  - Quyền giải quyết dữ liệu cũ đang chờ phân định (`resolveTiebreaker`) và chạy lại cặp đấu lỗi (`retry`). BO3 mới tự phân định nếu ván 3 hòa.
 
 ---
 
@@ -69,7 +69,7 @@ Chính sách bảo mật thực thi bot được định nghĩa tại `bot-execu
 
 ### 4.1. Nguyên tắc "Fail-Closed"
 - Trong môi trường `production`, hệ thống bắt buộc cấu hình `EXECUTION_POLICY=sandbox-required`.
-- Nếu Docker daemon bị tắt, gặp sự cố kết nối, hoặc các image Docker được chỉ định không tồn tại trên máy chủ, server sẽ dừng toàn bộ tiến trình hoặc đánh dấu lỗi pairing. **Tuyệt đối không bao giờ tự ý chuyển sang chạy bot trực tiếp trên Host OS**.
+- Nếu Docker daemon hoặc image bắt buộc không khả dụng, việc thực thi mã nguồn bị từ chối hoặc cặp đấu bị đánh dấu lỗi hạ tầng để thử lại. Policy này không tự chuyển sang chạy Bot trực tiếp trên host.
 - Chế độ `EXECUTION_POLICY=development` (chạy child process trên host) chỉ dùng cho mục đích phát triển mã nguồn nội bộ tin cậy.
 
 ### 4.2. Ràng buộc Image Bất biến (Immutable Image Digests)
@@ -78,33 +78,33 @@ Chính sách bảo mật thực thi bot được định nghĩa tại `bot-execu
 - Sử dụng cờ `--pull=never` để ngăn chặn việc tự ý kéo image lạ từ Internet về máy chủ trong lúc thi đấu.
 
 ### 4.3. Các Lớp Phòng vệ Container (Hardening Flags)
-Mỗi container bot khi chạy được áp dụng các cờ an ninh nghiêm ngặt nhất của Docker:
-- **`--network none`**: Vô hiệu hóa hoàn toàn card mạng. Bot không thể gửi request HTTP, không thể kết nối socket ra ngoài, không thể quét cổng máy chủ.
+Mỗi container Bot khi chạy được áp dụng các cờ Docker sau:
+- **`--network none`**: Container Bot không được nối vào mạng Docker, qua đó chặn các kết nối mạng thông thường từ Bot.
 - **`--read-only`**: Khóa toàn bộ root filesystem ở chế độ chỉ đọc. Bot không thể ghi đè binary hệ thống, không thể cài cắm malware hay script tự động.
 - **`/tmp:rw,noexec,nosuid,size=10m`**: Cấp một thư mục tạm nhỏ 10 MiB dạng tmpfs trong RAM. Cấm chạy file thực thi (`noexec`) và cấm chiếm đặc quyền (`nosuid`).
-- **`--security-opt=no-new-privileges:true`**: Chặn hoàn toàn khả năng tiến trình con xin nâng quyền (chống leo thang đặc quyền).
+- **`--security-opt=no-new-privileges:true`**: Không cho tiến trình nhận thêm đặc quyền qua cơ chế thực thi thông thường của Linux.
 - **`--cap-drop=ALL`**: Thu hồi toàn bộ quyền năng của nhân Linux (Linux capabilities) khỏi container.
 - **`--user non-root`**: Ép buộc tiến trình chạy dưới tài khoản người dùng thông thường, không có quyền root.
 - **Giới hạn tài nguyên (cgroups)**:
   - RAM: 256 MiB (`--memory 256m`, `--memory-swap 256m`). Tránh bot chiếm cạn kiệt RAM hệ thống.
   - CPU: 1.0 core (`--cpus 1.0`). Tránh bot dùng 100% CPU của máy chủ.
   - Tiến trình: Tối đa 64 PIDs (`--pids-limit 64`). Chống tấn công fork-bomb.
-- **Docker Socket Isolation**: Tuyệt đối không bao giờ mount file `/var/run/docker.sock` vào bên trong bất kỳ container nào.
+- **Docker Socket Isolation**: Container Bot không được mount `/var/run/docker.sock`. Compose execution hiện mount socket vào **container ứng dụng** để nó tạo/giám sát sandbox; đây là trust boundary đặc quyền cần bảo vệ ở cấp host.
 
 ---
 
 ## 5. An toàn API và Bảo vệ Dữ liệu Riêng tư
 
-1. **Chống Tấn công Path Traversal**:
-   - Mọi mã định danh người dùng truyền qua URL (`tournamentId`, `botId`, `matchId`, `revisionId`) đều được kiểm tra bằng hàm `assertSafeId`:
+1. **Giảm rủi ro path traversal**:
+   - Các đường dẫn lưu trữ nhạy cảm kiểm tra mã định danh bằng `assertSafeId` trước khi ghép đường dẫn:
      ```typescript
      /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/
      ```
-   - Chặn đứng mọi nỗ lực chèn ký tự `../`, `..\\`, ký tự null byte hoặc symlink để đọc trộm file ngoài phạm vi cho phép.
+   - Biểu thức này loại ký tự phân cách đường dẫn và chuỗi traversal khỏi các mã định danh được bảo vệ. Không nên suy ra rằng mọi tham số URL trong toàn bộ API đều đi qua cùng một hàm; route vẫn phải kiểm tra quyền sở hữu và dùng repository tương ứng.
 2. **Chiếu Dữ liệu An toàn cho Khán giả (Spectator Data Sanitization)**:
    - Dữ liệu phát qua Server-Sent Events (Live Stream) và Replay API (`/spectator/...`) được lọc qua hàm chiếu (projection) an toàn:
-     - Loại bỏ hoàn toàn: Mã nguồn bot, mã băm storage, cờ biên dịch, log lỗi chi tiết của compiler, stderr của bot, và đường dẫn file nội bộ trên server.
-     - Khán giả chỉ nhận được thông tin trận đấu công khai: Tên bot, tên thí sinh, vị trí quân cờ, lượt đấu và thời gian suy nghĩ.
+     - Dữ liệu chiếu không chứa mã nguồn Bot, mã băm lưu trữ, cờ biên dịch, compiler log chi tiết, stderr của Bot hoặc đường dẫn file nội bộ.
+     - Người xem nhận thông tin trận đấu đã được chiếu công khai như tên Bot/người chơi, trạng thái bàn cờ, nước đi, tỷ số và trạng thái trận.
 3. **Giới hạn Tần suất (Rate Limiting)**:
    - Bảng SQLite `rate_limits` theo dõi tần suất gọi API theo địa chỉ IP và tài khoản:
      - Đăng ký / Đăng nhập: Chống tấn công vét cạn mật khẩu (Brute-force).
@@ -113,3 +113,10 @@ Mỗi container bot khi chạy được áp dụng các cờ an ninh nghiêm ng�
 4. **Quyền truy cập Replay theo Giai đoạn**:
    - Khi giải đấu chưa công bố kết quả (`resultsPublishedAt === null`): Chỉ Ban tổ chức sở hữu giải mới có quyền xem replay. Thí sinh và khán giả không thể đọc trộm replay trước khi có thông báo chính thức.
    - Khi giải đấu đã công bố: Replay được mở quyền đọc công khai cho toàn bộ người dùng đã đăng nhập.
+
+## 6. Giới hạn và ranh giới tin cậy
+
+- Docker sandbox là phòng vệ nhiều lớp, không phải bằng chứng loại trừ mọi lỗ hổng Docker/kernel hoặc container escape.
+- Container Bot không nhận Docker socket. Tuy nhiên, cấu hình Compose dành cho source execution mount `/var/run/docker.sock` vào **container ứng dụng**; container ứng dụng vì thế là ranh giới đặc quyền và phải được bảo vệ như Docker host.
+- `EXECUTION_POLICY=development` có thể chạy tiến trình trên host và chỉ phù hợp với mã nội bộ tin cậy.
+- Mã băm SHA-256 và commit evidence giúp phát hiện thay đổi/thiếu dữ liệu; chúng không cung cấp chữ ký số hoặc khả năng chống sửa đổi nếu kẻ tấn công kiểm soát cả dữ liệu lẫn bằng chứng.

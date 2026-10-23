@@ -23,22 +23,22 @@ Bot Executor có nhiệm vụ nhận yêu cầu tính toán nước đi (`BotReq
 
 ## 2. Mô hình Docker Sandbox và Ràng buộc Bảo mật
 
-Trong môi trường thi đấu chính thức (`production`), hệ thống áp dụng nguyên tắc **Fail-Closed**: nếu Docker daemon không hoạt động hoặc các Docker image đã ghim bằng mã băm SHA-256 không khả dụng, server sẽ từ chối khởi động hoặc dừng xử lý, tuyệt đối **không tự ý fallback** sang chạy bot trực tiếp trên hệ điều hành máy chủ (Host).
+Trong môi trường thi đấu chính thức (`production`), hệ thống áp dụng nguyên tắc **fail-closed**: nếu Docker daemon hoặc image đã ghim bằng SHA-256 không khả dụng, yêu cầu thực thi mã nguồn bị từ chối hoặc được ghi nhận là lỗi hạ tầng. Policy không tự chuyển sang chạy Bot trực tiếp trên hệ điều hành máy chủ. Một số lỗi cấu hình image không hợp lệ được phát hiện khi khởi tạo; khả năng daemon/image thực tế được kiểm tra khi thực thi.
 
 Mỗi container bot khi khởi chạy được áp dụng các cờ cô lập nghiêm ngặt:
 
 | Tiêu chí | Cấu hình Docker | Mục đích bảo mật |
 | :--- | :--- | :--- |
-| **Mạng (Network)** | `--network none` | Chặn hoàn toàn kết nối Internet và mạng nội bộ, ngăn rò rỉ dữ liệu hoặc tấn công mạng. |
+| **Mạng (Network)** | `--network none` | Không nối container Bot vào mạng Docker; chặn các kết nối mạng thông thường từ Bot. |
 | **Hệ thống tệp gốc** | `--read-only` | Root filesystem ở chế độ chỉ đọc; bot không thể sửa đổi file hệ thống của image. |
 | **Thư mục tạm** | `/tmp:rw,noexec,nosuid,size=10m` | Gắn tmpfs trong bộ nhớ RAM tối đa 10 MiB, cấm thực thi binary (`noexec`) và cấm leo thang đặc quyền (`nosuid`). |
-| **Đặc quyền** | `--security-opt=no-new-privileges:true`<br>`--cap-drop=ALL` | Thu hồi toàn bộ quyền Linux capabilities của tiến trình; ngăn chặn leo thang đặc quyền. |
+| **Đặc quyền** | `--security-opt=no-new-privileges:true`<br>`--cap-drop=ALL` | Bỏ Linux capabilities và không cho tiến trình nhận thêm đặc quyền qua cơ chế thực thi thông thường. |
 | **Người dùng** | Chạy dưới UID/GID non-root | Không bao giờ chạy container dưới quyền root của hệ thống. |
 | **Bộ nhớ (RAM)** | Mặc định 256 MiB (`memoryLimitMb = 256`) | Giới hạn dung lượng RAM tối đa; bot bị kill ngay nếu rò rỉ bộ nhớ (OOM). |
 | **Vi xử lý (CPU)** | Mặc định 1.0 CPU (`cpuLimit = 1.0`) | Giới hạn hạn ngạch tính toán; ngăn bot chiếm dụng toàn bộ CPU máy chủ. |
 | **Số tiến trình (PIDs)** | Mặc định tối đa 64 (`maxProcesses = 64`) | Ngăn chặn tấn công làm cạn kiệt tài nguyên (Fork bomb). |
 | **Tải Image** | `--pull=never` | Chỉ sử dụng các image đã có sẵn trên máy và được ghim chính xác bằng SHA-256 digest. |
-| **Docker Socket** | Tuyệt đối không mount | Ngăn chặn việc bot thoát khỏi container để điều khiển Docker host. |
+| **Docker socket** | Không mount vào container Bot | Bot không nhận trực tiếp socket điều khiển Docker. Container ứng dụng có thể nhận socket trong Compose execution và là ranh giới đặc quyền riêng. |
 
 ---
 
@@ -55,8 +55,8 @@ Quy trình biên dịch và thực thi cho bot C++17 gồm các bước:
            ▼ (2. Kiểm tra SHA-256 artifact binary)
 [Runtime Container] ◄──────── Mount binary read-only
            │
-           ▼ (3. Warm container scope ván đấu)
-[Thực thi từng lượt qua stdin/stdout]
+           ▼ (3. Runtime container mới mỗi lượt)
+[Thực thi một lượt qua stdin/stdout]
            │
            ▼ (4. Dọn dẹp)
 [Hủy container và xóa workspace/volume khi trận kết thúc]
@@ -71,9 +71,9 @@ Quy trình biên dịch và thực thi cho bot C++17 gồm các bước:
    - Sử dụng Docker image biên dịch được ghim (`BOT_CPP_COMPILER_IMAGE`).
    - Cờ biên dịch: `-std=c++17 -O2 -pipe -s -static`.
    - Timeout biên dịch: Mặc định là **120 giây** (cấu hình qua `BOT_CPP_COMPILE_TIMEOUT_MS`).
-3. **Thực thi và Cơ chế Warm Container**:
+3. **Thực thi và cô lập từng lượt**:
    - Binary tĩnh sau khi biên dịch được mount ở chế độ read-only vào container runtime (`BOT_CPP_RUNTIME_IMAGE`).
-   - Container được giữ chạy ngầm trong phạm vi cả ván đấu (`match scope`). Mỗi lượt đấu, Match Runner chỉ cần gửi dữ liệu qua `stdin` và đọc kết quả từ `stdout` của container đang chờ, loại bỏ hoàn toàn độ trễ khởi tạo container ở từng nước đi.
+   - Source/binary và artifact đã chuẩn bị được giữ trong phạm vi match để tránh biên dịch lại. Mỗi lượt authoritative tạo một runtime container mới, gửi request qua `stdin`, đọc response từ `stdout` rồi cleanup; trạng thái process và `/tmp` không được chia sẻ giữa các lượt.
 4. **Dọn dẹp (Cleanup)**:
    - Khi trận đấu kết thúc hoặc bị hủy (`abort signal`), server dừng và xóa container, thu hồi binary và dọn sạch workspace/volume.
 
@@ -84,7 +84,7 @@ Quy trình biên dịch và thực thi cho bot C++17 gồm các bước:
 1. Không yêu cầu bước biên dịch nhị phân.
 2. Mã nguồn của thí sinh cùng với Strategy SDK (`ott_strategy_sdk.py`) và module driver (`runner.py`) được mount ở chế độ read-only vào container Python (`BOT_PYTHON3_RUNTIME_IMAGE`).
 3. Lệnh khởi chạy: `python3 -B runner.py` (cờ `-B` ngăn Python tự ý ghi đè file bytecode `.pyc`).
-4. Áp dụng cơ chế Warm Container tương tự như C++: giữ tiến trình sống trong suốt phạm vi ván đấu để phục vụ các lượt đi kế tiếp.
+4. Tái sử dụng source/SDK đã chuẩn bị trong match scope, nhưng tạo runtime container Python mới cho từng lượt authoritative.
 
 ---
 
@@ -102,7 +102,7 @@ Hệ thống phân tách rõ ràng ngân sách thời gian theo từng giai đo�
 
 ## 6. Phân loại và Xử lý Lỗi (Diagnostics)
 
-Bot Executor phân loại chi tiết các nguyên nhân lỗi nhằm bảo đảm tính minh bạch và an toàn:
+Bot Executor phân loại nguyên nhân lỗi để Match Runner và tầng giải đấu áp dụng đúng chính sách:
 - `COMPILATION_TIMEOUT`: Vượt quá thời gian biên dịch mã nguồn C++.
 - `RUNTIME_TIMEOUT`: Bot không trả về nước đi trong thời gian quy định của lượt.
 - `PROCESS_CRASHED`: Tiến trình bot thoát đột ngột (segmentation fault, unhandled exception, exit code $\ne 0$).
@@ -114,7 +114,7 @@ Bot Executor phân loại chi tiết các nguyên nhân lỗi nhằm bảo đả
 - `SANDBOX_REQUIRED`: Cấu hình yêu cầu sandbox nhưng Docker không sẵn sàng.
 - `EXECUTOR_UNAVAILABLE` / `EXECUTOR_ERROR`: Lỗi hạ tầng hệ thống máy chủ.
 
-*Bảo mật thông tin chẩn đoán*: Toàn bộ log chi tiết của compiler, stderr của bot và đường dẫn tệp nội bộ được bảo vệ nghiêm ngặt. Khi chiếu sang Spectator DTO cho người xem giải, hệ thống chỉ hiển thị mã lỗi chung (ví dụ: `bot_timeout`, `bot_crash`), tuyệt đối không làm lộ mã nguồn hay log nhạy cảm của thí sinh.
+*Bảo mật thông tin chẩn đoán*: API dành cho người xem dùng DTO đã lọc và chỉ hiển thị mã lỗi chung như `bot_timeout` hoặc `bot_crash`; mã nguồn, compiler log chi tiết, stderr và đường dẫn nội bộ không được đưa vào projection này. Endpoint dành cho chủ giải có thể trả dữ liệu chi tiết hơn theo quyền.
 
 ---
 
