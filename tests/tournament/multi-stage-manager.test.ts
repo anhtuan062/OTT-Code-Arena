@@ -499,21 +499,18 @@ describe('Tournament Manager - Multi-Stage Integration (Phase 2C)', () => {
       executor.setOutcome(koMatchId, 'draw');
 
       const koRes = await manager.runPairingById('draw-ko-tourney', koPairing.pairingId);
-      expect(koRes.success).toBe(false);
-      expect(koRes.error).toContain('Elimination series ended in a draw without a decisive winner');
+      expect(koRes.success).toBe(true);
+      expect(['A', 'B']).toContain(koRes.data?.matchResult.winner);
 
-      // Verify pairing status is marked as pending_tiebreaker
+      // Equal remaining piece counts resolve Game 3 for the game-side B;
+      // the aggregate participant winner depends on the deterministic side swap.
       const reloadedTourney = (await manager.loadTournament('draw-ko-tourney')).data!;
-      const failedPairing = getAllTournamentPairings(reloadedTourney).find(p => p.pairingId === koPairing.pairingId)!;
-      expect(failedPairing.status).toBe('pending_tiebreaker');
-      expect(failedPairing.failureCode).toBe('UNRESOLVED_DRAW');
-      expect(failedPairing.tiebreakerStatus).toBe('pending');
+      const completedPairing = getAllTournamentPairings(reloadedTourney).find(p => p.pairingId === koPairing.pairingId)!;
+      expect(completedPairing.status).toBe('completed');
+      expect(['A', 'B']).toContain(completedPairing.matchResult?.winner);
 
-      // Retry the pairing with a decisive winner
-      executor.setOutcome(koMatchId, 'A');
-      const retryRes = await manager.retryPairingById('draw-ko-tourney', koPairing.pairingId);
-      expect(retryRes.success).toBe(true);
-      expect(['A', 'B']).toContain(retryRes.data?.matchResult.winner);
+      const retryRes = await manager.resolveTiebreaker('draw-ko-tourney', koPairing.pairingId, 'A');
+      expect(retryRes.success).toBe(false);
     });
   });
 
@@ -714,7 +711,7 @@ describe('Tournament Manager - Multi-Stage Integration (Phase 2C)', () => {
   });
 
   describe('Hardening & Edge Cases (Phase 2C)', () => {
-    it('prevents infinite retry on elimination draw and supports resolveTiebreaker', async () => {
+    it('resolves an equal-piece elimination Game 3 draw deterministically', async () => {
       const memoryRepo = new InMemoryTournamentRepository();
       const executor = new AutoRespondingExecutor();
       const manager = new TournamentManager({
@@ -748,38 +745,18 @@ describe('Tournament Manager - Multi-Stage Integration (Phase 2C)', () => {
       const koMatchId = `hard-draw-tourney-${koPairing.pairingId}`;
       executor.setOutcome(koMatchId, 'draw');
 
-      // First run: ends in draw -> pending_tiebreaker
+      // First run: Game 3 draw with equal pieces -> game-side B wins by rule.
       const run1 = await manager.runPairingById('hard-draw-tourney', koPairing.pairingId);
-      expect(run1.success).toBe(false);
-      expect(run1.error).toContain('tiebreaker pending');
+      expect(run1.success).toBe(true);
+      expect(['A', 'B']).toContain(run1.data?.matchResult.winner);
 
-      // Attempt runAllMatches: should NOT retry the draw infinitely; stops and reports tiebreaker pending
-      const runAllRes = await manager.runAllMatches('hard-draw-tourney');
-      expect(runAllRes.success).toBe(false);
-      expect(runAllRes.error).toContain('tiebreaker resolution');
-
-      // Verify pairing remains pending_tiebreaker and not reset to scheduled
+      // Verify pairing is completed and no manual tiebreaker is pending.
       const postTourney = (await manager.loadTournament('hard-draw-tourney')).data!;
       const pAfter = getAllTournamentPairings(postTourney).find(p => p.pairingId === koPairing.pairingId)!;
-      expect(pAfter.status).toBe('pending_tiebreaker');
-      expect(pAfter.failureCode).toBe('UNRESOLVED_DRAW');
-
-      // Resolve the tiebreaker manually
+      expect(pAfter.status).toBe('completed');
+      expect(['A', 'B']).toContain(pAfter.matchResult?.winner);
       const resolveRes = await manager.resolveTiebreaker('hard-draw-tourney', koPairing.pairingId, 'A', 'Sudden death penalty');
-      expect(resolveRes.success).toBe(true);
-      expect(resolveRes.data?.status).toBe('running');
-
-      const resolvedTourney = resolveRes.data!;
-      const pResolved = getAllTournamentPairings(resolvedTourney).find(p => p.pairingId === koPairing.pairingId)!;
-      expect(pResolved.status).toBe('completed');
-      expect(pResolved.tiebreakerStatus).toBe('resolved');
-
-      // Complete the remaining knockout matches
-      const finishRes = await manager.runAllMatches('hard-draw-tourney');
-      expect(finishRes.success).toBe(true);
-
-      const completedTourney = (await manager.loadTournament('hard-draw-tourney')).data!;
-      expect(completedTourney.status).toBe('completed');
+      expect(resolveRes.success).toBe(false);
     });
 
     it('prevents double execution of the same pairing concurrently', async () => {

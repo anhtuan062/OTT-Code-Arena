@@ -1089,11 +1089,11 @@ describe('Series scheduler deterministic draw contract', () => {
       };
       const manager = new TournamentManager({ repository, executor, enableMultiStage: true, enableBo1MatchScheduler: true, qaMaxActiveMatches: 2 });
       const result = await manager.runAllMatches(tournamentId);
-      expect(result.success).toBe(false);
+      expect(result.success).toBe(true);
       const saved = await repository.load(tournamentId);
       const pairing = getAllTournamentPairings(saved!).find(candidate => candidate.participantB !== null)!;
-      expect(pairing.status).toBe('pending_tiebreaker');
-      expect(pairing.tiebreakerStatus).toBe('pending');
+      expect(pairing.status).toBe('completed');
+      expect(['A', 'B']).toContain(pairing.matchResult?.winner);
       expect(pairing.seriesProgress?.games).toHaveLength(3);
       const records = await repository.listMatchResults(tournamentId);
       expect(records).toHaveLength(1);
