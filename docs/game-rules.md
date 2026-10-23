@@ -139,6 +139,8 @@ Bot bị xử thua ngay lập tức (đối thủ thắng ván) nếu vi phạm 
   - **Ván 2**: Đảo bên thi đấu (B đi trước làm A, A đi sau làm B).
   - **Ván 3** (nếu cần): Quyết định bên đi trước một cách tất định dựa trên hash SHA-256 của `seed` (`digest[0] % 2 === 0`).
   - *Quy tắc dừng sớm*: Loạt trận dừng ngay khi một bên giành được 2 ván thắng (ví dụ tỷ số 2-0). Nếu sau 2 ván tỷ số là 1-0 kèm 1 ván hòa, ván 3 vẫn được tổ chức để xác định kết quả cuối cùng.
+  - *Phân định ván 3*: Nếu ván 3 hòa, bên còn nhiều quân hơn thắng ván 3. Nếu hai bên còn số quân bằng nhau, phe A thua và phe B thắng.
+  - *Phân định ván 3*: Nếu ván 3 hòa, bên còn nhiều quân hơn thắng ván 3. Nếu hai bên còn số quân bằng nhau, phe A thua và phe B thắng.
   - Giữa các ván đấu trong một series có khoảng nghỉ trễ 2.5 giây phía server để chuẩn bị môi trường.
 
 ### 7.2. Điểm số Bảng xếp hạng (Standings Scoring)

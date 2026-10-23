@@ -95,6 +95,7 @@ const state = {
   liveTransitionTimer: null,
   liveTransitionToken: 0,
   livePendingSnapshot: null,
+  liveCompletedSnapshot: null,
   liveHistoryTimer: null,
   liveMatchPollingTimer: null,
   liveStreamSource: null,

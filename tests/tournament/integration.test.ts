@@ -56,7 +56,7 @@ async function createDiagnosticExecutor(): Promise<MatchExecutor | undefined> {
 type OracleStanding = Pick<TournamentStanding, 'matchesPlayed' | 'wins' | 'draws' | 'losses' | 'forfeits' | 'points'>;
 
 const BOT_FORFEIT_TERMINATIONS = new Set([
-  'bot_timeout', 'bot_crash', 'bot_invalid_json', 'bot_invalid_response', 'bot_illegal_move', 'bot_empty_output',
+  'bot_timeout', 'bot_compilation_failed', 'bot_crash', 'bot_invalid_json', 'bot_invalid_response', 'bot_illegal_move', 'bot_empty_output',
 ]);
 const LEGITIMATE_DRAW_TERMINATIONS = new Set(['turn_limit', 'repetition', 'insufficient_material']);
 

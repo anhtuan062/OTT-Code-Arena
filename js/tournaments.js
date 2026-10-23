@@ -1675,7 +1675,7 @@ function renderPhase1CreationLegacy(container, tournament) {
         content: bestOf === 2
           ? 'Mỗi cặp đấu chơi 2 ván. Ván thứ hai đổi bên. Nếu hòa 1–1, kết quả được xử lý theo luật của giai đoạn đang diễn ra.'
           : bestOf === 3
-            ? 'Mỗi cặp đấu chơi tối đa 3 ván; Bot thắng 2 ván trước sẽ thắng cặp. Ván thứ hai đổi bên. Nếu cần ván thứ ba, hệ thống xác định bên đi trước theo mã cặp đấu để kết quả luôn nhất quán.'
+            ? 'Mỗi cặp đấu chơi tối đa 3 ván; Bot thắng 2 ván trước sẽ thắng cặp. Ván thứ hai đổi bên. Nếu ván 3 hòa, Bot còn nhiều quân hơn thắng ván 3; nếu bằng quân, phe A thua và phe B thắng.'
             : tournament.format === 'multi_stage'
               ? 'Ở vòng bảng, mỗi cặp chơi 2 ván. Ở nhánh loại trực tiếp, mỗi cặp chơi tối đa 3 ván. Ván thứ hai đổi bên; nếu có ván thứ ba, bên đi trước được xác định cố định cho từng cặp.'
               : `Mỗi cặp hiện chơi ${bestOf || 1} ván.`,
@@ -2881,7 +2881,7 @@ function renderPhase4Scheduling(container, tournament) {
   explorerHead.append(titleWrap, create('span', { className: 'phase4-format-badge', text: currentFormatBadge }));
   if (preliminaryRegions.length > 0 && preliminaryRegions.some(region => region.regionId === selectedTab)) {
     const note = titleWrap.querySelector('.phase4-explorer-note');
-    if (note) note.textContent = 'BO3: thi đấu tối đa 3 ván; sau 2 ván, Bot có kết quả nghiêng về mình sẽ thắng (ví dụ 1–0 khi một ván thắng và một ván hòa). Chỉ thi đấu ván 3 khi tỷ số sau 2 ván vẫn hòa.';
+    if (note) note.textContent = 'BO3: thi đấu tối đa 3 ván; sau 2 ván, Bot có kết quả nghiêng về mình sẽ thắng (ví dụ 1–0 khi một ván thắng và một ván hòa). Nếu ván 3 hòa, Bot còn nhiều quân hơn thắng ván 3; nếu bằng quân, phe A thua và phe B thắng.';
   }
   explorerCard.appendChild(explorerHead);
 
@@ -3651,11 +3651,7 @@ function renderPhase6KnockoutBranchMatch(tournament, pairing, onSelect, sourceSt
     attrs: { role: 'button', tabindex: '0', 'aria-label': `Trận ${matchCode || ''}`.trim(), 'aria-pressed': String(isSelected), 'data-pairing-id': String(pairing.pairingId || '') },
   });
   pair.dataset.pairingId = String(pairing.pairingId || '');
-  pair.dataset.parentPairings = [pairing.participantA, pairing.participantB]
-    .map(value => String(value || '').match(/winner\(([^)]+)\)|^(.+)-winner$/i))
-    .map(match => match?.[1] || match?.[2])
-    .filter(Boolean)
-    .join('|');
+  pair.dataset.parentPairings = knockoutParentPairingIds(pairing).join('|');
   pair.appendChild(create('span', { className: 'knockout-match-code', text: matchCode }));
 
   [['A', 'knockout-player-a'], ['B', 'knockout-player-b']].forEach(([side, className]) => {
@@ -5682,6 +5678,23 @@ function knockoutWinnerLabel(pairing) {
   return 'Chưa xác định';
 }
 
+function knockoutParentPairingIds(pairing) {
+  const parentIds = [];
+  for (const side of ['A', 'B']) {
+    const slot = pairing?.[`slot${side}`];
+    const sourcePairingId = slot?.sourceRef?.pairingId;
+    if (sourcePairingId) {
+      parentIds.push(String(sourcePairingId));
+      continue;
+    }
+    const participant = String(pairing?.[`participant${side}`] || '');
+    const match = participant.match(/^winner\(([^)]+)\)$|^(.+)-winner$/i);
+    const parentId = match?.[1] || match?.[2];
+    if (parentId) parentIds.push(parentId);
+  }
+  return parentIds;
+}
+
 function knockoutRoundTitle(roundNumber, pairings, maxRound) {
   const roundsFromFinal = maxRound - roundNumber;
   if (roundsFromFinal === 0) return pairings.length === 1 ? 'Chung kết' : 'Vòng cuối';
@@ -5912,13 +5925,7 @@ function renderKnockoutMatch(pairing) {
   });
   pair.appendChild(create('span', { className: 'knockout-match-code', text: matchCode }));
   pair.dataset.pairingId = String(pairing.pairingId || '');
-  pair.dataset.parentPairings = [pairing.participantA, pairing.participantB]
-    .map(value => {
-      const match = String(value || '').match(/winner\(([^)]+)\)|^(.+)-winner$/i);
-      return match?.[1] || match?.[2];
-    })
-    .filter(Boolean)
-    .join('|');
+  pair.dataset.parentPairings = knockoutParentPairingIds(pairing).join('|');
 
   const selectMatch = () => {
     state.multiStage.activeKnockoutPairingId = pairing.pairingId;

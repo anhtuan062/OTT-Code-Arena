@@ -73,6 +73,7 @@ Khi Bot Executor trả về lỗi, Match Runner lập tức xử dừng ván đ�
 | :--- | :--- | :--- |
 | `TIMEOUT`<br>`COMPILATION_TIMEOUT`<br>`RUNTIME_TIMEOUT` | Quá thời gian quy định của lượt hoặc quá thời gian biên dịch mã nguồn C++. | `bot_timeout` |
 | `PROCESS_CRASHED`<br>`RESOURCE_LIMIT_EXCEEDED` | Tiến trình bot thoát đột ngột (crash, segfault, OOM, exit code $\ne 0$). | `bot_crash` |
+| `PROCESS_CRASHED` (stage `compilation`) | Mã nguồn Bot không biên dịch được trong bước prewarm trước ván. | `bot_compilation_failed` |
 | `INVALID_JSON`<br>`INVALID_RESPONSE`<br>`MISSING_MOVE` | Bot in ra dữ liệu không parse được JSON hoặc JSON thiếu trường `move`. | `bot_invalid_json` |
 | `EMPTY_OUTPUT` | Bot kết thúc lượt mà không in bất kỳ byte dữ liệu nào ra stdout. | `bot_empty_output` |
 | `ILLEGAL_MOVE`<br>`SECURITY_VIOLATION` | Nước đi không nằm trong danh sách `legal_moves` hoặc vi phạm tọa độ/khoảng cách. | `bot_illegal_move` |

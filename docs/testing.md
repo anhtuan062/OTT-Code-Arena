@@ -79,7 +79,7 @@ npx vitest run tests/frontend
 
 ### 2.4. Phân hệ Trọng tài và Loạt trận (`tests/match/`)
 - Vòng lặp ván đấu, đảm bảo Bot không có quyền quyết định kết quả.
-- Ánh xạ chính xác các sự cố sang mã forfeit: `bot_timeout`, `bot_crash`, `bot_invalid_json`, `bot_empty_output`, `bot_illegal_move`.
+- Ánh xạ chính xác các sự cố sang mã forfeit: `bot_timeout`, `bot_compilation_failed`, `bot_crash`, `bot_invalid_json`, `bot_empty_output`, `bot_illegal_move`.
 - Loạt trận BO3: Ván 1 theo bốc thăm, ván 2 đảo bên thi đấu, ván 3 theo seed; dừng sớm khi có bên đạt 2 ván thắng.
 - Tạo dữ liệu Replay chính xác: Replay cho phép tua lại từng nước đi và tái tạo đúng `finalState`.
 

@@ -13,6 +13,7 @@ OTT Code Arena là nền tảng thi đấu lập trình Bot tự động cho tr�
   - `single_round_robin`: Thi đấu vòng tròn một lượt (quy mô 2–64 bot).
   - `multi_stage`: Thể thức đa tầng nâng cao (quy mô lên tới 4,096 bot) gồm Vòng sơ loại (Preliminary), Vòng loại khu vực (Regional Qualifiers), Vòng bảng (Group Stage, 4–8 bot/bảng), và Nhánh loại trực tiếp (Knockout Stage).
 - **Cấu trúc Loạt trận (Series)**: Hỗ trợ BO1, BO2 (vòng bảng) và BO3 (loại trực tiếp/chung cuộc) với cơ chế đổi bên thi đấu và tự động chọn bố cục bàn cờ tất định từ hạt giống (`seed`).
+- **Tie-break BO3**: Nếu ván 3 hòa, Bot còn nhiều quân hơn được xác định là thắng ván 3; nếu số quân bằng nhau, phe A thua và phe B thắng.
 - **Thực thi An toàn trong Docker Sandbox**: Áp dụng nguyên tắc Fail-Closed. Mã nguồn bot C++17 và Python 3 được cô lập hoàn toàn: ngắt mạng (`--network none`), filesystem chỉ đọc (`--read-only`), tmpfs 10MB `noexec`, quyền non-root, trần RAM 256 MiB, CPU 1.0, tối đa 64 PIDs.
 - **Theo dõi Trực tiếp (Live Spectator)**: Người dùng đã đăng nhập có thể xem trực tiếp các trận đấu đang diễn ra thông qua Server-Sent Events (SSE) hoặc HTTP Polling.
 - **Hệ thống Phát lại Trận đấu (Replay Engine)**: Xem lại chi tiết từng nước đi, biểu đồ quân cờ và phân tích kết quả. Replay được bảo vệ bằng chữ ký mã băm SHA-256 (`.commit.json`) và tự động xuất bản công khai khi giải đấu kết thúc.

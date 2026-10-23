@@ -154,6 +154,8 @@ export interface ExecutionContext {
   signal?: AbortSignal;
   /** Keeps a prepared source artifact alive only for this match/session. */
   revisionScopeId?: string;
+  /** Internal preparation call: compile/materialize only, never execute Bot code. */
+  prepareOnly?: boolean;
 }
 
 export class ExecutionCancelledError extends Error {
@@ -203,6 +205,12 @@ export interface BotExecutor {
 
 /** Optional capability implemented only by the dedicated source adapter. */
 export interface SourceRevisionExecutor {
+  /** Prepare a pinned revision without executing a turn. */
+  prepareRevision?(
+    context: ExecutionContext,
+    revision: { execution: SourceRevisionExecution; source: Buffer }
+  ): Promise<BotExecutionResult>;
+
   executeRevision(
     context: ExecutionContext,
     revision: { execution: SourceRevisionExecution; source: Buffer },

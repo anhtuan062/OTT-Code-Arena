@@ -95,6 +95,7 @@ export function isForfeitTermination(reason: TerminationReason | null): boolean 
   if (!reason) return false;
   return [
     'bot_timeout',
+    'bot_compilation_failed',
     'bot_crash',
     'bot_invalid_json',
     'bot_invalid_response',

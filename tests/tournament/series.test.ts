@@ -7,7 +7,7 @@ import { FileTournamentRepository } from '@tournament/persistence.js';
 import type { MatchExecutor } from '@tournament/executor.js';
 import type { MatchResult, MatchReplay } from '@match-runner/types.js';
 import type { Tournament, TournamentMatchRecord } from '@tournament/types.js';
-import { getSeriesSides, shouldPlayNextGame } from '@tournament/series.js';
+import { getSeriesSides, shouldPlayNextGame, winnerByRemainingPieces } from '@tournament/series.js';
 
 class CrashAfterFirstSeriesGameRepository extends FileTournamentRepository {
   private failNextTournamentSave = false;
@@ -35,7 +35,7 @@ class CrashAfterFirstSeriesGameRepository extends FileTournamentRepository {
   }
 }
 
-function result(matchId: string, winner: 'A' | 'B' | 'draw'): MatchResult {
+function result(matchId: string, winner: 'A' | 'B' | 'draw', finalPieces: MatchResult['finalState']['pieces'] = []): MatchResult {
   return {
     matchId, protocolVersion: '0.1.0', status: 'finished', winner,
     terminationReason: winner === 'draw' ? 'repetition' : 'goal_reached', turnCount: 2,
@@ -43,7 +43,7 @@ function result(matchId: string, winner: 'A' | 'B' | 'draw'): MatchResult {
     playerA: { botId: 'bot-a', player: 'A', command: 'node', args: [] },
     playerB: { botId: 'bot-b', player: 'B', command: 'node', args: [] },
     initialState: { boardSize: 9, currentPlayer: 'A', turn: 1, pieces: [], status: 'playing', winner: null, winReason: null, lastMove: null },
-    finalState: { boardSize: 9, currentPlayer: 'A', turn: 2, pieces: [], status: 'finished', winner: winner === 'draw' ? null : winner, winReason: winner === 'draw' ? 'repetition' : 'goal_reached', lastMove: null },
+    finalState: { boardSize: 9, currentPlayer: 'A', turn: 2, pieces: finalPieces, status: 'finished', winner: winner === 'draw' ? null : winner, winReason: winner === 'draw' ? 'repetition' : 'goal_reached', lastMove: null },
     turnLog: [],
   };
 }
@@ -90,12 +90,30 @@ describe('BO3 tournament series', () => {
     expect(shouldPlayNextGame([game(null), game(null)])).toBe(true);
   });
 
+  it('uses remaining piece count to resolve a drawn third BO3 game', () => {
+    expect(winnerByRemainingPieces({ pieces: [
+      { id: 'a1', type: 'dam', player: 'A', row: 1, col: 1 },
+      { id: 'a2', type: 'la', player: 'A', row: 1, col: 2 },
+      { id: 'b1', type: 'keo', player: 'B', row: 2, col: 1 },
+    ] })).toBe('A');
+    expect(winnerByRemainingPieces({ pieces: [
+      { id: 'a1', type: 'dam', player: 'A', row: 1, col: 1 },
+      { id: 'b1', type: 'keo', player: 'B', row: 2, col: 1 },
+      { id: 'b2', type: 'la', player: 'B', row: 2, col: 2 },
+    ] })).toBe('B');
+    expect(winnerByRemainingPieces({ pieces: [] })).toBe('B');
+  });
+
   it('plays both sides, stores the seed and keeps standings at one series', async () => {
     const calls: string[] = [];
     const executor: MatchExecutor = {
       async executeMatch(matchId, playerA, playerB) {
         calls.push(`${matchId}:${playerA.botId}:${playerB.botId}`);
-        return result(matchId, matchId.endsWith('-g1') ? 'A' : matchId.endsWith('-g2') ? 'A' : 'draw');
+        return result(matchId, matchId.endsWith('-g1') ? 'A' : matchId.endsWith('-g2') ? 'A' : 'draw', matchId.endsWith('-g3') ? [
+          { id: 'remaining-a1', type: 'dam', player: 'A', row: 1, col: 1 },
+          { id: 'remaining-a2', type: 'la', player: 'A', row: 1, col: 2 },
+          { id: 'remaining-b1', type: 'keo', player: 'B', row: 2, col: 1 },
+        ] : []);
       },
       async isAvailable() { return true; },
     };
@@ -116,8 +134,12 @@ describe('BO3 tournament series', () => {
     const tournament = (await manager.loadTournament('bo3')).data!;
     const pairing = tournament.rounds[0]!.pairings[0]!;
     expect(pairing.status).toBe('completed');
-    expect(pairing.matchResult?.series).toMatchObject({ format: 'bo3', bestOf: 3, winsA: 1, winsB: 1, winner: 'draw' });
     expect(pairing.matchResult?.series?.games).toHaveLength(3);
+    const thirdGame = pairing.matchResult?.series?.games[2];
+    expect(thirdGame?.winner).toBe('A');
+    expect(thirdGame?.winnerParticipantId).toBe(thirdGame?.participantA);
+    const expectedWinner = thirdGame?.participantA === pairing.participantA ? 'A' : 'B';
+    expect(pairing.matchResult?.series).toMatchObject({ format: 'bo3', bestOf: 3, winsA: expectedWinner === 'A' ? 2 : 1, winsB: expectedWinner === 'B' ? 2 : 1, winner: expectedWinner });
     expect((await repository.listMatchResults('bo3'))).toHaveLength(1);
     const replay = await manager.getReplay('bo3', pairing.matchId!);
     expect(replay.data?.series?.games).toHaveLength(3);
@@ -129,10 +151,17 @@ describe('BO3 tournament series', () => {
       A: { participantId: 'P1', participantName: 'Player 1' },
       B: { participantId: 'P2', participantName: 'Player 2' },
     });
-    expect(secondGameReplay.data?.series?.winsA).toBe(1);
-    expect(secondGameReplay.data?.series?.winsB).toBe(1);
-    expect(tournament.standings.every(standing => standing.matchesPlayed === 1 && standing.draws === 1)).toBe(true);
-    expect(tournament.standings.every(standing => standing.points === 1)).toBe(true);
+    expect(secondGameReplay.data?.series?.winsA).toBe(expectedWinner === 'A' ? 2 : 1);
+    expect(secondGameReplay.data?.series?.winsB).toBe(expectedWinner === 'B' ? 2 : 1);
+    expect(tournament.standings.find(standing => standing.participantId === thirdGame?.winnerParticipantId)).toMatchObject({ matchesPlayed: 1, wins: 1, points: 3 });
+    expect(tournament.standings.find(standing => standing.participantId !== thirdGame?.winnerParticipantId)).toMatchObject({ matchesPlayed: 1, losses: 1, points: 0 });
+    tournament.standings = [];
+    await repository.save(tournament);
+    const published = await manager.publishResults('bo3');
+    expect(published.success).toBe(true);
+    expect(published.data?.standings).toEqual(expect.arrayContaining([
+      expect.objectContaining({ participantId: thirdGame?.winnerParticipantId, wins: 1, points: 3 }),
+    ]));
   }, 20_000);
 
   it('stops after the second series win', async () => {

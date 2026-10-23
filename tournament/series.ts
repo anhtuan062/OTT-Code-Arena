@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import type { Player } from '@match-runner/types.js';
+import type { GameState } from '@engine/types.js';
 import type { TournamentSeriesGameRecord, TournamentSeriesRecord } from './types.js';
 
 export interface SeriesSides {
@@ -25,6 +26,13 @@ export function seriesWinner(games: TournamentSeriesGameRecord[], participantA: 
   const winsA = games.filter(game => game.winnerParticipantId === participantA).length;
   const winsB = games.filter(game => game.winnerParticipantId === participantB).length;
   return winsA === winsB ? 'draw' : winsA > winsB ? 'A' : 'B';
+}
+
+/** Resolve a drawn third BO3 game by the number of pieces remaining; ties favor B. */
+export function winnerByRemainingPieces(finalState: Pick<GameState, 'pieces'>): Player {
+  const piecesA = finalState.pieces.filter(piece => piece.player === 'A').length;
+  const piecesB = finalState.pieces.filter(piece => piece.player === 'B').length;
+  return piecesA > piecesB ? 'A' : 'B';
 }
 
 export function seriesScore(games: TournamentSeriesGameRecord[], participantA: string, participantB: string): { winsA: number; winsB: number } {

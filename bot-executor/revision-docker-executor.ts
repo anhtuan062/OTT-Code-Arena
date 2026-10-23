@@ -706,10 +706,25 @@ export class RevisionDockerExecutor {
     return [scopeId, execution.competitorId, execution.botId, execution.revisionId].join(':');
   }
 
+  async prepareRevision(
+    context: ExecutionContext,
+    revision: RevisionSource,
+  ): Promise<BotExecutionResult> {
+    return this.executeRevisionInternal({ ...context, prepareOnly: true }, revision, undefined);
+  }
+
   async executeRevision(
     context: ExecutionContext,
     revision: RevisionSource,
     request: BotRequestMessage
+  ): Promise<BotExecutionResult> {
+    return this.executeRevisionInternal(context, revision, request);
+  }
+
+  private async executeRevisionInternal(
+    context: ExecutionContext,
+    revision: RevisionSource,
+    request?: BotRequestMessage,
   ): Promise<BotExecutionResult> {
     const started = performance.now();
     const timings: RevisionExecutionTimings = {
@@ -741,7 +756,7 @@ export class RevisionDockerExecutor {
   private async executeMeasuredRevision(
     context: ExecutionContext,
     revision: RevisionSource,
-    request: BotRequestMessage,
+    request: BotRequestMessage | undefined,
     timings: RevisionExecutionTimings,
     provenance: RevisionExecutionProvenance,
   ): Promise<BotExecutionResult> {
@@ -779,7 +794,7 @@ export class RevisionDockerExecutor {
         return this.error('SECURITY_VIOLATION', 'Prepared revision identity does not match the pinned revision', null, '', '', false, 'source_integrity');
       }
       if (prepared.artifactDigest) provenance.artifactDigest = prepared.artifactDigest;
-      return this.executePreparedRuntime(context, revision, request, prepared, timings);
+      return this.executePreparedOrRuntime(context, revision, request, prepared, timings);
     }
 
     const root = path.join(this.config.workingDirBase!, 'source-exec', context.executionId);
@@ -857,7 +872,7 @@ export class RevisionDockerExecutor {
           };
           if (artifactKey && context.revisionScopeId) this.preparedArtifacts.set(artifactKey, artifact);
           retainArtifact = Boolean(artifactKey && context.revisionScopeId);
-          return this.executePreparedRuntime(context, revision, request, artifact, timings);
+          return this.executePreparedOrRuntime(context, revision, request, artifact, timings);
         }
       }
       if (revision.execution.runtimeId === 'cpp' && (!useVolume || volumeCacheEnabled)) {
@@ -912,7 +927,7 @@ export class RevisionDockerExecutor {
             await cacheBuildHandle.release();
             cacheBuildHandle = null;
             retainArtifact = Boolean(artifactKey && context.revisionScopeId);
-            return this.executePreparedRuntime(context, revision, request, artifact, timings);
+            return this.executePreparedOrRuntime(context, revision, request, artifact, timings);
             }
           }
         } catch (error) {
@@ -991,7 +1006,7 @@ export class RevisionDockerExecutor {
         this.preparedArtifacts.set(artifactKey, artifact);
         retainArtifact = true;
       }
-      return this.executePreparedRuntime(context, revision, request, artifact, timings);
+      return this.executePreparedOrRuntime(context, revision, request, artifact, timings);
     } finally {
       if (cacheBuildHandle) await cacheBuildHandle.release().catch(() => {});
       // A match-scoped artifact is released by releaseRevisionScope once the
@@ -1006,6 +1021,26 @@ export class RevisionDockerExecutor {
         timings.cleanupMs += Math.round(performance.now() - cleanupStarted);
       }
     }
+  }
+
+  private async executePreparedOrRuntime(
+    context: ExecutionContext,
+    revision: RevisionSource,
+    request: BotRequestMessage | undefined,
+    artifact: PreparedRevisionArtifact,
+    timings: RevisionExecutionTimings,
+  ): Promise<BotExecutionResult> {
+    if (context.prepareOnly) {
+      return {
+        success: true,
+        exitCode: 0,
+        timedOut: false,
+        stdout: '',
+        stderr: '',
+        durationMs: 0,
+      };
+    }
+    return this.executePreparedRuntime(context, revision, request!, artifact, timings);
   }
 
   private async executePreparedRuntime(

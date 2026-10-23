@@ -30,6 +30,7 @@ const REASON_LABELS = {
   goal_reached: 'Đến ô đích',
   all_pieces_captured: 'Ăn hết quân đối thủ',
   bot_timeout: 'Bot quá thời gian',
+  bot_compilation_failed: 'Bot biên dịch thất bại',
   bot_crash: 'Bot gặp lỗi',
   bot_invalid_json: 'Phản hồi Bot không hợp lệ',
   bot_empty_output: 'Bot không trả về dữ liệu',

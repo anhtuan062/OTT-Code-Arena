@@ -55,6 +55,7 @@ describe('Tournament Scoring', () => {
     it('should identify forfeit termination reasons', () => {
       const forfeitReasons: TerminationReason[] = [
         'bot_timeout',
+        'bot_compilation_failed',
         'bot_crash',
         'bot_invalid_json',
         'bot_invalid_response',

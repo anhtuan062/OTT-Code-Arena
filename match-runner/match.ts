@@ -28,6 +28,12 @@ import type { BotProcessConfig, BotExecutionResult, SourceRevisionExecutor } fro
 import type { SourceRevisionExecution, ExecutionDiagnostic } from './types.js';
 import { createHash } from 'node:crypto';
 
+interface PrewarmFailure {
+  player: Player;
+  bot: BotDefinition & { execution: SourceRevisionExecution };
+  result: BotExecutionResult;
+}
+
 function createTurnExecutionId(matchId: string, turn: number, player: Player): string {
   const suffix = `-turn-${turn}-${player}`;
   const plain = `${matchId}${suffix}`;
@@ -104,9 +110,66 @@ export class MatchRunner {
     }
   }
 
+  private async prepareSourceRevisions(signal?: AbortSignal): Promise<PrewarmFailure | null> {
+    if (!this.revisionExecutor?.prepareRevision || !this.resolveRevision) return null;
+    const sourceBots = [this.playerA, this.playerB]
+      .filter(bot => bot.execution?.kind === 'source-revision') as Array<BotDefinition & { execution: SourceRevisionExecution }>;
+    if (sourceBots.length === 0) return null;
+
+    const outcomes = await Promise.allSettled(sourceBots.map(async bot => {
+      if (signal?.aborted) throw new ExecutionCancelledError();
+      const source = await this.resolveRevision!(bot.execution);
+      if (!source) throw new Error(`Pinned source revision could not be resolved for ${bot.player}`);
+      const prepared = await this.revisionExecutor!.prepareRevision!({
+        executionId: createTurnExecutionId(this.config.matchId, 0, bot.player),
+        matchId: this.config.matchId,
+        turn: 0,
+        player: bot.player,
+        timeoutMs: sourceRevisionTurnTimeoutMs(this.config.turnTimeoutMs),
+        resourceLimits: this.config.resourceLimits,
+        signal,
+        revisionScopeId: this.config.matchId,
+        prepareOnly: true,
+      }, { execution: bot.execution, source });
+      if (!prepared.success) {
+        const infrastructureFailure = prepared.error?.code === 'EXECUTOR_UNAVAILABLE'
+          || prepared.error?.code === 'EXECUTOR_ERROR'
+          || prepared.error?.code === 'SANDBOX_REQUIRED'
+          || prepared.error?.stage === 'docker_infrastructure';
+        if (infrastructureFailure) throw new Error(prepared.error?.message || `Unable to prepare Bot ${bot.player}`);
+        return { player: bot.player, bot, result: prepared } satisfies PrewarmFailure;
+      }
+      return null;
+    }));
+
+    const rejected = outcomes.find((outcome): outcome is PromiseRejectedResult => outcome.status === 'rejected');
+    if (rejected) throw rejected.reason;
+    return outcomes
+      .map(outcome => outcome.status === 'fulfilled' ? outcome.value : null)
+      .find((failure): failure is PrewarmFailure => failure !== null) ?? null;
+  }
+
   private async runMatch(signal?: AbortSignal): Promise<MatchResult> {
     let currentState = this.engine.getState();
     this.emitSnapshot('in_progress', currentState);
+    const prewarmFailure = await this.prepareSourceRevisions(signal);
+    if (prewarmFailure) {
+      const { player, bot, result } = prewarmFailure;
+      const turnLog: TurnLog = {
+        turn: 0,
+        player,
+        timestamp: new Date().toISOString(),
+        response: this.config.logResponses ? result : undefined,
+        error: result.error,
+        executionDiagnostic: this.createExecutionDiagnostic(bot, result),
+      };
+      return this.finishMatch(
+        result.error?.code === 'COMPILATION_TIMEOUT' ? 'bot_timeout' : 'bot_compilation_failed',
+        player === 'A' ? 'B' : 'A',
+        currentState,
+        turnLog,
+      );
+    }
 
     while (currentState.status !== 'finished') {
       if (signal?.aborted) throw new ExecutionCancelledError();
@@ -321,6 +384,25 @@ export class MatchRunner {
       default:
         return 'unknown';
     }
+  }
+
+  private createExecutionDiagnostic(bot: BotDefinition, result: BotExecutionResult): ExecutionDiagnostic {
+    return {
+      player: bot.player,
+      runtimeId: bot.execution?.kind === 'source-revision' ? bot.execution.runtimeId : 'legacy',
+      executionMode: bot.execution?.kind === 'source-revision' ? (bot.execution.executionMode ?? 'raw') : 'legacy',
+      ...(bot.execution?.kind === 'source-revision' && bot.execution.sdkVersion ? { sdkVersion: bot.execution.sdkVersion } : {}),
+      ...(bot.execution?.kind === 'source-revision' && bot.execution.sdkDigest ? { sdkDigest: bot.execution.sdkDigest } : {}),
+      ...(result.provenance?.compilationBackend ? { compilationBackend: result.provenance.compilationBackend } : {}),
+      ...(result.provenance?.compilerImageDigest ? { compilerImageDigest: result.provenance.compilerImageDigest } : {}),
+      ...(result.provenance?.compilerConfigDigest ? { compilerConfigDigest: result.provenance.compilerConfigDigest } : {}),
+      ...(result.provenance?.artifactDigest ? { artifactDigest: result.provenance.artifactDigest } : {}),
+      ...(result.error?.stage ? { failureStage: result.error.stage } : {}),
+      ...(result.error?.code ? { errorCode: result.error.code } : {}),
+      exitCode: result.exitCode,
+      outputProduced: result.stdout.length > 0 || result.stderr.length > 0,
+      engineAcceptedMove: false,
+    };
   }
 
   private finishMatch(

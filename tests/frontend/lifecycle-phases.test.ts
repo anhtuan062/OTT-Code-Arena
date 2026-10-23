@@ -126,6 +126,13 @@ describe('Tournament Lifecycle 7-Phase Distinct UI/UX Architecture', () => {
     expect(app).not.toContain("data-group-id': 'preliminary'");
   });
 
+  it('keeps knockout connectors after downstream slots resolve to real participants', async () => {
+    const app = await readAssembledFrontendScript();
+    expect(app).toContain('function knockoutParentPairingIds(pairing)');
+    expect(app).toContain('const sourcePairingId = slot?.sourceRef?.pairingId;');
+    expect(app).toContain('pair.dataset.parentPairings = knockoutParentPairingIds(pairing).join(\'|\');');
+  });
+
   it('renders Phase 5 (Running) with live progress bar, active match spotlight, and stage workspace', async () => {
     const [app, css] = await Promise.all([readAssembledFrontendScript(), readAssembledFrontendStyles()]);
     expect(app).toContain('phase-layout-running');

@@ -41,7 +41,7 @@ export function verifyProtectedResourceBaseline(before, after) {
 
 export function validateNoBotFailures(executedResults) {
   const botFailureReasons = new Set([
-    'bot_timeout', 'bot_crash', 'bot_invalid_json', 'bot_invalid_response', 'bot_illegal_move', 'bot_empty_output',
+    'bot_timeout', 'bot_compilation_failed', 'bot_crash', 'bot_invalid_json', 'bot_invalid_response', 'bot_illegal_move', 'bot_empty_output',
   ]);
   const failures = executedResults
     .map(result => result.matchResult ?? result)

@@ -35,6 +35,7 @@ const REASON_LABELS = {
   goal_reached: 'Đến ô đích',
   all_pieces_captured: 'Ăn hết quân đối thủ',
   bot_timeout: 'Bot quá thời gian',
+  bot_compilation_failed: 'Bot biên dịch thất bại',
   bot_crash: 'Bot gặp lỗi',
   bot_invalid_json: 'Phản hồi Bot không hợp lệ',
   bot_empty_output: 'Bot không trả về dữ liệu',
@@ -279,6 +280,7 @@ const state = {
   liveTransitionTimer: null,
   liveTransitionToken: 0,
   livePendingSnapshot: null,
+  liveCompletedSnapshot: null,
   liveHistoryTimer: null,
   liveMatchPollingTimer: null,
   liveStreamSource: null,
@@ -4839,7 +4841,7 @@ function renderPhase1CreationLegacy(container, tournament) {
         content: bestOf === 2
           ? 'Mỗi cặp đấu chơi 2 ván. Ván thứ hai đổi bên. Nếu hòa 1–1, kết quả được xử lý theo luật của giai đoạn đang diễn ra.'
           : bestOf === 3
-            ? 'Mỗi cặp đấu chơi tối đa 3 ván; Bot thắng 2 ván trước sẽ thắng cặp. Ván thứ hai đổi bên. Nếu cần ván thứ ba, hệ thống xác định bên đi trước theo mã cặp đấu để kết quả luôn nhất quán.'
+            ? 'Mỗi cặp đấu chơi tối đa 3 ván; Bot thắng 2 ván trước sẽ thắng cặp. Ván thứ hai đổi bên. Nếu ván 3 hòa, Bot còn nhiều quân hơn thắng ván 3; nếu bằng quân, phe A thua và phe B thắng.'
             : tournament.format === 'multi_stage'
               ? 'Ở vòng bảng, mỗi cặp chơi 2 ván. Ở nhánh loại trực tiếp, mỗi cặp chơi tối đa 3 ván. Ván thứ hai đổi bên; nếu có ván thứ ba, bên đi trước được xác định cố định cho từng cặp.'
               : `Mỗi cặp hiện chơi ${bestOf || 1} ván.`,
@@ -6045,7 +6047,7 @@ function renderPhase4Scheduling(container, tournament) {
   explorerHead.append(titleWrap, create('span', { className: 'phase4-format-badge', text: currentFormatBadge }));
   if (preliminaryRegions.length > 0 && preliminaryRegions.some(region => region.regionId === selectedTab)) {
     const note = titleWrap.querySelector('.phase4-explorer-note');
-    if (note) note.textContent = 'BO3: thi đấu tối đa 3 ván; sau 2 ván, Bot có kết quả nghiêng về mình sẽ thắng (ví dụ 1–0 khi một ván thắng và một ván hòa). Chỉ thi đấu ván 3 khi tỷ số sau 2 ván vẫn hòa.';
+    if (note) note.textContent = 'BO3: thi đấu tối đa 3 ván; sau 2 ván, Bot có kết quả nghiêng về mình sẽ thắng (ví dụ 1–0 khi một ván thắng và một ván hòa). Nếu ván 3 hòa, Bot còn nhiều quân hơn thắng ván 3; nếu bằng quân, phe A thua và phe B thắng.';
   }
   explorerCard.appendChild(explorerHead);
 
@@ -6815,11 +6817,7 @@ function renderPhase6KnockoutBranchMatch(tournament, pairing, onSelect, sourceSt
     attrs: { role: 'button', tabindex: '0', 'aria-label': `Trận ${matchCode || ''}`.trim(), 'aria-pressed': String(isSelected), 'data-pairing-id': String(pairing.pairingId || '') },
   });
   pair.dataset.pairingId = String(pairing.pairingId || '');
-  pair.dataset.parentPairings = [pairing.participantA, pairing.participantB]
-    .map(value => String(value || '').match(/winner\(([^)]+)\)|^(.+)-winner$/i))
-    .map(match => match?.[1] || match?.[2])
-    .filter(Boolean)
-    .join('|');
+  pair.dataset.parentPairings = knockoutParentPairingIds(pairing).join('|');
   pair.appendChild(create('span', { className: 'knockout-match-code', text: matchCode }));
 
   [['A', 'knockout-player-a'], ['B', 'knockout-player-b']].forEach(([side, className]) => {
@@ -8846,6 +8844,23 @@ function knockoutWinnerLabel(pairing) {
   return 'Chưa xác định';
 }
 
+function knockoutParentPairingIds(pairing) {
+  const parentIds = [];
+  for (const side of ['A', 'B']) {
+    const slot = pairing?.[`slot${side}`];
+    const sourcePairingId = slot?.sourceRef?.pairingId;
+    if (sourcePairingId) {
+      parentIds.push(String(sourcePairingId));
+      continue;
+    }
+    const participant = String(pairing?.[`participant${side}`] || '');
+    const match = participant.match(/^winner\(([^)]+)\)$|^(.+)-winner$/i);
+    const parentId = match?.[1] || match?.[2];
+    if (parentId) parentIds.push(parentId);
+  }
+  return parentIds;
+}
+
 function knockoutRoundTitle(roundNumber, pairings, maxRound) {
   const roundsFromFinal = maxRound - roundNumber;
   if (roundsFromFinal === 0) return pairings.length === 1 ? 'Chung kết' : 'Vòng cuối';
@@ -9076,13 +9091,7 @@ function renderKnockoutMatch(pairing) {
   });
   pair.appendChild(create('span', { className: 'knockout-match-code', text: matchCode }));
   pair.dataset.pairingId = String(pairing.pairingId || '');
-  pair.dataset.parentPairings = [pairing.participantA, pairing.participantB]
-    .map(value => {
-      const match = String(value || '').match(/winner\(([^)]+)\)|^(.+)-winner$/i);
-      return match?.[1] || match?.[2];
-    })
-    .filter(Boolean)
-    .join('|');
+  pair.dataset.parentPairings = knockoutParentPairingIds(pairing).join('|');
 
   const selectMatch = () => {
     state.multiStage.activeKnockoutPairingId = pairing.pairingId;
@@ -10625,14 +10634,35 @@ function stopLiveMatchPolling() {
   if (state.liveTransitionTimer) clearTimeout(state.liveTransitionTimer);
   state.liveTransitionTimer = null;
   state.livePendingSnapshot = null;
+  state.liveCompletedSnapshot = null;
   hideLiveGameResultModal();
   if (state.liveHistoryTimer) clearTimeout(state.liveHistoryTimer);
   state.liveHistoryTimer = null;
   $('#replay-view')?.classList.remove('live-match-view');
 }
 
-function showLiveGameResultModal(snapshot, completedGame = null) {
+function liveTerminationLabel(reason) {
+  const labels = {
+    all_pieces_captured: 'ăn hết quân đối phương',
+    goal_reached: 'đạt mục tiêu',
+    turn_limit: 'hết giới hạn lượt',
+    repetition: 'vi phạm luật lặp',
+    insufficient_material: 'không đủ quân để tiếp tục',
+    bot_timeout: 'bot hết thời gian',
+    bot_compilation_failed: 'biên dịch thất bại',
+    bot_crash: 'bot bị lỗi khi chạy',
+    bot_invalid_json: 'bot trả về dữ liệu không hợp lệ',
+    bot_invalid_response: 'bot trả về nước đi không hợp lệ',
+    bot_empty_output: 'bot không trả về nước đi',
+    bot_illegal_move: 'bot đi nước không hợp lệ',
+    engine_error: 'lỗi engine',
+  };
+  return labels[reason] || (reason ? `lý do: ${reason}` : 'kết quả luật chơi');
+}
+
+function showLiveGameResultModal(snapshot, completedGame = null, completedSnapshot = null) {
   const series = snapshot.series;
+  const resultSnapshot = completedSnapshot || snapshot;
   if (snapshot.status !== 'finished' && snapshot.status !== 'completed') return;
   if (snapshot.status === 'finished' && series?.active) {
     const gameNumber = Number(completedGame || series.currentGame || snapshot.gameNumber || 1);
@@ -10669,9 +10699,10 @@ function showLiveGameResultModal(snapshot, completedGame = null) {
       ? (series.winsA > series.winsB ? 'A' : series.winsB > series.winsA ? 'B' : (series.winsA === series.winsB && !series.active ? 'draw' : null))
       : null);
   const winnerSide = transition
-    ? snapshot.winner
+    ? resultSnapshot.winner
     : (seriesDecidedWinner || (series ? null : snapshot.winner));
-  const winnerParticipants = transition ? currentParticipants : (snapshot.participants || currentParticipants);
+  const resultParticipants = resultSnapshot.currentParticipants || resultSnapshot.participants || currentParticipants;
+  const winnerParticipants = transition ? resultParticipants : (snapshot.participants || currentParticipants);
   const winnerName = winnerSide && winnerSide !== 'draw'
     ? (winnerSide === 'A' ? (playerA?.participantName || fixedA?.participantName || fixedA?.name || winnerParticipants?.A?.participantName)
       : winnerSide === 'B' ? (playerB?.participantName || fixedB?.participantName || fixedB?.name || winnerParticipants?.B?.participantName)
@@ -10689,8 +10720,9 @@ function showLiveGameResultModal(snapshot, completedGame = null) {
   scoreA?.classList.toggle('is-leading', Boolean(series && (series.winsA ?? 0) > (series.winsB ?? 0)));
   scoreB?.classList.toggle('is-leading', Boolean(series && (series.winsB ?? 0) > (series.winsA ?? 0)));
   const winnerLabel = $('#live-game-result-winner');
+  const resultReason = liveTerminationLabel(resultSnapshot.terminationReason || resultSnapshot.state?.winReason);
   if (winnerLabel) winnerLabel.textContent = transition
-    ? 'Kết quả ván đã được ghi nhận'
+    ? (winnerSide === 'draw' ? `Ván ${game} hòa · ${resultReason}` : (winnerName ? `${winnerName} thắng Ván ${game} · ${resultReason}` : `Ván ${game} đã kết thúc · ${resultReason}`))
     : (winnerSide === 'draw' ? 'Trận đấu kết thúc với kết quả hòa' : (winnerName ? `${winnerName} chiến thắng` : 'Kết quả đã được ghi nhận'));
   if (next) next.textContent = transition
     ? (nextGame ? `Đang chuẩn bị Ván ${nextGame}` : 'Đang chuẩn bị ván tiếp theo')
@@ -10833,7 +10865,6 @@ function playLiveHistoryFrame() {
   const latest = state.liveLatestSnapshot;
   if (!latest || state.activeView !== 'replay-view') return;
   const frame = state.liveHistoryQueue.shift();
-  const hasMove = Boolean(frame?.state?.lastMove || frame?.latestMove);
   if (frame) {
     renderLiveMatchSnapshot({
       ...latest,
@@ -10848,23 +10879,24 @@ function playLiveHistoryFrame() {
     });
     state.liveLastSequence = Math.max(state.liveLastSequence, Number(frame.sequence) || 0);
   }
-  // Give each actual move enough time to be readable instead of flashing
-  // through several turns when the live endpoint returns a burst of snapshots.
+  // Live mode must reflect the engine as soon as a snapshot arrives. Replay
+  // controls can animate history deliberately; live spectators must not wait
+  // 800-900ms per queued snapshot before seeing the next Bot move.
   state.liveHistoryTimer = state.liveHistoryQueue.length
-    ? setTimeout(playLiveHistoryFrame, hasMove ? 900 : 800)
+    ? setTimeout(playLiveHistoryFrame, 0)
     : null;
   if (!state.liveHistoryTimer && state.livePendingSnapshot && !state.liveTransitionTimer) {
     const pending = state.livePendingSnapshot;
     const completedGame = state.liveHistoryGame;
     state.livePendingSnapshot = null;
-    showLiveGameResultModal({ ...pending, status: 'finished' }, completedGame);
+    showLiveGameResultModal({ ...pending, status: 'finished' }, completedGame, state.liveCompletedSnapshot);
     const transitionToken = state.liveTransitionToken;
     state.liveTransitionTimer = setTimeout(() => {
       if (transitionToken !== state.liveTransitionToken || state.activeView !== 'replay-view') return;
       state.liveTransitionTimer = null;
       hideLiveGameResultModal();
       updateLiveHistory(pending);
-    }, 300);
+    }, 1500);
   }
 }
 
@@ -10884,6 +10916,9 @@ function updateLiveHistory(snapshot) {
   const sameSequenceLifecycleUpdate = currentGame !== null && game === currentGame && incomingSequence === lastSequence && !sameFrame;
   if (currentGame !== null && (game < currentGame || (game === currentGame && incomingSequence < lastSequence))) return;
   if (sameFrame) return;
+  if (snapshot.status === 'finished' && snapshot.series?.active) {
+    state.liveCompletedSnapshot = snapshot;
+  }
   state.liveAcceptedSnapshot = snapshot;
   if (snapshot.status === 'in_progress' && state.liveHistoryGame !== null && game > state.liveHistoryGame) {
     hideLiveGameResultModal();
@@ -10892,6 +10927,7 @@ function updateLiveHistory(snapshot) {
     .filter(frame => (frame.gameNumber || 1) === game)
     .sort((left, right) => left.sequence - right.sequence);
   if (state.liveStreamMode) {
+    const previousGame = state.liveHistoryGame;
     state.liveHistoryGame = game;
     state.liveHistory = history;
     state.liveHistoryIndex = history.length;
@@ -10899,6 +10935,21 @@ function updateLiveHistory(snapshot) {
     state.liveLastSequence = Number(snapshot.sequence) || Number(history.at(-1)?.sequence) || 0;
     if (state.liveHistoryTimer) clearTimeout(state.liveHistoryTimer);
     state.liveHistoryTimer = null;
+    if (previousGame !== null && game > previousGame) {
+      if (state.liveTransitionTimer) clearTimeout(state.liveTransitionTimer);
+      state.livePendingSnapshot = snapshot;
+      showLiveGameResultModal({ ...snapshot, status: 'finished' }, previousGame, state.liveCompletedSnapshot);
+      const transitionToken = state.liveTransitionToken;
+      state.liveTransitionTimer = setTimeout(() => {
+        if (transitionToken !== state.liveTransitionToken || state.activeView !== 'replay-view') return;
+        state.liveTransitionTimer = null;
+        const pending = state.livePendingSnapshot;
+        state.livePendingSnapshot = null;
+        hideLiveGameResultModal();
+        if (pending && state.activeView === 'replay-view') renderLiveMatchSnapshot(pending);
+      }, 1500);
+      return;
+    }
     renderLiveMatchSnapshot(snapshot);
     return;
   }
@@ -10921,8 +10972,10 @@ function updateLiveHistory(snapshot) {
     if (previousGame !== null && game > previousGame) {
       if (state.liveTransitionTimer) clearTimeout(state.liveTransitionTimer);
       state.livePendingSnapshot = snapshot;
+      const completedSnapshot = state.liveCompletedSnapshot;
+      showLiveGameResultModal({ ...snapshot, status: 'finished' }, previousGame, completedSnapshot);
       const resultText = $('#r-result-text');
-      if (resultText) resultText.textContent = `Ván ${previousGame} hoàn tất · Tỷ số ${snapshot.series?.winsA ?? 0}-${snapshot.series?.winsB ?? 0} · Đang chuyển sang Ván ${game}`;
+      if (resultText) resultText.textContent = `Ván ${previousGame} hoàn tất · ${completedSnapshot?.winner === 'draw' ? 'Hòa' : completedSnapshot?.winner ? `${completedSnapshot.winner} thắng` : 'Đã có kết quả'} · Tỷ số ${snapshot.series?.winsA ?? 0}-${snapshot.series?.winsB ?? 0} · Đang chuyển sang Ván ${game}`;
       const transitionToken = state.liveTransitionToken;
       state.liveTransitionTimer = setTimeout(() => {
         if (transitionToken !== state.liveTransitionToken || state.activeView !== 'replay-view') return;
@@ -10931,7 +10984,7 @@ function updateLiveHistory(snapshot) {
         state.livePendingSnapshot = null;
         if (pending && state.activeView === 'replay-view') renderLiveMatchSnapshot(pending);
         if (!state.liveHistoryTimer && state.liveHistoryQueue.length) playLiveHistoryFrame();
-      }, 0);
+      }, 1500);
     } else {
       renderLiveMatchSnapshot(snapshot);
     }
@@ -10952,7 +11005,10 @@ function scheduleLiveMatchPoll() {
   if (!state.liveMatchContext || state.activeView !== 'replay-view') return;
   if (state.liveMatchPollingTimer) return;
   const transitioning = state.liveLatestSnapshot?.status === 'finished' && state.liveLatestSnapshot?.series?.active;
-  const baseDelay = transitioning ? 500 : 1500;
+  // SSE is the primary path. Polling is only a fallback, so keep its first
+  // retry short enough that a move is visible promptly when SSE is unavailable
+  // without creating a tight request loop (the server rate-limits this path).
+  const baseDelay = transitioning ? 250 : 250;
   const delay = Math.min(30_000, state.livePollBackoffMs || baseDelay) + Math.floor(Math.random() * 250);
   state.liveMatchPollingTimer = setTimeout(() => { void pollLiveMatch(); }, delay);
 }

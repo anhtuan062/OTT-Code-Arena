@@ -456,6 +456,30 @@ describe('source revision Docker adapter contracts', () => {
     }
   });
 
+  it('prepares a pinned C++ revision without executing a runtime container', async () => {
+    const workingDirBase = await fs.mkdtemp(path.join(os.tmpdir(), 'ott-revision-prepare-'));
+    try {
+      const executor = createRevisionDockerExecutor({
+        ...config(), workingDirBase, compiledArtifactCacheDir: path.join(workingDirBase, 'cache'),
+      }) as any;
+      vi.spyOn(executor, 'isAvailable').mockResolvedValue(true);
+      const run = vi.spyOn(executor, 'runContainer').mockResolvedValue({
+        code: 0, stdout: '', stderr: '', timedOut: false, killed: false, cancelled: false,
+      });
+      const result = await executor.prepareRevision(
+        { executionId: 'prepare-a', matchId: 'match-prepare', turn: 0, player: 'A', revisionScopeId: 'match-prepare' },
+        sourceRevision('cpp', 'int main() { return 0; }'),
+      );
+      expect(result.success).toBe(true);
+      expect(run).toHaveBeenCalledTimes(1);
+      expect(String(run.mock.calls[0]?.[0])).toContain('-compile');
+      expect(executor.preparedArtifacts.size).toBe(1);
+      await executor.releaseRevisionScope('match-prepare');
+    } finally {
+      await fs.rm(workingDirBase, { recursive: true, force: true });
+    }
+  });
+
   it('reuses a verified C++ artifact across separate match executions', async () => {
     const workingDirBase = await fs.mkdtemp(path.join(os.tmpdir(), 'ott-cross-match-cache-'));
     try {

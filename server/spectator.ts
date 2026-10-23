@@ -6,7 +6,7 @@ import { getSeriesSides } from '../tournament/series.js';
 const MAX_HISTORY_FRAMES = 120;
 const PUBLIC_TERMINATIONS = new Set([
   'all_pieces_captured', 'goal_reached', 'turn_limit', 'repetition',
-  'insufficient_material', 'bot_timeout', 'bot_crash', 'bot_invalid_json',
+  'insufficient_material', 'bot_timeout', 'bot_compilation_failed', 'bot_crash', 'bot_invalid_json',
   'bot_invalid_response', 'bot_empty_output', 'bot_illegal_move', 'engine_error', 'unknown',
 ]);
 

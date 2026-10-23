@@ -879,6 +879,10 @@ export class TournamentCommitCoordinator extends EventEmitter {
         const res = commitMatchResultAndResolveSlots(tournament, pairingId, matchResult);
         resolvedSlotCount = res.resolvedCount;
         newlyExecutablePairings = res.newlyExecutablePairings;
+        if (isTournamentComplete(tournament)) {
+          const allMatchRecords = await this.repository.listMatchResults(tournamentId);
+          tournament.standings = computeStandings(tournament.participants, allMatchRecords, tournament.scoringConfig);
+        }
       } else {
         // Single round robin / legacy tournament
         pairing.status = 'completed';

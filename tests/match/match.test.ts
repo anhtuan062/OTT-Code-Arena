@@ -140,6 +140,108 @@ describe('Match Runner', () => {
       expect(MatchRunner.createReplay(result).metadata?.sourceRevisions).toEqual(result.metadata?.sourceRevisions);
     });
 
+    it('prepares both source revisions in parallel before the first turn executes', async () => {
+      const makeExecution = (player: 'A' | 'B', runtimeId: 'cpp' | 'python3') => ({
+        kind: 'source-revision' as const,
+        competitorId: `competitor-${player.toLowerCase()}`,
+        botId: `bot-${player.toLowerCase()}`,
+        revisionId: `revision-${player.toLowerCase()}`,
+        runtimeId,
+        sourceDigest: 'a'.repeat(64),
+      });
+      const executionA = makeExecution('A', 'cpp');
+      const executionB = makeExecution('B', 'python3');
+      const events: string[] = [];
+      const revisionExecutor: SourceRevisionExecutor = {
+        async prepareRevision(_context, revision) {
+          events.push(`prepare-${revision.execution.botId}`);
+          await new Promise(resolve => setTimeout(resolve, 5));
+          events.push(`prepared-${revision.execution.botId}`);
+          return { success: true, exitCode: 0, timedOut: false, stdout: '', stderr: '', durationMs: 5 };
+        },
+        async executeRevision(_context, revision, request) {
+          events.push(`execute-${revision.execution.botId}`);
+          const move = request.legal_moves[0]!;
+          return {
+            success: true,
+            response: { move: { piece_id: move.piece_id, from: move.from, to: move.to } },
+            exitCode: 0, timedOut: false, stdout: '', stderr: '', durationMs: 1,
+          };
+        },
+      };
+      const sourceA: BotDefinition = { botId: 'bot-a', player: 'A', command: '', args: [], execution: executionA };
+      const sourceB: BotDefinition = { botId: 'bot-b', player: 'B', command: '', args: [], execution: executionB };
+      const runner = createMatchRunner(createTestConfig({ maxTurns: 1 }), sourceA, sourceB, {}, undefined,
+        revisionExecutor, async () => Buffer.from('pinned source'));
+
+      const result = await runner.run();
+
+      expect(result.status).toBe('finished');
+      expect(events.slice(0, 2).sort()).toEqual(['prepare-bot-a', 'prepare-bot-b']);
+      expect(events.indexOf('execute-bot-a')).toBeGreaterThan(events.indexOf('prepared-bot-a'));
+      expect(events.indexOf('execute-bot-a')).toBeGreaterThan(events.indexOf('prepared-bot-b'));
+      expect(events).not.toContain('execute-bot-b');
+    });
+
+    it('forfeits the bot whose source revision fails during prewarm', async () => {
+      const makeExecution = (player: 'A' | 'B') => ({
+        kind: 'source-revision' as const,
+        competitorId: `competitor-${player.toLowerCase()}`,
+        botId: `bot-${player.toLowerCase()}`,
+        revisionId: `revision-${player.toLowerCase()}`,
+        runtimeId: 'cpp' as const,
+        sourceDigest: 'a'.repeat(64),
+      });
+      const sourceA: BotDefinition = { botId: 'bot-a', player: 'A', command: '', args: [], execution: makeExecution('A') };
+      const sourceB: BotDefinition = { botId: 'bot-b', player: 'B', command: '', args: [], execution: makeExecution('B') };
+      const revisionExecutor: SourceRevisionExecutor = {
+        async prepareRevision(_context, revision) {
+          if (revision.execution.botId === 'bot-a') {
+            return {
+              success: false,
+              error: { code: 'PROCESS_CRASHED', message: 'C++ compilation failed', stage: 'compilation' },
+              exitCode: 1, timedOut: false, stdout: '', stderr: 'compile error', durationMs: 4,
+            };
+          }
+          return { success: true, exitCode: 0, timedOut: false, stdout: '', stderr: '', durationMs: 4 };
+        },
+        async executeRevision() { throw new Error('runtime must not execute after prewarm failure'); },
+      };
+      const runner = createMatchRunner(createTestConfig(), sourceA, sourceB, {}, undefined,
+        revisionExecutor, async () => Buffer.from('source'));
+
+      const result = await runner.run();
+
+      expect(result.winner).toBe('B');
+      expect(result.terminationReason).toBe('bot_compilation_failed');
+      expect(result.turnCount).toBe(1);
+      expect(result.turnLog[0]).toEqual(expect.objectContaining({ turn: 0, player: 'A' }));
+      expect(result.metadata?.executionDiagnostics).toEqual(expect.arrayContaining([
+        expect.objectContaining({ player: 'A', failureStage: 'compilation', errorCode: 'PROCESS_CRASHED', engineAcceptedMove: false }),
+      ]));
+    });
+
+    it('does not forfeit a bot when prewarm reports Docker infrastructure failure', async () => {
+      const execution = {
+        kind: 'source-revision' as const, competitorId: 'competitor-a', botId: 'bot-a',
+        revisionId: 'revision-a', runtimeId: 'cpp' as const, sourceDigest: 'a'.repeat(64),
+      };
+      const sourceBot: BotDefinition = { botId: 'bot-a', player: 'A', command: '', args: [], execution };
+      const revisionExecutor: SourceRevisionExecutor = {
+        async prepareRevision() {
+          return {
+            success: false,
+            error: { code: 'EXECUTOR_ERROR', message: 'Docker daemon unavailable', stage: 'docker_infrastructure' },
+            exitCode: -1, timedOut: false, stdout: '', stderr: '', durationMs: 1,
+          };
+        },
+      };
+      const runner = createMatchRunner(createTestConfig(), sourceBot, playerB, {}, undefined,
+        revisionExecutor, async () => Buffer.from('source'));
+
+      await expect(runner.run()).rejects.toThrow('Docker daemon unavailable');
+    });
+
     it('persists bounded executor timings in match and replay diagnostics', async () => {
       const execution = {
         kind: 'source-revision' as const,

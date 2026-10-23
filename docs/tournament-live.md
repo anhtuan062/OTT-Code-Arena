@@ -82,6 +82,7 @@ Hệ thống sử dụng bộ điều phối `FairMatchDispatcher` kết hợp v
 - **Ván 3** (nếu cần): Quyết định bên đi trước dựa trên mã băm SHA-256 tất định của hạt giống trận đấu (`seed`).
 - **Bảo toàn danh tính**: Điểm số và kết quả trận được gắn cố định với ID của thí sinh (`participantId`), không bị phụ thuộc vào việc đổi bên A/B giữa các ván.
 - **Dừng sớm**: Loạt trận kết thúc ngay khi một bên đạt đủ 2 ván thắng (ví dụ 2-0).
+- **Phân định ván 3**: Nếu ván 3 hòa, bên còn nhiều quân hơn thắng ván 3; nếu số quân bằng nhau, phe A thua và phe B thắng.
 - **Khoảng nghỉ**: Giữa các ván trong một series có khoảng nghỉ trễ 2.5 giây phía server để giải phóng container và chuẩn bị ván kế tiếp.
 
 ---
