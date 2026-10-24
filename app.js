@@ -146,6 +146,9 @@ function localizeErrorMessage(message) {
     'Request failed (409).': 'Thao tác bị trùng hoặc xung đột với dữ liệu hiện tại.',
     'Request failed (429).': 'Bạn đã thực hiện quá nhiều yêu cầu. Hãy thử lại sau.',
     'Unable to load data': 'Không thể tải dữ liệu.',
+    'API proxy is not configured': 'Kết nối API chưa được cấu hình.',
+    'API backend timeout': 'Máy chủ API phản hồi quá thời gian. Vui lòng thử lại sau.',
+    'API backend unavailable': 'Máy chủ API hiện không khả dụng. Vui lòng thử lại sau.',
   };
   if (exact[value]) return exact[value];
   if (/^Tournament .* already exists$/i.test(value)) return 'Giải đấu này đã tồn tại.';
@@ -207,7 +210,7 @@ function localizeErrorMessage(message) {
   if (/^(?:Cannot|The|No|Not|An|This|Maximum|Need|Too many|Participant|Pairing|Tournament|Match|Replay|Source|Bot|Registration|Visibility|Scoring|Winner|Reason|CAPACITY_)/i.test(value)) {
     return 'Không thể hoàn tất thao tác. Vui lòng kiểm tra lại dữ liệu và thử lại.';
   }
-  if (/\b(?:is|are|must|cannot|failed|not|already|requires|unavailable|exceeds|pending|configured|belongs|completed|active|status|error|execution|validation|source|revision|tournament|pairing|match|participant|request|sandbox|docker)\b/i.test(value)) {
+  if (/\b(?:is|are|must|cannot|failed|failure|not|already|requires|unavailable|exceeds|pending|configured|belongs|completed|active|status|error|execution|validation|source|revision|tournament|pairing|match|participant|request|sandbox|docker|compile|startup|protocol|legal|smoke|infrastructure|produced|response|output|timed|terminated|timeout)\b/i.test(value)) {
     return 'Không thể hoàn tất thao tác. Vui lòng kiểm tra lại dữ liệu và thử lại.';
   }
   return value;
