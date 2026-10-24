@@ -149,6 +149,49 @@ function localizeErrorMessage(message) {
   };
   if (exact[value]) return exact[value];
   if (/^Tournament .* already exists$/i.test(value)) return 'Giải đấu này đã tồn tại.';
+  if (/^New tournaments use the multi_stage format$/i.test(value)) return 'Giải đấu mới phải dùng thể thức nhiều giai đoạn.';
+  if (/^New tournaments use stage-specific series:/i.test(value)) return 'Giải đấu mới dùng chuỗi trận theo từng giai đoạn: Vòng bảng BO2 và vòng loại BO3.';
+  if (/^New tournaments use fixed scoring:/i.test(value)) return 'Giải đấu mới dùng cách tính điểm cố định: thắng 3, hòa 1, thua 0.';
+  if (/^New tournament Bot limits are managed by the platform/i.test(value)) return 'Giới hạn Bot của giải đấu mới được hệ thống quản lý và không thể chỉnh sửa.';
+  if (/^New tournaments only allow maxTurns/i.test(value)) return 'Giải đấu mới chỉ cho phép chỉnh sửa số lượt tối đa và thời gian mỗi lượt.';
+  if (/^Tournament format, rules, scoring and technical limits are locked/i.test(value)) return 'Thể thức, luật, điểm số và giới hạn kỹ thuật đã bị khóa sau khi mở đăng ký.';
+  if (/^Maximum participants reached$/i.test(value)) return 'Đã đạt số người tham gia tối đa.';
+  if (/^Need at least (\d+) participants for (.+)$/i.test(value)) {
+    const [, count, format] = value.match(/^Need at least (\d+) participants for (.+)$/i) || [];
+    return `Cần ít nhất ${count} người tham gia cho thể thức ${format}.`;
+  }
+  if (/^Too many participants for (.+) \(max (\d+)\)$/i.test(value)) {
+    const [, format, max] = value.match(/^Too many participants for (.+) \(max (\d+)\)$/i) || [];
+    return `Số người tham gia vượt quá giới hạn của thể thức ${format} (tối đa ${max}).`;
+  }
+  if (/^An active participation request already exists$/i.test(value)) return 'Đã có một yêu cầu tham gia đang hoạt động.';
+  if (/^This Bot is already a tournament participant$/i.test(value)) return 'Bot này đã là người tham gia giải đấu.';
+  if (/^Participant .* already registered$/i.test(value)) return 'Người tham gia này đã được đăng ký.';
+  if (/^Participation request has already been reviewed$/i.test(value)) return 'Yêu cầu tham gia này đã được xét duyệt trước đó.';
+  if (/^Only approved or rejected participation requests can be undone$/i.test(value)) return 'Chỉ có thể hoàn tác yêu cầu đã được duyệt hoặc từ chối.';
+  if (/^The next stage is waiting for the organizer to start it$/i.test(value)) return 'Giai đoạn tiếp theo đang chờ Ban tổ chức bắt đầu.';
+  if (/^No pending matches to run$/i.test(value)) return 'Không có trận đấu chờ chạy.';
+  if (/^No schedule generated\./i.test(value)) return 'Chưa có lịch thi đấu. Hãy tạo lịch trước.';
+  if (/^Not all matches completed$/i.test(value)) return 'Chưa hoàn tất tất cả trận đấu.';
+  if (/^Tournament results are incomplete/i.test(value)) return 'Kết quả giải đấu chưa hoàn tất hoặc không nhất quán.';
+  if (/^Tournament execution cancelled$/i.test(value)) return 'Đã hủy thực thi giải đấu.';
+  if (/^Tournament execution paused for shutdown$/i.test(value)) return 'Thực thi giải đấu đang tạm dừng để tắt hệ thống.';
+  if (/^Tournament not running \(status: (.+)\)$/i.test(value)) {
+    const [, status] = value.match(/^Tournament not running \(status: (.+)\)$/i) || [];
+    return `Giải đấu hiện không chạy (trạng thái: ${localizeStatus(status)}).`;
+  }
+  if (/^Match execution failed:/i.test(value)) return 'Thực thi trận đấu thất bại. Vui lòng xem chi tiết trận đấu để biết nguyên nhân.';
+  if (/^Match execution timed out$/i.test(value)) return 'Trận đấu đã quá thời gian thực thi.';
+  if (/^Match result persistence failed/i.test(value)) return 'Không thể lưu kết quả trận đấu.';
+  if (/^Docker execution infrastructure failed$/i.test(value)) return 'Hạ tầng chạy Bot đang gặp lỗi. Vui lòng thử lại sau.';
+  if (/^Pinned source revision unavailable/i.test(value)) return 'Không thể sử dụng phiên bản mã nguồn đã ghim.';
+  if (/^Elimination (?:match|series) ended in a draw/i.test(value)) return 'Trận loại trực tiếp hòa và đang chờ phân định.';
+  if (/^Cannot (?:edit|register|unregister|generate schedule|start|request participation|review|undo|complete|publish|close|run|requeue|retry|rerun)/i.test(value)) return 'Không thể thực hiện thao tác này với trạng thái hiện tại.';
+  if (/^Pairing .* is already being executed$/i.test(value)) return 'Trận đấu này đang được thực thi.';
+  if (/^Pairing .* is not available$/i.test(value)) return 'Trận đấu này hiện không khả dụng.';
+  if (/^Pairing .* (?:cannot be requeued|cannot be retried)/i.test(value)) return 'Không thể đưa trận đấu vào hàng đợi chạy lại ở trạng thái hiện tại.';
+  if (/^Pairing .* lease expired$/i.test(value)) return 'Phiên xử lý trận đấu đã hết hạn. Vui lòng thử lại.';
+  if (/^Pairing .* not found$/i.test(value)) return 'Không tìm thấy trận đấu.';
   if (/^Cannot register:/i.test(value)) return value.replace(/^Cannot register:/i, 'Không thể đăng ký:');
   if (/^Participant .* already registered$/i.test(value)) return 'Người tham gia này đã được đăng ký.';
   if (/^Tournament .* not found$/i.test(value)) return 'Không tìm thấy giải đấu.';
@@ -161,6 +204,9 @@ function localizeErrorMessage(message) {
   if (/^Unsupported\b/i.test(value)) return 'Thao tác hoặc dữ liệu không được hỗ trợ.';
   if (/^Only\b/i.test(value)) return 'Thao tác này không được hỗ trợ với dữ liệu hiện tại.';
   if (/\bnot found$/i.test(value)) return 'Không tìm thấy dữ liệu yêu cầu.';
+  if (/^(?:Cannot|The|No|Not|An|This|Maximum|Need|Too many|Participant|Pairing|Tournament|Match|Replay|Source|Bot|Registration|Visibility|Scoring|Winner|Reason|CAPACITY_)/i.test(value)) {
+    return 'Không thể hoàn tất thao tác. Vui lòng kiểm tra lại dữ liệu và thử lại.';
+  }
   return value;
 }
 
