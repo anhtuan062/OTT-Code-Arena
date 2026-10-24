@@ -306,7 +306,7 @@ async function importBotSourceFile(event) {
     syncSourceEditorTools();
     setWorkspaceStatus(`Đã tải ${file.name}`);
   } catch (error) {
-    setSourceError(error?.message || 'Không thể đọc file mã nguồn.');
+    setSourceError(localizeErrorMessage(error?.message || 'Không thể đọc file mã nguồn.'));
   } finally {
     resetInput();
   }
@@ -692,7 +692,7 @@ async function loadRevisionSource(revision, mode = 'view', confirmBeforeReplace 
     // Opening a revision as an editable draft does not itself change the
     // source. Mark it dirty only after the editor emits an input event.
     setSourceDirty(false);
-  } catch (error) { setSourceError(error.message || 'Không thể đọc phiên bản mã nguồn.'); }
+  } catch (error) { setSourceError(localizeErrorMessage(error.message || 'Không thể đọc phiên bản mã nguồn.')); }
 }
 
 async function loadBotRevisions(bot) {
@@ -805,7 +805,7 @@ async function openBotWorkspace(bot = null) {
   setSourceError();
   if (bot) {
     try { await loadBotRevisions(bot); }
-    catch (error) { state.sourceRevisions = []; renderRevisionList(); setSourceError(error.message || 'Không thể tải lịch sử phiên bản.'); }
+    catch (error) { state.sourceRevisions = []; renderRevisionList(); setSourceError(localizeErrorMessage(error.message || 'Không thể tải lịch sử phiên bản.')); }
   } else {
     state.sourceRevisions = [];
     renderRevisionList();
@@ -845,7 +845,7 @@ async function saveBotSource() {
       if (typeof clearBotWorkspaceDraft === 'function') clearBotWorkspaceDraft();
       await loadBotRevisions(bot);
       showToast('Đã lưu phiên bản mã nguồn.', 'success');
-    } catch (error) { setSourceError(error.message || 'Không thể lưu phiên bản mã nguồn.'); setSourceDirty(true); setWorkspaceStatus('Lưu thất bại · Kiểm tra lỗi bên dưới'); throw error; }
+    } catch (error) { setSourceError(localizeErrorMessage(error.message || 'Không thể lưu phiên bản mã nguồn.')); setSourceDirty(true); setWorkspaceStatus('Lưu thất bại · Kiểm tra lỗi bên dưới'); throw error; }
     return true;
   });
   return result === true;
@@ -861,7 +861,7 @@ async function selectRevision(revision) {
     await loadBotRevisions(bot);
     await loadRevisionSource(revision, 'draft', false);
     showToast('Đã chọn phiên bản mã nguồn.', 'success');
-  } catch (error) { setSourceError(error.message || 'Không thể chọn phiên bản mã nguồn.'); }
+  } catch (error) { setSourceError(localizeErrorMessage(error.message || 'Không thể chọn phiên bản mã nguồn.')); }
 }
 
 
@@ -998,7 +998,7 @@ async function submitBot() {
           showToast(`Đã nhập phiên bản${revisionLabel} từ GitHub.`, 'success');
         } else if (state.sourceDirty && !(await saveBotSource())) throw new Error('Không thể hoàn tất việc chọn phiên bản mã nguồn.');
       } catch (error) {
-        if (isBotView()) showBotFormError(error.message || 'Không thể lưu Bot hoặc phiên bản mã nguồn.');
+        if (isBotView()) showBotFormError(localizeErrorMessage(error.message || 'Không thể lưu Bot hoặc phiên bản mã nguồn.'));
         throw error;
       }
     } else {
@@ -1027,7 +1027,7 @@ async function submitBot() {
             $('#save-bot-source').textContent = 'Thử lưu mã nguồn';
           }
         } else if (isBotView()) {
-          showBotFormError(error.message || 'Không thể tạo Bot.');
+          showBotFormError(localizeErrorMessage(error.message || 'Không thể tạo Bot.'));
         }
         throw error;
       }
@@ -1065,7 +1065,7 @@ async function deleteBot() {
   const dialogRevision = state.deleteDialogRevision;
   await runPending(`confirm-delete:${bot.id}`, button, async () => {
     try { await api(`/bots/${bot.id}`, { method: 'DELETE' }); }
-    catch (error) { if (isCurrentView('bots', authRevision, viewRevision) && state.deleteDialogRevision === dialogRevision) { const message = $('#delete-bot-error'); message.textContent = error.message || 'Unable to delete bot.'; message.hidden = false; } throw error; }
+    catch (error) { if (isCurrentView('bots', authRevision, viewRevision) && state.deleteDialogRevision === dialogRevision) { const message = $('#delete-bot-error'); message.textContent = localizeErrorMessage(error.message || 'Không thể xóa Bot.'); message.hidden = false; } throw error; }
     if (!isCurrentView('bots', authRevision, viewRevision)) return;
     if (state.deleteDialogRevision !== dialogRevision) { void loadBots(); return; }
     closeModal('delete-bot-modal');

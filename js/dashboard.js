@@ -212,7 +212,7 @@ async function loadDashboard() {
     });
   } catch (error) {
     if (isCurrentView('dashboard', authRevision, viewRevision)) {
-      state.error = error.message || 'Không thể tải trang tổng quan.';
+      state.error = localizeErrorMessage(error.message || 'Không thể tải trang tổng quan.');
       $('#dash-tourney-count').textContent = '—';
       $('#dash-bot-count').textContent = '—';
       emptyState.hidden = true;

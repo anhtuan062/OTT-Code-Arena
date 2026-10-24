@@ -74,7 +74,7 @@ function bindEvents() {
       setAuthMessage('login', '');
       setAuthenticated(result.user, result.csrfToken);
     } catch (error) {
-      setAuthMessage('login', error.message || 'Đăng nhập không thành công.');
+      setAuthMessage('login', localizeErrorMessage(error.message || 'Đăng nhập không thành công.'));
     }
   }); }, { required: true, feature: 'authentication login form' });
   on('#register-form', 'submit', event => { event.preventDefault(); void runPending('register', $('#register-submit'), async () => {
@@ -87,7 +87,7 @@ function bindEvents() {
       setAuthMessage('register', '');
       setAuthenticated(result.user, result.csrfToken);
     } catch (error) {
-      setAuthMessage('register', error.message || 'Không thể tạo tài khoản.');
+      setAuthMessage('register', localizeErrorMessage(error.message || 'Không thể tạo tài khoản.'));
     }
   }); }, { required: true, feature: 'authentication registration form' });
   on('#logout-button', 'click', () => void runPending('logout', $('#logout-button'), async () => { try { await api('/auth/logout', { method: 'POST' }); } finally { showAuthScreen(); } }));

@@ -207,6 +207,9 @@ function localizeErrorMessage(message) {
   if (/^(?:Cannot|The|No|Not|An|This|Maximum|Need|Too many|Participant|Pairing|Tournament|Match|Replay|Source|Bot|Registration|Visibility|Scoring|Winner|Reason|CAPACITY_)/i.test(value)) {
     return 'Không thể hoàn tất thao tác. Vui lòng kiểm tra lại dữ liệu và thử lại.';
   }
+  if (/\b(?:is|are|must|cannot|failed|not|already|requires|unavailable|exceeds|pending|configured|belongs|completed|active|status|error|execution|validation|source|revision|tournament|pairing|match|participant|request|sandbox|docker)\b/i.test(value)) {
+    return 'Không thể hoàn tất thao tác. Vui lòng kiểm tra lại dữ liệu và thử lại.';
+  }
   return value;
 }
 
@@ -1557,7 +1560,7 @@ async function loadDashboard() {
     });
   } catch (error) {
     if (isCurrentView('dashboard', authRevision, viewRevision)) {
-      state.error = error.message || 'Không thể tải trang tổng quan.';
+      state.error = localizeErrorMessage(error.message || 'Không thể tải trang tổng quan.');
       $('#dash-tourney-count').textContent = '—';
       $('#dash-bot-count').textContent = '—';
       emptyState.hidden = true;
@@ -1889,7 +1892,7 @@ async function importBotSourceFile(event) {
     syncSourceEditorTools();
     setWorkspaceStatus(`Đã tải ${file.name}`);
   } catch (error) {
-    setSourceError(error?.message || 'Không thể đọc file mã nguồn.');
+    setSourceError(localizeErrorMessage(error?.message || 'Không thể đọc file mã nguồn.'));
   } finally {
     resetInput();
   }
@@ -2275,7 +2278,7 @@ async function loadRevisionSource(revision, mode = 'view', confirmBeforeReplace 
     // Opening a revision as an editable draft does not itself change the
     // source. Mark it dirty only after the editor emits an input event.
     setSourceDirty(false);
-  } catch (error) { setSourceError(error.message || 'Không thể đọc phiên bản mã nguồn.'); }
+  } catch (error) { setSourceError(localizeErrorMessage(error.message || 'Không thể đọc phiên bản mã nguồn.')); }
 }
 
 async function loadBotRevisions(bot) {
@@ -2388,7 +2391,7 @@ async function openBotWorkspace(bot = null) {
   setSourceError();
   if (bot) {
     try { await loadBotRevisions(bot); }
-    catch (error) { state.sourceRevisions = []; renderRevisionList(); setSourceError(error.message || 'Không thể tải lịch sử phiên bản.'); }
+    catch (error) { state.sourceRevisions = []; renderRevisionList(); setSourceError(localizeErrorMessage(error.message || 'Không thể tải lịch sử phiên bản.')); }
   } else {
     state.sourceRevisions = [];
     renderRevisionList();
@@ -2428,7 +2431,7 @@ async function saveBotSource() {
       if (typeof clearBotWorkspaceDraft === 'function') clearBotWorkspaceDraft();
       await loadBotRevisions(bot);
       showToast('Đã lưu phiên bản mã nguồn.', 'success');
-    } catch (error) { setSourceError(error.message || 'Không thể lưu phiên bản mã nguồn.'); setSourceDirty(true); setWorkspaceStatus('Lưu thất bại · Kiểm tra lỗi bên dưới'); throw error; }
+    } catch (error) { setSourceError(localizeErrorMessage(error.message || 'Không thể lưu phiên bản mã nguồn.')); setSourceDirty(true); setWorkspaceStatus('Lưu thất bại · Kiểm tra lỗi bên dưới'); throw error; }
     return true;
   });
   return result === true;
@@ -2444,7 +2447,7 @@ async function selectRevision(revision) {
     await loadBotRevisions(bot);
     await loadRevisionSource(revision, 'draft', false);
     showToast('Đã chọn phiên bản mã nguồn.', 'success');
-  } catch (error) { setSourceError(error.message || 'Không thể chọn phiên bản mã nguồn.'); }
+  } catch (error) { setSourceError(localizeErrorMessage(error.message || 'Không thể chọn phiên bản mã nguồn.')); }
 }
 
 
@@ -2581,7 +2584,7 @@ async function submitBot() {
           showToast(`Đã nhập phiên bản${revisionLabel} từ GitHub.`, 'success');
         } else if (state.sourceDirty && !(await saveBotSource())) throw new Error('Không thể hoàn tất việc chọn phiên bản mã nguồn.');
       } catch (error) {
-        if (isBotView()) showBotFormError(error.message || 'Không thể lưu Bot hoặc phiên bản mã nguồn.');
+        if (isBotView()) showBotFormError(localizeErrorMessage(error.message || 'Không thể lưu Bot hoặc phiên bản mã nguồn.'));
         throw error;
       }
     } else {
@@ -2610,7 +2613,7 @@ async function submitBot() {
             $('#save-bot-source').textContent = 'Thử lưu mã nguồn';
           }
         } else if (isBotView()) {
-          showBotFormError(error.message || 'Không thể tạo Bot.');
+          showBotFormError(localizeErrorMessage(error.message || 'Không thể tạo Bot.'));
         }
         throw error;
       }
@@ -2648,7 +2651,7 @@ async function deleteBot() {
   const dialogRevision = state.deleteDialogRevision;
   await runPending(`confirm-delete:${bot.id}`, button, async () => {
     try { await api(`/bots/${bot.id}`, { method: 'DELETE' }); }
-    catch (error) { if (isCurrentView('bots', authRevision, viewRevision) && state.deleteDialogRevision === dialogRevision) { const message = $('#delete-bot-error'); message.textContent = error.message || 'Unable to delete bot.'; message.hidden = false; } throw error; }
+    catch (error) { if (isCurrentView('bots', authRevision, viewRevision) && state.deleteDialogRevision === dialogRevision) { const message = $('#delete-bot-error'); message.textContent = localizeErrorMessage(error.message || 'Không thể xóa Bot.'); message.hidden = false; } throw error; }
     if (!isCurrentView('bots', authRevision, viewRevision)) return;
     if (state.deleteDialogRevision !== dialogRevision) { void loadBots(); return; }
     closeModal('delete-bot-modal');
@@ -2735,7 +2738,7 @@ function formatPracticeError(error) {
   if (payload.code === 'EMPTY_OUTPUT' || payload.code === 'MISSING_MOVE') return payload.error || 'Bot không trả về nước đi.';
   if (payload.code === 'INVALID_MOVE') return payload.error || 'Nước đi của Bot không nằm trong danh sách hợp lệ.';
   if (payload.code === 'RESOURCE_LIMIT_EXCEEDED') return payload.error || 'Bot vượt quá giới hạn tài nguyên.';
-  return payload.error || error?.message || 'Không thể chạy thử Bot.';
+  return localizeErrorMessage(payload.error || error?.message || 'Không thể chạy thử Bot.');
 }
 
 function practiceErrorTitle(error) {
@@ -4042,7 +4045,7 @@ async function submitNewTournament() {
           ? await api(`/tournaments/${editingTournament.tournamentId}`, { method: 'PATCH', body: JSON.stringify({ name }) })
           : await api('/tournaments', { method: 'POST', body: JSON.stringify({ name, format: 'multi_stage' }) });
       }
-      catch (requestError) { if (state.user && state.authRevision === authRevision && state.tournamentDialogRevision === dialogRevision) { error.textContent = requestError.message || 'Không thể tạo giải đấu.'; error.hidden = false; } throw requestError; }
+      catch (requestError) { if (state.user && state.authRevision === authRevision && state.tournamentDialogRevision === dialogRevision) { error.textContent = localizeErrorMessage(requestError.message || 'Không thể tạo giải đấu.'); error.hidden = false; } throw requestError; }
       if (!state.user || state.authRevision !== authRevision || state.viewRevision !== viewRevision) return;
       if (state.tournamentDialogRevision !== dialogRevision) return;
       closeModal('add-tourney-modal'); nameInput.value = '';
@@ -8413,7 +8416,7 @@ async function loadRegionalPairings(stageId, regionId, page = 1) {
     if (controller.signal.aborted) return;
     clear(pairingsTarget);
     const errorState = create('div', { className: 'multi-stage-inline-error', attrs: { role: 'alert' } });
-    errorState.append(create('span', { text: error.message || 'Không thể tải lịch đấu khu vực.' }), actionButton('Thử lại', () => loadRegionalPairings(stageId, regionId, page), `regional-retry:${stageId}:${regionId}:${page}`, 'secondary-btn'));
+    errorState.append(create('span', { text: localizeErrorMessage(error.message || 'Không thể tải lịch đấu khu vực.') }), actionButton('Thử lại', () => loadRegionalPairings(stageId, regionId, page), `regional-retry:${stageId}:${regionId}:${page}`, 'secondary-btn'));
     pairingsTarget.appendChild(errorState);
   }
 }
@@ -8845,7 +8848,7 @@ async function loadGroupPairings(stageId, groupId, page = 1) {
     if (controller.signal.aborted) return;
     clear(target);
     const errorState = create('div', { className: 'multi-stage-inline-error', attrs: { role: 'alert' } });
-    errorState.append(create('span', { text: error.message || 'Không thể tải dữ liệu bảng đấu.' }), actionButton('Thử lại', () => loadGroupPairings(stageId, groupId, page), `group-retry:${stageId}:${groupId}:${page}`, 'secondary-btn'));
+    errorState.append(create('span', { text: localizeErrorMessage(error.message || 'Không thể tải dữ liệu bảng đấu.') }), actionButton('Thử lại', () => loadGroupPairings(stageId, groupId, page), `group-retry:${stageId}:${groupId}:${page}`, 'secondary-btn'));
     target.appendChild(errorState);
   }
 }
@@ -9567,7 +9570,7 @@ async function loadKnockoutPairings(stageId, page = 1) {
     if (controller.signal.aborted || !target) return;
     clear(target);
     const errorState = create('div', { className: 'multi-stage-inline-error', attrs: { role: 'alert' } });
-    errorState.append(create('span', { text: error.message || 'Không thể tải nhánh đấu.' }), actionButton('Thử lại', () => loadKnockoutPairings(stageId, page), `knockout-retry:${stageId}:${page}`, 'secondary-btn'));
+    errorState.append(create('span', { text: localizeErrorMessage(error.message || 'Không thể tải nhánh đấu.') }), actionButton('Thử lại', () => loadKnockoutPairings(stageId, page), `knockout-retry:${stageId}:${page}`, 'secondary-btn'));
     target.appendChild(errorState);
   }
 }
@@ -9663,7 +9666,7 @@ function renderMultiStageError(error, retry) {
   if (!workspace) return;
   clear(workspace);
   const errorState = create('div', { className: 'multi-stage-error-state', attrs: { role: 'alert' } });
-  errorState.append(icon('td-icon-circle-x'), create('strong', { text: 'Không thể tải tiến độ giải đấu' }), create('span', { text: error.message || 'Hãy thử lại sau.' }), actionButton('Thử lại', retry, 'multi-stage-retry', 'primary-btn'));
+  errorState.append(icon('td-icon-circle-x'), create('strong', { text: 'Không thể tải tiến độ giải đấu' }), create('span', { text: localizeErrorMessage(error.message || 'Hãy thử lại sau.') }), actionButton('Thử lại', retry, 'multi-stage-retry', 'primary-btn'));
   errorState.querySelector('svg')?.classList.add('td-icon', 'td-icon--lg');
   workspace.appendChild(errorState);
 }
@@ -9983,7 +9986,7 @@ async function refreshTournamentDetail() {
       $('#td-status').className = 'status-badge status-unknown'; $('#td-status').textContent = 'Không khả dụng';
       $('#td-pcount').textContent = '0'; clear($('#td-participants')); clear($('#td-actions')); clear($('#td-standings tbody')); $('#td-standings').hidden = true; $('#td-standings-empty').hidden = false; $('#td-standings-empty').textContent = 'Không thể tải bảng xếp hạng.'; $('#td-next-step').replaceChildren(); $('#td-stats').textContent = ''; renderTournamentPodium(null);
       $('#btn-register-bot').hidden = true;
-      renderMessage($('#td-schedule'), error.message || 'Không thể tải giải đấu.', refreshTournamentDetail);
+      renderMessage($('#td-schedule'), localizeErrorMessage(error.message || 'Không thể tải giải đấu.'), refreshTournamentDetail);
     }
   }
 }
@@ -10080,7 +10083,7 @@ async function renderParticipationRequestsV2(tournamentId, status) {
       list.appendChild(row);
     });
   } catch (error) {
-    renderMessage(list, error.message || 'Không thể tải yêu cầu tham gia.', () => renderParticipationRequestsV2(tournamentId, status));
+    renderMessage(list, localizeErrorMessage(error.message || 'Không thể tải yêu cầu tham gia.'), () => renderParticipationRequestsV2(tournamentId, status));
   }
 }
 
@@ -10125,7 +10128,7 @@ async function renderParticipationRequests(tournamentId, status) {
       list.appendChild(row);
     });
   } catch (error) {
-    list.appendChild(create('p', { text: error.message || 'Không thể tải yêu cầu tham gia.' }));
+    list.appendChild(create('p', { text: localizeErrorMessage(error.message || 'Không thể tải yêu cầu tham gia.') }));
   }
 }
 
@@ -10485,7 +10488,7 @@ async function submitTournamentRegistration() {
     const endpoint = state.user?.role === 'competitor' ? `/tournaments/${tournamentId}/participation-requests` : `/tournaments/${tournamentId}/register`;
     let result;
     try { result = await api(endpoint, { method: 'POST', body: JSON.stringify({ participantName, botId, revisionId }) }); }
-    catch (requestError) { if (state.authRevision === authRevision && ['dashboard', 'tournaments', 'tournament-detail'].includes(state.activeView) && state.viewRevision === viewRevision && state.registrationDialogRevision === dialogRevision) { error.textContent = requestError.message || 'Unable to register bot.'; error.hidden = false; } throw requestError; }
+    catch (requestError) { if (state.authRevision === authRevision && ['dashboard', 'tournaments', 'tournament-detail'].includes(state.activeView) && state.viewRevision === viewRevision && state.registrationDialogRevision === dialogRevision) { error.textContent = localizeErrorMessage(requestError.message || 'Không thể đăng ký Bot.'); error.hidden = false; } throw requestError; }
     if (state.authRevision !== authRevision || state.registrationDialogRevision !== dialogRevision) return;
     state.registrationSubmission = { ...result, tournamentId };
     renderRegistrationSubmissionStatus(state.registrationSubmission);
@@ -10545,7 +10548,7 @@ async function populateRevisionSelect(botId) {
     updateRegistrationRevisionSummary(select.value);
     if (!supportedRevisions.length) setRegistrationError('Bot chưa có phiên bản C++17 hoặc Python 3 để tham gia.');
   } catch (error) {
-    setRegistrationError(error.message || 'Không thể tải phiên bản mã nguồn.');
+    setRegistrationError(localizeErrorMessage(error.message || 'Không thể tải phiên bản mã nguồn.'));
   }
 }
 
@@ -11185,7 +11188,7 @@ async function pollLiveMatch() {
     $('#replay-loading').hidden = false;
     if (state.liveMatchContext !== context || state.activeView !== 'replay-view') return;
     if (error?.status === 429) state.livePollBackoffMs = Math.min(30_000, Math.max(3_000, (state.livePollBackoffMs || 1500) * 2));
-    const resultText = $('#r-result-text'); if (resultText) resultText.textContent = error.message || 'Không thể tải dữ liệu trực tiếp';
+    const resultText = $('#r-result-text'); if (resultText) resultText.textContent = localizeErrorMessage(error.message || 'Không thể tải dữ liệu trực tiếp');
     scheduleLiveMatchPoll();
   }
 }
@@ -11727,7 +11730,7 @@ async function playReplay(tournamentId, matchId, seriesContext = null) {
       setReplayLoading(false);
       $('#replay-content').hidden = true;
       const seriesCard = $('#replay-series-card'); if (seriesCard) seriesCard.hidden = true;
-      $('#replay-error-message').textContent = error.message || 'Không thể tải dữ liệu xem lại.';
+      $('#replay-error-message').textContent = localizeErrorMessage(error.message || 'Không thể tải dữ liệu xem lại.');
       $('#replay-error').hidden = false;
     }
     return;
@@ -12889,7 +12892,7 @@ function bindEvents() {
       setAuthMessage('login', '');
       setAuthenticated(result.user, result.csrfToken);
     } catch (error) {
-      setAuthMessage('login', error.message || 'Đăng nhập không thành công.');
+      setAuthMessage('login', localizeErrorMessage(error.message || 'Đăng nhập không thành công.'));
     }
   }); }, { required: true, feature: 'authentication login form' });
   on('#register-form', 'submit', event => { event.preventDefault(); void runPending('register', $('#register-submit'), async () => {
@@ -12902,7 +12905,7 @@ function bindEvents() {
       setAuthMessage('register', '');
       setAuthenticated(result.user, result.csrfToken);
     } catch (error) {
-      setAuthMessage('register', error.message || 'Không thể tạo tài khoản.');
+      setAuthMessage('register', localizeErrorMessage(error.message || 'Không thể tạo tài khoản.'));
     }
   }); }, { required: true, feature: 'authentication registration form' });
   on('#logout-button', 'click', () => void runPending('logout', $('#logout-button'), async () => { try { await api('/auth/logout', { method: 'POST' }); } finally { showAuthScreen(); } }));

@@ -776,7 +776,7 @@ async function submitNewTournament() {
           ? await api(`/tournaments/${editingTournament.tournamentId}`, { method: 'PATCH', body: JSON.stringify({ name }) })
           : await api('/tournaments', { method: 'POST', body: JSON.stringify({ name, format: 'multi_stage' }) });
       }
-      catch (requestError) { if (state.user && state.authRevision === authRevision && state.tournamentDialogRevision === dialogRevision) { error.textContent = requestError.message || 'Không thể tạo giải đấu.'; error.hidden = false; } throw requestError; }
+      catch (requestError) { if (state.user && state.authRevision === authRevision && state.tournamentDialogRevision === dialogRevision) { error.textContent = localizeErrorMessage(requestError.message || 'Không thể tạo giải đấu.'); error.hidden = false; } throw requestError; }
       if (!state.user || state.authRevision !== authRevision || state.viewRevision !== viewRevision) return;
       if (state.tournamentDialogRevision !== dialogRevision) return;
       closeModal('add-tourney-modal'); nameInput.value = '';
@@ -5147,7 +5147,7 @@ async function loadRegionalPairings(stageId, regionId, page = 1) {
     if (controller.signal.aborted) return;
     clear(pairingsTarget);
     const errorState = create('div', { className: 'multi-stage-inline-error', attrs: { role: 'alert' } });
-    errorState.append(create('span', { text: error.message || 'Không thể tải lịch đấu khu vực.' }), actionButton('Thử lại', () => loadRegionalPairings(stageId, regionId, page), `regional-retry:${stageId}:${regionId}:${page}`, 'secondary-btn'));
+    errorState.append(create('span', { text: localizeErrorMessage(error.message || 'Không thể tải lịch đấu khu vực.') }), actionButton('Thử lại', () => loadRegionalPairings(stageId, regionId, page), `regional-retry:${stageId}:${regionId}:${page}`, 'secondary-btn'));
     pairingsTarget.appendChild(errorState);
   }
 }
@@ -5579,7 +5579,7 @@ async function loadGroupPairings(stageId, groupId, page = 1) {
     if (controller.signal.aborted) return;
     clear(target);
     const errorState = create('div', { className: 'multi-stage-inline-error', attrs: { role: 'alert' } });
-    errorState.append(create('span', { text: error.message || 'Không thể tải dữ liệu bảng đấu.' }), actionButton('Thử lại', () => loadGroupPairings(stageId, groupId, page), `group-retry:${stageId}:${groupId}:${page}`, 'secondary-btn'));
+    errorState.append(create('span', { text: localizeErrorMessage(error.message || 'Không thể tải dữ liệu bảng đấu.') }), actionButton('Thử lại', () => loadGroupPairings(stageId, groupId, page), `group-retry:${stageId}:${groupId}:${page}`, 'secondary-btn'));
     target.appendChild(errorState);
   }
 }
@@ -6301,7 +6301,7 @@ async function loadKnockoutPairings(stageId, page = 1) {
     if (controller.signal.aborted || !target) return;
     clear(target);
     const errorState = create('div', { className: 'multi-stage-inline-error', attrs: { role: 'alert' } });
-    errorState.append(create('span', { text: error.message || 'Không thể tải nhánh đấu.' }), actionButton('Thử lại', () => loadKnockoutPairings(stageId, page), `knockout-retry:${stageId}:${page}`, 'secondary-btn'));
+    errorState.append(create('span', { text: localizeErrorMessage(error.message || 'Không thể tải nhánh đấu.') }), actionButton('Thử lại', () => loadKnockoutPairings(stageId, page), `knockout-retry:${stageId}:${page}`, 'secondary-btn'));
     target.appendChild(errorState);
   }
 }
@@ -6397,7 +6397,7 @@ function renderMultiStageError(error, retry) {
   if (!workspace) return;
   clear(workspace);
   const errorState = create('div', { className: 'multi-stage-error-state', attrs: { role: 'alert' } });
-  errorState.append(icon('td-icon-circle-x'), create('strong', { text: 'Không thể tải tiến độ giải đấu' }), create('span', { text: error.message || 'Hãy thử lại sau.' }), actionButton('Thử lại', retry, 'multi-stage-retry', 'primary-btn'));
+  errorState.append(icon('td-icon-circle-x'), create('strong', { text: 'Không thể tải tiến độ giải đấu' }), create('span', { text: localizeErrorMessage(error.message || 'Hãy thử lại sau.') }), actionButton('Thử lại', retry, 'multi-stage-retry', 'primary-btn'));
   errorState.querySelector('svg')?.classList.add('td-icon', 'td-icon--lg');
   workspace.appendChild(errorState);
 }
@@ -6717,7 +6717,7 @@ async function refreshTournamentDetail() {
       $('#td-status').className = 'status-badge status-unknown'; $('#td-status').textContent = 'Không khả dụng';
       $('#td-pcount').textContent = '0'; clear($('#td-participants')); clear($('#td-actions')); clear($('#td-standings tbody')); $('#td-standings').hidden = true; $('#td-standings-empty').hidden = false; $('#td-standings-empty').textContent = 'Không thể tải bảng xếp hạng.'; $('#td-next-step').replaceChildren(); $('#td-stats').textContent = ''; renderTournamentPodium(null);
       $('#btn-register-bot').hidden = true;
-      renderMessage($('#td-schedule'), error.message || 'Không thể tải giải đấu.', refreshTournamentDetail);
+      renderMessage($('#td-schedule'), localizeErrorMessage(error.message || 'Không thể tải giải đấu.'), refreshTournamentDetail);
     }
   }
 }
@@ -6814,7 +6814,7 @@ async function renderParticipationRequestsV2(tournamentId, status) {
       list.appendChild(row);
     });
   } catch (error) {
-    renderMessage(list, error.message || 'Không thể tải yêu cầu tham gia.', () => renderParticipationRequestsV2(tournamentId, status));
+    renderMessage(list, localizeErrorMessage(error.message || 'Không thể tải yêu cầu tham gia.'), () => renderParticipationRequestsV2(tournamentId, status));
   }
 }
 
@@ -6859,7 +6859,7 @@ async function renderParticipationRequests(tournamentId, status) {
       list.appendChild(row);
     });
   } catch (error) {
-    list.appendChild(create('p', { text: error.message || 'Không thể tải yêu cầu tham gia.' }));
+    list.appendChild(create('p', { text: localizeErrorMessage(error.message || 'Không thể tải yêu cầu tham gia.') }));
   }
 }
 
@@ -7219,7 +7219,7 @@ async function submitTournamentRegistration() {
     const endpoint = state.user?.role === 'competitor' ? `/tournaments/${tournamentId}/participation-requests` : `/tournaments/${tournamentId}/register`;
     let result;
     try { result = await api(endpoint, { method: 'POST', body: JSON.stringify({ participantName, botId, revisionId }) }); }
-    catch (requestError) { if (state.authRevision === authRevision && ['dashboard', 'tournaments', 'tournament-detail'].includes(state.activeView) && state.viewRevision === viewRevision && state.registrationDialogRevision === dialogRevision) { error.textContent = requestError.message || 'Unable to register bot.'; error.hidden = false; } throw requestError; }
+    catch (requestError) { if (state.authRevision === authRevision && ['dashboard', 'tournaments', 'tournament-detail'].includes(state.activeView) && state.viewRevision === viewRevision && state.registrationDialogRevision === dialogRevision) { error.textContent = localizeErrorMessage(requestError.message || 'Không thể đăng ký Bot.'); error.hidden = false; } throw requestError; }
     if (state.authRevision !== authRevision || state.registrationDialogRevision !== dialogRevision) return;
     state.registrationSubmission = { ...result, tournamentId };
     renderRegistrationSubmissionStatus(state.registrationSubmission);
@@ -7279,7 +7279,7 @@ async function populateRevisionSelect(botId) {
     updateRegistrationRevisionSummary(select.value);
     if (!supportedRevisions.length) setRegistrationError('Bot chưa có phiên bản C++17 hoặc Python 3 để tham gia.');
   } catch (error) {
-    setRegistrationError(error.message || 'Không thể tải phiên bản mã nguồn.');
+    setRegistrationError(localizeErrorMessage(error.message || 'Không thể tải phiên bản mã nguồn.'));
   }
 }
 

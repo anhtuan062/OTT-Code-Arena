@@ -404,7 +404,7 @@ async function playReplay(tournamentId, matchId, seriesContext = null) {
       setReplayLoading(false);
       $('#replay-content').hidden = true;
       const seriesCard = $('#replay-series-card'); if (seriesCard) seriesCard.hidden = true;
-      $('#replay-error-message').textContent = error.message || 'Không thể tải dữ liệu xem lại.';
+      $('#replay-error-message').textContent = localizeErrorMessage(error.message || 'Không thể tải dữ liệu xem lại.');
       $('#replay-error').hidden = false;
     }
     return;

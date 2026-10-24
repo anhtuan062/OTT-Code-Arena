@@ -9,7 +9,7 @@ function formatPracticeError(error) {
   if (payload.code === 'EMPTY_OUTPUT' || payload.code === 'MISSING_MOVE') return payload.error || 'Bot không trả về nước đi.';
   if (payload.code === 'INVALID_MOVE') return payload.error || 'Nước đi của Bot không nằm trong danh sách hợp lệ.';
   if (payload.code === 'RESOURCE_LIMIT_EXCEEDED') return payload.error || 'Bot vượt quá giới hạn tài nguyên.';
-  return payload.error || error?.message || 'Không thể chạy thử Bot.';
+  return localizeErrorMessage(payload.error || error?.message || 'Không thể chạy thử Bot.');
 }
 
 function practiceErrorTitle(error) {

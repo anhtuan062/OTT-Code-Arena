@@ -202,6 +202,9 @@ function localizeErrorMessage(message) {
   if (/^(?:Cannot|The|No|Not|An|This|Maximum|Need|Too many|Participant|Pairing|Tournament|Match|Replay|Source|Bot|Registration|Visibility|Scoring|Winner|Reason|CAPACITY_)/i.test(value)) {
     return 'Không thể hoàn tất thao tác. Vui lòng kiểm tra lại dữ liệu và thử lại.';
   }
+  if (/\b(?:is|are|must|cannot|failed|not|already|requires|unavailable|exceeds|pending|configured|belongs|completed|active|status|error|execution|validation|source|revision|tournament|pairing|match|participant|request|sandbox|docker)\b/i.test(value)) {
+    return 'Không thể hoàn tất thao tác. Vui lòng kiểm tra lại dữ liệu và thử lại.';
+  }
   return value;
 }
 
