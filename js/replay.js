@@ -466,7 +466,13 @@ function renderReplayBoard(board, liveMove = null) {
   const element = $('#r-board'); clear(element);
   const lastMove = liveMove || (state.replayMoveIndex >= 0 ? state.replay.moves[state.replayMoveIndex] : null);
   const previousBoard = state.replayMoveIndex > 0 ? buildStateAt(state.replayMoveIndex - 1) : state.replay?.initialState;
-  const capturedPiece = lastMove?.captures && previousBoard?.pieces?.find(piece => piece.id === lastMove.captures);
+  // The red capture marker must follow the piece's position after the move.
+  // In a conversion capture the captured id remains on the board and is
+  // relocated to `conversionTo`; looking it up in the previous board would
+  // incorrectly mark its old square. Standard captures remove the piece, so
+  // fall back to the move destination (the square where the capture happened).
+  const capturedPiece = lastMove?.captures && board?.pieces?.find(piece => piece.id === lastMove.captures);
+  const capturePosition = capturedPiece || lastMove?.to;
   const boardSize = Number(board.boardSize) === 9 ? 9 : 0;
   if (!boardSize) {
     element.appendChild(create('p', { className: 'ui-message', text: 'Bản xem lại này có kích thước bàn cờ không được hỗ trợ.' }));
@@ -478,7 +484,7 @@ function renderReplayBoard(board, liveMove = null) {
     const cell = create('div', { className: 'replay-cell', attrs: { role: 'gridcell', 'aria-label': `${coordinate}, ô trống` } });
     if (lastMove?.pieceId && lastMove.from?.row === row && lastMove.from?.col === col) cell.classList.add('move-from');
     if (lastMove?.pieceId && lastMove.to?.row === row && lastMove.to?.col === col) cell.classList.add('move-to');
-    if (capturedPiece?.row === row && capturedPiece?.col === col) cell.classList.add('capture');
+    if (capturePosition?.row === row && capturePosition?.col === col) cell.classList.add('capture');
     const goal = row === 0 && col === 0
       ? 'Mục tiêu của người chơi B'
       : row === 8 && col === 8 ? 'Mục tiêu của người chơi A' : '';

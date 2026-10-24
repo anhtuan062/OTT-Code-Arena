@@ -203,7 +203,10 @@ function renderLiveMatchSnapshot(snapshot) {
   const protocol = $('#r-protocol'); if (protocol) protocol.textContent = 'Dữ liệu trực tiếp';
   const participants = snapshot.participants || {};
   const currentParticipants = snapshot.currentParticipants || participants;
-  const latestMove = snapshot.state?.lastMove || snapshot.latestMove;
+  // The live frame explicitly carries the move that produced this snapshot.
+  // Prefer it over the embedded state copy so a delayed/stale state.lastMove
+  // cannot make the capture marker point at an earlier square.
+  const latestMove = snapshot.latestMove || snapshot.state?.lastMove;
   const latestMovePlayer = replayMovePlayer(latestMove);
   const activePlayer = snapshot.currentPlayer;
   const fixedAId = participants.A?.participantId;
