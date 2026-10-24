@@ -83,6 +83,53 @@ function actionLabel(action) { return ACTION_LABELS[action] || action; }
 function localizeErrorMessage(message) {
   const value = String(message || '');
   const exact = {
+    'Server is shutting down': 'Máy chủ đang tắt. Vui lòng thử lại sau.',
+    'Malformed JSON payload': 'Dữ liệu gửi lên không hợp lệ.',
+    'Insufficient permissions': 'Bạn không có đủ quyền để thực hiện thao tác này.',
+    'Not found': 'Không tìm thấy dữ liệu yêu cầu.',
+    'Too many attempts': 'Bạn đã thử quá nhiều lần. Vui lòng thử lại sau.',
+    'Invalid registration details': 'Thông tin đăng ký không hợp lệ.',
+    'Username unavailable': 'Tên người dùng đã được sử dụng.',
+    'Unable to register': 'Không thể tạo tài khoản.',
+    'Unable to register bot': 'Không thể đăng ký Bot.',
+    'Unable to save source revision': 'Không thể lưu phiên bản mã nguồn.',
+    'Unable to save GitHub source revision': 'Không thể lưu phiên bản mã nguồn từ GitHub.',
+    'Source revision not found': 'Không tìm thấy phiên bản mã nguồn.',
+    'Source revision integrity check failed': 'Không thể xác minh tính toàn vẹn của phiên bản mã nguồn.',
+    'Invalid practice scenario': 'Kịch bản chạy thử không hợp lệ.',
+    'Practice rate limit exceeded': 'Bạn đã chạy thử quá nhiều lần. Vui lòng thử lại sau.',
+    'This revision is already being tested': 'Phiên bản này đang được chạy thử.',
+    'Practice execution capacity is busy': 'Hệ thống chạy thử đang bận. Vui lòng thử lại sau.',
+    'Unable to load participation requests': 'Không thể tải yêu cầu tham gia.',
+    'Unable to submit participation request': 'Không thể gửi yêu cầu tham gia.',
+    'Invalid participation request': 'Yêu cầu tham gia không hợp lệ.',
+    'Unable to create tournament': 'Không thể tạo giải đấu.',
+    'Unable to update tournament': 'Không thể cập nhật giải đấu.',
+    'Unable to delete tournament': 'Không thể xóa giải đấu.',
+    'Unable to perform tournament action': 'Không thể thực hiện thao tác giải đấu.',
+    'Unable to approve participation request': 'Không thể duyệt yêu cầu tham gia.',
+    'Unable to reject participation request': 'Không thể từ chối yêu cầu tham gia.',
+    'Unable to undo participation request review': 'Không thể hoàn tác quyết định yêu cầu tham gia.',
+    'Unable to retry Bot preflight validation': 'Không thể chạy lại kiểm tra Bot.',
+    'Preflight validation not found': 'Không tìm thấy lượt kiểm tra Bot.',
+    'Tournament not accessible': 'Bạn không có quyền truy cập giải đấu này.',
+    'Pairing not found': 'Không tìm thấy trận đấu.',
+    'Match result not found': 'Không tìm thấy kết quả trận đấu.',
+    'Replay not found': 'Không tìm thấy dữ liệu xem lại.',
+    'Tournament execution is not active': 'Giải đấu hiện không đang chạy.',
+    'Unable to requeue pairing': 'Không thể đưa trận đấu vào hàng đợi.',
+    'Unable to rematch pairing': 'Không thể chạy lại trận đấu.',
+    'Unable to resolve tiebreaker': 'Không thể phân định trận đấu.',
+    'Unable to load tournament': 'Không thể tải giải đấu.',
+    'Unable to load tournament progress': 'Không thể tải tiến độ giải đấu.',
+    'Unable to load tournament pairings': 'Không thể tải danh sách trận đấu.',
+    'Unable to load tournament stages': 'Không thể tải các giai đoạn giải đấu.',
+    'Unable to load standings': 'Không thể tải bảng xếp hạng.',
+    'Unable to load tournament statistics': 'Không thể tải thống kê giải đấu.',
+    'Unable to load match result': 'Không thể tải kết quả trận đấu.',
+    'Unable to load live match': 'Không thể tải trận đấu trực tiếp.',
+    'Unable to load spectator data': 'Không thể tải dữ liệu khán giả.',
+    'Spectator polling rate limit exceeded': 'Bạn đã yêu cầu dữ liệu quá thường xuyên. Vui lòng thử lại sau.',
     'Bot cannot be deleted while it has immutable source revisions': 'Không thể xóa Bot vì Bot đã có phiên bản mã nguồn bất biến. Hãy giữ Bot để bảo toàn lịch sử phiên bản và kết quả thi đấu.',
     'Bot cannot be deleted while its revision is referenced by a tournament': 'Không thể xóa Bot vì phiên bản của Bot đang được giải đấu tham chiếu.',
     'Cannot delete the only revision': 'Không thể xóa phiên bản duy nhất của Bot. Hãy lưu một phiên bản khác trước.',
@@ -109,6 +156,11 @@ function localizeErrorMessage(message) {
   if (/^Invalid action$/i.test(value)) return 'Thao tác không hợp lệ.';
   if (/^Tournament execution cancelled$/i.test(value)) return 'Đã hủy thực thi giải đấu.';
   if (/^Tournament is already running$/i.test(value)) return 'Giải đấu đang được thực thi.';
+  if (/^Unable to\b/i.test(value)) return 'Không thể hoàn tất thao tác. Vui lòng thử lại.';
+  if (/^Invalid\b/i.test(value)) return 'Dữ liệu yêu cầu không hợp lệ.';
+  if (/^Unsupported\b/i.test(value)) return 'Thao tác hoặc dữ liệu không được hỗ trợ.';
+  if (/^Only\b/i.test(value)) return 'Thao tác này không được hỗ trợ với dữ liệu hiện tại.';
+  if (/\bnot found$/i.test(value)) return 'Không tìm thấy dữ liệu yêu cầu.';
   return value;
 }
 
@@ -393,16 +445,17 @@ function showToast(message, type = 'info') {
   const container = $('#toast-container');
   if (!container) return;
   const toastMeta = {
-    success: { icon: 'td-icon-check', label: '\u0110\u00E3 xong' },
-    error: { icon: 'td-icon-circle-x', label: 'C\u00F3 l\u1ED7i' },
-    info: { icon: 'td-icon-ellipsis', label: 'Th\u00F4ng b\u00E1o' },
-    capture: { icon: 'td-icon-check', label: 'C\u1EADp nh\u1EADt' },
-  }[type] || { icon: 'td-icon-ellipsis', label: 'Th\u00F4ng b\u00E1o' };
+    success: { icon: 'td-icon-check', label: 'Thành công' },
+    error: { icon: 'td-icon-circle-x', label: 'Lỗi' },
+    info: { icon: 'td-icon-ellipsis', label: 'Thông tin' },
+    capture: { icon: 'td-icon-check', label: 'Cập nhật' },
+  }[type] || { icon: 'td-icon-ellipsis', label: 'Thông tin' };
   const toast = create('div', { className: `toast toast-${type}`, attrs: { role: type === 'error' ? 'alert' : 'status' } });
   const marker = create('span', { className: 'toast-marker', attrs: { 'aria-hidden': 'true' } });
   marker.appendChild(icon(toastMeta.icon));
   const content = create('div', { className: 'toast-content' });
-  content.append(create('strong', { className: 'toast-label', text: toastMeta.label }), create('span', { className: 'toast-message', text: message }));
+  const localizedMessage = type === 'error' ? localizeErrorMessage(message) : String(message || '');
+  content.append(create('strong', { className: 'toast-label', text: toastMeta.label }), create('span', { className: 'toast-message', text: localizedMessage }));
   toast.append(marker, content);
   toast.appendChild(actionButton('Đóng', () => toast.remove(), `dismiss-toast:${Date.now()}`, 'toast-close'));
   container.appendChild(toast);
@@ -2140,7 +2193,7 @@ async function unlockDraftFromNotice() {
   const revision = typeof currentPracticeRevision === 'function' ? currentPracticeRevision() : null;
   if (revision) {
     await loadRevisionSource(revision, 'draft', false);
-    if (typeof showToast === 'function') showToast('Đã kích hoạt chế độ tạo bản nháp. Bạn có thể chỉnh sửa mã nguồn ngay.', 'info');
+    if (typeof showToast === 'function') showToast('Đã kích hoạt chế độ tạo bản nháp. Bạn có thể chỉnh sửa mã nguồn ngay.', 'success');
     $('#bot-source-editor')?.focus();
   } else {
     state.botWorkspaceReadOnly = false;
@@ -2479,7 +2532,7 @@ async function submitBot() {
           setSourceDirty(false);
           await loadBotRevisions(editingBot);
           const revisionLabel = revision.githubCommitSha ? ` ${revision.githubCommitSha.slice(0, 8)}` : '';
-          showToast(`Đã nhập revision${revisionLabel} từ GitHub.`, 'success');
+          showToast(`Đã nhập phiên bản${revisionLabel} từ GitHub.`, 'success');
         } else if (state.sourceDirty && !(await saveBotSource())) throw new Error('Không thể hoàn tất việc chọn phiên bản mã nguồn.');
       } catch (error) {
         if (isBotView()) showBotFormError(error.message || 'Không thể lưu Bot hoặc phiên bản mã nguồn.');
@@ -7410,7 +7463,7 @@ async function renderPhase2Requests(tournamentId, container, countBadge, tournam
       if (failureCount) {
         showToast(`Đã xử lý ${successCount}/${requestIds.length} yêu cầu; ${failureCount} yêu cầu lỗi.`, 'error');
       } else {
-        showToast(`Đã ${decision === 'approve' ? 'duyệt' : 'từ chối'} ${successCount} yêu cầu.`, decision === 'approve' ? 'success' : 'info');
+        showToast(`Đã ${decision === 'approve' ? 'duyệt' : 'từ chối'} ${successCount} yêu cầu.`, 'success');
       }
       await refreshTournamentDetail({ force: true });
     } catch (error) {
@@ -7609,7 +7662,7 @@ async function renderPhase2Requests(tournamentId, container, countBadge, tournam
         const retry = actionButton('Kiểm tra lại', async () => {
           try {
             await api(`/tournaments/${tournamentId}/requests/${req.requestId}/preflight/retry`, { method: 'POST' });
-            showToast('Đã đưa Bot vào hàng đợi kiểm tra lại.', 'info');
+            showToast('Đã đưa Bot vào hàng đợi kiểm tra lại.', 'success');
             startPhase2PreflightPolling(tournamentId, container, statsRoot, countBadge, { pending: tabPending, approved: tabApproved, rejected: tabRejected }, requests);
           }
           catch (e) { showToast(e.message || 'Không thể chạy lại kiểm tra Bot.', 'error'); }
@@ -7636,7 +7689,7 @@ async function renderPhase2Requests(tournamentId, container, countBadge, tournam
         const rejectBtn = actionButton('Từ chối', async () => {
           try {
             await api(`/tournaments/${tournamentId}/requests/${req.requestId}/reject`, { method: 'POST' });
-            showToast('Đã từ chối yêu cầu.', 'info');
+            showToast('Đã từ chối yêu cầu.', 'success');
             await refreshTournamentDetail({ force: true });
           } catch (e) {
             showToast(e.message || 'Không thể từ chối yêu cầu.', 'error');
@@ -10258,7 +10311,7 @@ async function tournamentAction(tournamentId, authRevision, viewRevision, action
   }
   if (isCurrentView('tournament-detail', authRevision, viewRevision, tournamentId)) {
     if (action === 'run_all' && ['failed', 'cancelled'].includes(executionStatus)) {
-      showToast('Scheduler đã dừng vì trận lỗi khi chuẩn bị thực thi. Mở chi tiết pairing để xem nguyên nhân.', 'error');
+      showToast('Bộ điều phối đã dừng vì trận đấu gặp lỗi khi chuẩn bị thực thi. Mở chi tiết trận đấu để xem nguyên nhân.', 'error');
     } else {
       const message = action === 'run_all' && executionStatus === 'active'
         ? 'Đã bắt đầu thực thi trận đấu.'
@@ -12266,7 +12319,7 @@ function setPlaygroundToast(message, type = 'error') {
     return;
   }
 
-  toast.textContent = message;
+  toast.textContent = type === 'error' ? localizeErrorMessage(message) : String(message || '');
   toast.className = `playground-toast ${type === 'error' ? 'form-error' : 'ui-message'}`;
   toast.hidden = false;
 }
@@ -12848,7 +12901,7 @@ function bindEvents() {
       if (revision && typeof loadRevisionSource === 'function') {
         event.preventDefault();
         void loadRevisionSource(revision, 'draft', false).then(() => {
-          if (typeof showToast === 'function') showToast('Đã kích hoạt chế độ tạo bản nháp. Bạn có thể chỉnh sửa mã nguồn ngay.', 'info');
+          if (typeof showToast === 'function') showToast('Đã kích hoạt chế độ tạo bản nháp. Bạn có thể chỉnh sửa mã nguồn ngay.', 'success');
           $('#bot-source-editor')?.focus();
         });
       }
@@ -12919,7 +12972,7 @@ function bindEvents() {
       const revision = typeof currentPracticeRevision === 'function' ? currentPracticeRevision() : null;
       if (revision && typeof loadRevisionSource === 'function') {
         void loadRevisionSource(revision, 'draft', false).then(() => {
-          if (typeof showToast === 'function') showToast('Đã kích hoạt chế độ tạo bản nháp. Bạn có thể chỉnh sửa mã nguồn ngay.', 'info');
+          if (typeof showToast === 'function') showToast('Đã kích hoạt chế độ tạo bản nháp. Bạn có thể chỉnh sửa mã nguồn ngay.', 'success');
           $('#bot-source-editor')?.focus();
         });
       }

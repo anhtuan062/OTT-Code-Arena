@@ -363,7 +363,7 @@ function setPlaygroundToast(message, type = 'error') {
     return;
   }
 
-  toast.textContent = message;
+  toast.textContent = type === 'error' ? localizeErrorMessage(message) : String(message || '');
   toast.className = `playground-toast ${type === 'error' ? 'form-error' : 'ui-message'}`;
   toast.hidden = false;
 }

@@ -132,7 +132,7 @@ function bindEvents() {
       if (revision && typeof loadRevisionSource === 'function') {
         event.preventDefault();
         void loadRevisionSource(revision, 'draft', false).then(() => {
-          if (typeof showToast === 'function') showToast('Đã kích hoạt chế độ tạo bản nháp. Bạn có thể chỉnh sửa mã nguồn ngay.', 'info');
+          if (typeof showToast === 'function') showToast('Đã kích hoạt chế độ tạo bản nháp. Bạn có thể chỉnh sửa mã nguồn ngay.', 'success');
           $('#bot-source-editor')?.focus();
         });
       }
@@ -203,7 +203,7 @@ function bindEvents() {
       const revision = typeof currentPracticeRevision === 'function' ? currentPracticeRevision() : null;
       if (revision && typeof loadRevisionSource === 'function') {
         void loadRevisionSource(revision, 'draft', false).then(() => {
-          if (typeof showToast === 'function') showToast('Đã kích hoạt chế độ tạo bản nháp. Bạn có thể chỉnh sửa mã nguồn ngay.', 'info');
+          if (typeof showToast === 'function') showToast('Đã kích hoạt chế độ tạo bản nháp. Bạn có thể chỉnh sửa mã nguồn ngay.', 'success');
           $('#bot-source-editor')?.focus();
         });
       }

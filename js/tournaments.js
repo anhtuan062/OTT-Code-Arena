@@ -4243,7 +4243,7 @@ async function renderPhase2Requests(tournamentId, container, countBadge, tournam
       if (failureCount) {
         showToast(`Đã xử lý ${successCount}/${requestIds.length} yêu cầu; ${failureCount} yêu cầu lỗi.`, 'error');
       } else {
-        showToast(`Đã ${decision === 'approve' ? 'duyệt' : 'từ chối'} ${successCount} yêu cầu.`, decision === 'approve' ? 'success' : 'info');
+        showToast(`Đã ${decision === 'approve' ? 'duyệt' : 'từ chối'} ${successCount} yêu cầu.`, 'success');
       }
       await refreshTournamentDetail({ force: true });
     } catch (error) {
@@ -4442,7 +4442,7 @@ async function renderPhase2Requests(tournamentId, container, countBadge, tournam
         const retry = actionButton('Kiểm tra lại', async () => {
           try {
             await api(`/tournaments/${tournamentId}/requests/${req.requestId}/preflight/retry`, { method: 'POST' });
-            showToast('Đã đưa Bot vào hàng đợi kiểm tra lại.', 'info');
+            showToast('Đã đưa Bot vào hàng đợi kiểm tra lại.', 'success');
             startPhase2PreflightPolling(tournamentId, container, statsRoot, countBadge, { pending: tabPending, approved: tabApproved, rejected: tabRejected }, requests);
           }
           catch (e) { showToast(e.message || 'Không thể chạy lại kiểm tra Bot.', 'error'); }
@@ -4469,7 +4469,7 @@ async function renderPhase2Requests(tournamentId, container, countBadge, tournam
         const rejectBtn = actionButton('Từ chối', async () => {
           try {
             await api(`/tournaments/${tournamentId}/requests/${req.requestId}/reject`, { method: 'POST' });
-            showToast('Đã từ chối yêu cầu.', 'info');
+            showToast('Đã từ chối yêu cầu.', 'success');
             await refreshTournamentDetail({ force: true });
           } catch (e) {
             showToast(e.message || 'Không thể từ chối yêu cầu.', 'error');
@@ -7091,7 +7091,7 @@ async function tournamentAction(tournamentId, authRevision, viewRevision, action
   }
   if (isCurrentView('tournament-detail', authRevision, viewRevision, tournamentId)) {
     if (action === 'run_all' && ['failed', 'cancelled'].includes(executionStatus)) {
-      showToast('Scheduler đã dừng vì trận lỗi khi chuẩn bị thực thi. Mở chi tiết pairing để xem nguyên nhân.', 'error');
+      showToast('Bộ điều phối đã dừng vì trận đấu gặp lỗi khi chuẩn bị thực thi. Mở chi tiết trận đấu để xem nguyên nhân.', 'error');
     } else {
       const message = action === 'run_all' && executionStatus === 'active'
         ? 'Đã bắt đầu thực thi trận đấu.'

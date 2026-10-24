@@ -656,7 +656,7 @@ async function unlockDraftFromNotice() {
   const revision = typeof currentPracticeRevision === 'function' ? currentPracticeRevision() : null;
   if (revision) {
     await loadRevisionSource(revision, 'draft', false);
-    if (typeof showToast === 'function') showToast('Đã kích hoạt chế độ tạo bản nháp. Bạn có thể chỉnh sửa mã nguồn ngay.', 'info');
+    if (typeof showToast === 'function') showToast('Đã kích hoạt chế độ tạo bản nháp. Bạn có thể chỉnh sửa mã nguồn ngay.', 'success');
     $('#bot-source-editor')?.focus();
   } else {
     state.botWorkspaceReadOnly = false;
@@ -995,7 +995,7 @@ async function submitBot() {
           setSourceDirty(false);
           await loadBotRevisions(editingBot);
           const revisionLabel = revision.githubCommitSha ? ` ${revision.githubCommitSha.slice(0, 8)}` : '';
-          showToast(`Đã nhập revision${revisionLabel} từ GitHub.`, 'success');
+          showToast(`Đã nhập phiên bản${revisionLabel} từ GitHub.`, 'success');
         } else if (state.sourceDirty && !(await saveBotSource())) throw new Error('Không thể hoàn tất việc chọn phiên bản mã nguồn.');
       } catch (error) {
         if (isBotView()) showBotFormError(error.message || 'Không thể lưu Bot hoặc phiên bản mã nguồn.');

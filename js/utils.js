@@ -72,16 +72,17 @@ function showToast(message, type = 'info') {
   const container = $('#toast-container');
   if (!container) return;
   const toastMeta = {
-    success: { icon: 'td-icon-check', label: '\u0110\u00E3 xong' },
-    error: { icon: 'td-icon-circle-x', label: 'C\u00F3 l\u1ED7i' },
-    info: { icon: 'td-icon-ellipsis', label: 'Th\u00F4ng b\u00E1o' },
-    capture: { icon: 'td-icon-check', label: 'C\u1EADp nh\u1EADt' },
-  }[type] || { icon: 'td-icon-ellipsis', label: 'Th\u00F4ng b\u00E1o' };
+    success: { icon: 'td-icon-check', label: 'Thành công' },
+    error: { icon: 'td-icon-circle-x', label: 'Lỗi' },
+    info: { icon: 'td-icon-ellipsis', label: 'Thông tin' },
+    capture: { icon: 'td-icon-check', label: 'Cập nhật' },
+  }[type] || { icon: 'td-icon-ellipsis', label: 'Thông tin' };
   const toast = create('div', { className: `toast toast-${type}`, attrs: { role: type === 'error' ? 'alert' : 'status' } });
   const marker = create('span', { className: 'toast-marker', attrs: { 'aria-hidden': 'true' } });
   marker.appendChild(icon(toastMeta.icon));
   const content = create('div', { className: 'toast-content' });
-  content.append(create('strong', { className: 'toast-label', text: toastMeta.label }), create('span', { className: 'toast-message', text: message }));
+  const localizedMessage = type === 'error' ? localizeErrorMessage(message) : String(message || '');
+  content.append(create('strong', { className: 'toast-label', text: toastMeta.label }), create('span', { className: 'toast-message', text: localizedMessage }));
   toast.append(marker, content);
   toast.appendChild(actionButton('Đóng', () => toast.remove(), `dismiss-toast:${Date.now()}`, 'toast-close'));
   container.appendChild(toast);

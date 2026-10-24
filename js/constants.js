@@ -78,6 +78,53 @@ function actionLabel(action) { return ACTION_LABELS[action] || action; }
 function localizeErrorMessage(message) {
   const value = String(message || '');
   const exact = {
+    'Server is shutting down': 'Máy chủ đang tắt. Vui lòng thử lại sau.',
+    'Malformed JSON payload': 'Dữ liệu gửi lên không hợp lệ.',
+    'Insufficient permissions': 'Bạn không có đủ quyền để thực hiện thao tác này.',
+    'Not found': 'Không tìm thấy dữ liệu yêu cầu.',
+    'Too many attempts': 'Bạn đã thử quá nhiều lần. Vui lòng thử lại sau.',
+    'Invalid registration details': 'Thông tin đăng ký không hợp lệ.',
+    'Username unavailable': 'Tên người dùng đã được sử dụng.',
+    'Unable to register': 'Không thể tạo tài khoản.',
+    'Unable to register bot': 'Không thể đăng ký Bot.',
+    'Unable to save source revision': 'Không thể lưu phiên bản mã nguồn.',
+    'Unable to save GitHub source revision': 'Không thể lưu phiên bản mã nguồn từ GitHub.',
+    'Source revision not found': 'Không tìm thấy phiên bản mã nguồn.',
+    'Source revision integrity check failed': 'Không thể xác minh tính toàn vẹn của phiên bản mã nguồn.',
+    'Invalid practice scenario': 'Kịch bản chạy thử không hợp lệ.',
+    'Practice rate limit exceeded': 'Bạn đã chạy thử quá nhiều lần. Vui lòng thử lại sau.',
+    'This revision is already being tested': 'Phiên bản này đang được chạy thử.',
+    'Practice execution capacity is busy': 'Hệ thống chạy thử đang bận. Vui lòng thử lại sau.',
+    'Unable to load participation requests': 'Không thể tải yêu cầu tham gia.',
+    'Unable to submit participation request': 'Không thể gửi yêu cầu tham gia.',
+    'Invalid participation request': 'Yêu cầu tham gia không hợp lệ.',
+    'Unable to create tournament': 'Không thể tạo giải đấu.',
+    'Unable to update tournament': 'Không thể cập nhật giải đấu.',
+    'Unable to delete tournament': 'Không thể xóa giải đấu.',
+    'Unable to perform tournament action': 'Không thể thực hiện thao tác giải đấu.',
+    'Unable to approve participation request': 'Không thể duyệt yêu cầu tham gia.',
+    'Unable to reject participation request': 'Không thể từ chối yêu cầu tham gia.',
+    'Unable to undo participation request review': 'Không thể hoàn tác quyết định yêu cầu tham gia.',
+    'Unable to retry Bot preflight validation': 'Không thể chạy lại kiểm tra Bot.',
+    'Preflight validation not found': 'Không tìm thấy lượt kiểm tra Bot.',
+    'Tournament not accessible': 'Bạn không có quyền truy cập giải đấu này.',
+    'Pairing not found': 'Không tìm thấy trận đấu.',
+    'Match result not found': 'Không tìm thấy kết quả trận đấu.',
+    'Replay not found': 'Không tìm thấy dữ liệu xem lại.',
+    'Tournament execution is not active': 'Giải đấu hiện không đang chạy.',
+    'Unable to requeue pairing': 'Không thể đưa trận đấu vào hàng đợi.',
+    'Unable to rematch pairing': 'Không thể chạy lại trận đấu.',
+    'Unable to resolve tiebreaker': 'Không thể phân định trận đấu.',
+    'Unable to load tournament': 'Không thể tải giải đấu.',
+    'Unable to load tournament progress': 'Không thể tải tiến độ giải đấu.',
+    'Unable to load tournament pairings': 'Không thể tải danh sách trận đấu.',
+    'Unable to load tournament stages': 'Không thể tải các giai đoạn giải đấu.',
+    'Unable to load standings': 'Không thể tải bảng xếp hạng.',
+    'Unable to load tournament statistics': 'Không thể tải thống kê giải đấu.',
+    'Unable to load match result': 'Không thể tải kết quả trận đấu.',
+    'Unable to load live match': 'Không thể tải trận đấu trực tiếp.',
+    'Unable to load spectator data': 'Không thể tải dữ liệu khán giả.',
+    'Spectator polling rate limit exceeded': 'Bạn đã yêu cầu dữ liệu quá thường xuyên. Vui lòng thử lại sau.',
     'Bot cannot be deleted while it has immutable source revisions': 'Không thể xóa Bot vì Bot đã có phiên bản mã nguồn bất biến. Hãy giữ Bot để bảo toàn lịch sử phiên bản và kết quả thi đấu.',
     'Bot cannot be deleted while its revision is referenced by a tournament': 'Không thể xóa Bot vì phiên bản của Bot đang được giải đấu tham chiếu.',
     'Cannot delete the only revision': 'Không thể xóa phiên bản duy nhất của Bot. Hãy lưu một phiên bản khác trước.',
@@ -104,6 +151,11 @@ function localizeErrorMessage(message) {
   if (/^Invalid action$/i.test(value)) return 'Thao tác không hợp lệ.';
   if (/^Tournament execution cancelled$/i.test(value)) return 'Đã hủy thực thi giải đấu.';
   if (/^Tournament is already running$/i.test(value)) return 'Giải đấu đang được thực thi.';
+  if (/^Unable to\b/i.test(value)) return 'Không thể hoàn tất thao tác. Vui lòng thử lại.';
+  if (/^Invalid\b/i.test(value)) return 'Dữ liệu yêu cầu không hợp lệ.';
+  if (/^Unsupported\b/i.test(value)) return 'Thao tác hoặc dữ liệu không được hỗ trợ.';
+  if (/^Only\b/i.test(value)) return 'Thao tác này không được hỗ trợ với dữ liệu hiện tại.';
+  if (/\bnot found$/i.test(value)) return 'Không tìm thấy dữ liệu yêu cầu.';
   return value;
 }
 
