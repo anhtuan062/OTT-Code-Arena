@@ -59,8 +59,9 @@ npx vitest run tests/frontend
 - Khởi tạo bàn cờ chuẩn $9 \times 9$, kiểm tra vị trí 18 quân cờ khởi đầu của hai bên.
 - Nước đi 8 hướng, cấm đi ra ngoài bàn cờ, cấm đứng yên, cấm đi vào ô có quân cùng màu.
 - Quan hệ ăn quân Oẳn Tù Tì: Búa ăn Kéo, Kéo ăn Bao, Bao ăn Búa.
+- Conversion mặc định tắt; khi bật, quân bị ăn đổi phe và được đặt vào ô trống gần ô bị ăn theo thứ tự deterministic. Nếu không có ô đặt hợp lệ, nước ăn không được tạo trong `legalMoves`.
 - Điều kiện thắng: Ăn hết toàn bộ quân đối phương; phe A tới ô `i9`; phe B tới ô `a1`.
-- Điều kiện hòa của luồng có thẩm quyền: quá giới hạn lượt (`turn_limit`) và hai bên chỉ còn cùng một loại quân (`insufficient_material`). Engine có nhánh hòa do lặp thế, nhưng Match Runner xử Bot tạo chuỗi lặp là bên thua với lý do `repetition`.
+- Điều kiện hòa của luồng có thẩm quyền: quá giới hạn lượt (`turn_limit`), hai bên chỉ còn cùng một loại quân (`insufficient_material`) hoặc không còn `legalMoves` mà chưa xác định được bên thắng. Engine có nhánh hòa do lặp thế, nhưng Match Runner xử Bot tạo chuỗi lặp là bên thua với lý do `repetition`.
 - Tính tất định của layout theo hạt giống (`seed`) trong loạt trận BO3.
 
 ### 2.2. Phân hệ Giao thức (`tests/protocol/`)

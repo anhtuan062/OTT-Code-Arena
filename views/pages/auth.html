@@ -33,7 +33,7 @@
           Đăng nhập
         </button>
         <button type="button" class="landing-btn landing-btn-primary" onclick="document.getElementById('show-register')?.click(); document.getElementById('auth-station')?.scrollIntoView({behavior:'smooth'});">
-          Tạo Bot đầu tiên <span aria-hidden="true">↗</span>
+          Tạo Bot đầu tiên <span class="inline-arrow" aria-hidden="true">→</span>
         </button>
       </div>
     </div>
@@ -54,7 +54,7 @@
 
       <p class="landing-hero-desc">
         Biến những dòng mã C++17 và Python 3 thành chiến thuật đỉnh cao trên bàn cờ 9×9.
-        Thử sức cùng bot của các lập trình viên khác, kiểm soát thế trận và bước lên đỉnh vinh quang.
+        Xây dựng Bot, kiểm tra nước đi và tham gia các giải đấu theo vai trò của bạn.
       </p>
 
       <div class="landing-hero-actions">
@@ -77,7 +77,7 @@
           <span class="landing-mini-avatar avatar-orange">A</span>
         </div>
         <div class="landing-trust-copy">
-          <div class="landing-trust-stars">★★★★★</div>
+          <div class="landing-trust-stars">Đã sẵn sàng cho trận đầu</div>
           <p>Dành cho những người ham học hỏi và đam mê lập trình đấu trí</p>
         </div>
       </div>
@@ -185,7 +185,7 @@
       <div class="auth-system-panel" aria-label="Tổng quan nền tảng">
         <div class="auth-system-kicker"><span class="auth-system-dot"></span>OTT CODE ARENA</div>
         <h1>Viết Bot.<br><span>Luyện tập. Thi đấu.</span></h1>
-        <p class="auth-system-intro">Nền tảng để học sinh xây dựng chiến thuật, chạy thử mã nguồn và tham gia các giải đấu lập trình.</p>
+        <p class="auth-system-intro">Nền tảng để xây dựng Bot, kiểm tra chiến thuật và tham gia các giải đấu lập trình trên bàn cờ 9×9.</p>
         <div class="auth-code-preview" aria-label="Ví dụ mã nguồn Bot">
           <div class="auth-code-preview-header"><span>bot.cpp</span><span>C++17</span></div>
           <pre><code><span class="auth-code-muted">Move</span> <span class="auth-code-accent">chooseMove</span>(<span class="auth-code-muted">const GameState</span>&amp; state, <span class="auth-code-muted">const vector&lt;Move&gt;</span>&amp; legalMoves) {
@@ -196,9 +196,10 @@
         </div>
         <div class="auth-system-board" aria-hidden="true"><span class="board-piece board-piece-a"></span><span class="board-piece board-piece-b"></span></div>
         <div class="auth-system-facts">
-          <div><strong>C++17 · Python 3</strong><span>Viết hàm chiến thuật `chooseMove`</span></div>
-          <div><strong>Sandbox an toàn</strong><span>Chạy thử Bot trước khi đăng ký giải đấu</span></div>
-          <div><strong>Giải đấu 9×9</strong><span>Theo dõi trận đấu và xem lại kết quả</span></div>
+          <div><strong>C++17 · Python 3</strong><span>Viết `chooseMove` (C++) hoặc `choose_move` (Python)</span></div>
+          <div><strong>Sandbox cô lập</strong><span>Kiểm tra biên dịch và một nước đi trước khi gửi</span></div>
+          <div><strong>Phiên bản bất biến</strong><span>Mỗi lần lưu tạo một revision để chọn khi đăng ký</span></div>
+          <div><strong>Giải đấu 9×9</strong><span>Chọn Bot và revision cụ thể rồi gửi yêu cầu tham gia</span></div>
         </div>
       </div>
 
@@ -216,8 +217,7 @@
         </h2>
 
         <p class="strategy-desc">
-          Tạo bot thông minh, so tài cùng những đối thủ đáng gờm
-          và biến chiến thuật của bạn thành chiến thắng vang dội.
+          Bắt đầu bằng cách tạo tài khoản hoặc đăng nhập để mở các chức năng dành cho người chơi.
         </p>
 
         <!-- Code Preview Card -->
@@ -229,7 +229,7 @@
               <span></span>
             </div>
             <span class="showcase-file">strategy.cpp</span>
-            <span class="showcase-live">● SANDBOX READY</span>
+            <span class="showcase-live"><span class="status-dot" aria-hidden="true"></span> SANDBOX READY</span>
           </div>
 
           <div class="strategy-code-body">
@@ -239,7 +239,9 @@
             <div><span class="code-line-number">04</span> &nbsp;&nbsp;<span class="code-keyword">return</span> legal[<span class="code-number">0</span>];</div>
             <div><span class="code-line-number">05</span> }</div>
             <div class="code-output">
-              <span class="output-check">✓</span>
+              <span class="output-check" aria-hidden="true">
+                <svg viewBox="0 0 24 24" focusable="false"><path d="m5 12 4 4L19 6" /></svg>
+              </span>
               Chiến thuật đã sẵn sàng. Bắt đầu so tài!
             </div>
           </div>
@@ -247,14 +249,18 @@
 
         <div class="strategy-chips">
           <div class="mini-stat-chip">
-            <span class="mini-stat-icon">⚡</span>
+            <span class="mini-stat-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" focusable="false"><path d="m13 2-8 12h6l-1 8 8-12h-6l1-8Z" /></svg>
+            </span>
             <div>
               <strong>Chiến thuật sắc bén</strong>
               <span>Không chỉ là những dòng mã</span>
             </div>
           </div>
           <div class="mini-stat-chip">
-            <span class="mini-stat-icon">🏆</span>
+            <span class="mini-stat-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" focusable="false"><path d="M7 4h10v4a5 5 0 0 1-10 0V4Zm5 9v4m-4 3h8M4 5h3v3a4 4 0 0 1-3-3Zm16 0h-3v3a4 4 0 0 0 3-3Z" /></svg>
+            </span>
             <div>
               <strong>Chiến thắng tiếp theo</strong>
               <span>Bắt đầu từ một nước đi</span>
@@ -474,7 +480,7 @@
   <section class="landing-stats-section landing-container" aria-label="Điểm nổi bật của nền tảng">
     <div class="landing-stats-card">
       <div class="landing-stat-item">
-        <div class="stat-icon-wrap icon-purple">⌘</div>
+        <div class="stat-icon-wrap icon-purple" aria-hidden="true"><svg viewBox="0 0 24 24" focusable="false"><path d="M6 5h12M6 12h12M6 19h12" /></svg></div>
         <div>
           <div class="landing-stat-value">Mã của bạn</div>
           <div class="landing-stat-label">Chiến thuật do chính bạn quyết định</div>
@@ -484,7 +490,7 @@
       <div class="stat-divider" aria-hidden="true"></div>
 
       <div class="landing-stat-item">
-        <div class="stat-icon-wrap icon-cyan">⚔</div>
+        <div class="stat-icon-wrap icon-cyan" aria-hidden="true"><svg viewBox="0 0 24 24" focusable="false"><path d="m5 5 14 14M19 5 5 19M7 3l4 4M17 21l-4-4" /></svg></div>
         <div>
           <div class="landing-stat-value">1 vs 1</div>
           <div class="landing-stat-label">Đấu bot trực tiếp trên bàn cờ 9×9</div>
@@ -494,7 +500,7 @@
       <div class="stat-divider" aria-hidden="true"></div>
 
       <div class="landing-stat-item">
-        <div class="stat-icon-wrap icon-gold">♛</div>
+        <div class="stat-icon-wrap icon-gold" aria-hidden="true"><svg viewBox="0 0 24 24" focusable="false"><path d="m5 7 3 4 4-7 4 7 3-4-1 12H6L5 7Zm1 16h12" /></svg></div>
         <div>
           <div class="landing-stat-value">Vươn lên dẫn đầu</div>
           <div class="landing-stat-label">So tài cùng cộng đồng &amp; tính điểm Elo</div>
@@ -504,7 +510,7 @@
       <div class="stat-divider" aria-hidden="true"></div>
 
       <div class="landing-stat-item">
-        <div class="stat-icon-wrap icon-green">✧</div>
+        <div class="stat-icon-wrap icon-green" aria-hidden="true"><svg viewBox="0 0 24 24" focusable="false"><path d="M12 3v18M3 12h18M5.6 5.6l12.8 12.8M18.4 5.6 5.6 18.4" /></svg></div>
         <div>
           <div class="landing-stat-value">Không ngừng tiến bộ</div>
           <div class="landing-stat-label">Replay phân tích sau mỗi trận</div>
@@ -523,21 +529,21 @@
 
     <div class="landing-rules-grid">
       <div class="rule-card">
-        <div class="rule-icon-circle keo-circle">✌</div>
+        <div class="rule-icon-circle keo-circle" aria-hidden="true"><svg class="rule-icon-svg rule-icon-piece" viewBox="0 0 280 280" focusable="false"><g><path d="M 140,120 L 85,220 C 72,245 92,260 112,235 L 175,145 Z"/><path d="M 110,95 L 38,175 C 20,195 40,215 65,192 L 145,125 Z"/><path d="M 105,100 C 95,75 135,25 170,22 C 192,20 202,32 205,45 C 228,38 255,58 242,98 C 232,128 215,148 195,155 Z"/><path d="M 205,115 C 218,112 226,128 220,152 C 214,172 196,172 192,152 C 188,132 195,118 205,115 Z"/><path d="M 176,112 C 192,110 200,130 194,158 C 188,182 164,182 158,158 C 154,135 162,115 176,112 Z"/><path d="M 110,95 C 122,120 162,135 172,120 C 180,108 158,95 140,92 C 165,98 182,82 184,62"/></g></svg></div>
         <h3>Quân KÉO</h3>
         <p class="rule-relation">Thắng <strong>Bao</strong> · Thua <strong>Búa</strong></p>
-        <p class="rule-desc">Cắt xuyên phòng tuyến Bao của đối thủ. Di chuyển chiến lược để khóa chặt quân địch.</p>
+        <p class="rule-desc">Cắt xuyên phòng tuyến Lá của đối thủ. Di chuyển chiến lược để khóa chặt quân địch.</p>
       </div>
 
       <div class="rule-card">
-        <div class="rule-icon-circle bua-circle">✊</div>
+        <div class="rule-icon-circle bua-circle" aria-hidden="true"><svg class="rule-icon-svg rule-icon-piece" viewBox="0 0 260 280" focusable="false"><g><path d="M 110,65 C 55,45 30,95 45,155 C 30,195 55,235 95,235 Z"/><path d="M 85,215 C 95,255 150,265 165,240 C 175,225 155,205 130,200 Z"/><path d="M 95,185 C 115,230 180,235 190,205 C 200,185 175,165 140,165 Z"/><path d="M 105,145 C 130,195 195,195 205,160 C 212,135 185,120 140,125 Z"/><path d="M 105,70 C 165,65 220,90 220,130 C 220,165 170,165 135,140 Z"/><path d="M 145,105 C 155,95 170,95 178,103" fill="none"/><path d="M 148,97 C 155,90 163,90 168,94" fill="none"/><path d="M 95,70 C 125,65 145,100 142,155 C 138,195 110,208 92,195 C 75,180 82,135 95,105"/><path d="M 95,105 C 82,125 78,145 84,165" fill="none"/><path d="M 85,90 C 82,108 85,122 89,130" fill="none"/><path d="M 73,102 C 75,116 80,126 85,134" fill="none"/></g></svg></div>
         <h3>Quân BÚA</h3>
         <p class="rule-relation">Thắng <strong>Kéo</strong> · Thua <strong>Bao</strong></p>
         <p class="rule-desc">Lực lượng công phá mạnh mẽ, khắc chế hoàn toàn quân Kéo và mở đường tiến công.</p>
       </div>
 
       <div class="rule-card">
-        <div class="rule-icon-circle bao-circle">✋</div>
+        <div class="rule-icon-circle bao-circle" aria-hidden="true"><svg class="rule-icon-svg rule-icon-piece" viewBox="0 0 280 240" focusable="false"><g><path d="M 165,92 C 125,88 85,88 60,92 C 38,96 35,112 45,118 C 25,122 22,140 38,148 C 20,154 22,174 42,180 C 32,192 42,212 70,215 L 165,226 C 198,230 215,212 212,175 C 235,165 245,140 230,115 C 222,102 222,88 232,70 C 242,50 228,28 205,30 C 182,32 172,58 182,78 C 186,86 178,92 165,92 Z"/><path d="M 45,118 C 70,114 100,116 125,120" fill="none"/><path d="M 38,148 C 65,144 95,146 115,150" fill="none"/><path d="M 42,180 C 65,174 90,176 112,182" fill="none"/><path d="M 135,108 C 120,128 112,162 112,195" fill="none"/><path d="M 195,90 C 165,95 155,128 178,155" fill="none"/></g></svg></div>
         <h3>Quân BAO</h3>
         <p class="rule-relation">Thắng <strong>Búa</strong> · Thua <strong>Kéo</strong></p>
         <p class="rule-desc">Bao bọc và vô hiệu hóa Búa đối phương, là chìa khóa bọc lót quan trọng trong đội hình.</p>
@@ -548,7 +554,7 @@
       <div class="win-card">
         <span class="win-badge">ĐIỀU KIỆN THẮNG 1</span>
         <h4>Tiêu diệt toàn bộ quân địch</h4>
-        <p>Bắt hết toàn bộ 9 quân cờ của đối thủ trên bàn đấu thông qua các nước đi hợp lệ.</p>
+        <p>Ăn hết quân của đối thủ bằng các nước đi hợp lệ.</p>
       </div>
       <div class="win-card">
         <span class="win-badge">ĐIỀU KIỆN THẮNG 2</span>
@@ -608,7 +614,7 @@
         </div>
         <span class="feature-index">03 / TIẾN BỘ</span>
         <h3>Học hỏi &amp; Nâng cấp</h3>
-        <p>Xem lại replay chi tiết từng ván đấu, phân tích nước đi sai lầm và thử nghiệm với bot mẫu cố định trong Sandbox an toàn trước khi vào giải.</p>
+        <p>Xem lại diễn biến từng ván đấu và kiểm tra một nước đi trong Sandbox trước khi đăng ký giải.</p>
         <button type="button" class="landing-feature-link" onclick="document.getElementById('show-register')?.click(); document.getElementById('auth-station')?.scrollIntoView({behavior:'smooth'});">
           Bắt đầu so tài <span>→</span>
         </button>
@@ -636,16 +642,16 @@
             <h3>Tạo tài khoản</h3>
             <p>Đăng ký tài khoản để bắt đầu xây dựng Bot và tham gia các hoạt động trên nền tảng.</p>
           </div>
-          <div class="step-icon-status">✓</div>
+          <div class="step-icon-status" aria-hidden="true"><svg viewBox="0 0 24 24" focusable="false"><path d="m5 12 4 4L19 6" /></svg></div>
         </article>
 
         <article class="workflow-step-card">
           <div class="step-badge">02</div>
           <div class="step-text">
-            <h3>Xây dựng &amp; Chạy thử</h3>
+            <h3>Xây dựng và kiểm tra</h3>
             <p>Lập trình bot bằng C++17 hoặc Python 3, kiểm thử chiến thuật ngay trong Docker Sandbox.</p>
           </div>
-          <div class="step-icon-status">⌘</div>
+          <div class="step-icon-status" aria-hidden="true"><svg viewBox="0 0 24 24" focusable="false"><path d="M5 5h14v14H5zM8 9h8M8 13h5" /></svg></div>
         </article>
 
         <article class="workflow-step-card">
@@ -654,7 +660,7 @@
             <h3>Bước vào giải đấu</h3>
             <p>Gửi yêu cầu tham gia giải đấu, theo dõi trạng thái đăng ký và xem kết quả trận đấu.</p>
           </div>
-          <div class="step-icon-status">↗</div>
+          <div class="step-icon-status" aria-hidden="true"><svg viewBox="0 0 24 24" focusable="false"><path d="M7 17 17 7M9 7h8v8" /></svg></div>
         </article>
       </div>
     </div>

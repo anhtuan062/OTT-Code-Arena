@@ -35,14 +35,16 @@ Mã nguồn phải là UTF-8, không rỗng và tối đa 64 KiB. Với Bot đã
 
 ### Nhập từ GitHub
 
-Luồng nhập chỉ hỗ trợ public GitHub repository. Backend:
+Trong Không gian mã nguồn, chọn đúng runtime rồi dùng **Nạp mã**. UI chấp nhận URL HTTPS của repository hoặc URL file/raw GitHub trỏ tới file ở thư mục gốc. URL không được có thông tin đăng nhập, query hoặc fragment.
 
-1. xác thực URL repository;
-2. resolve default branch về commit SHA 40 ký tự;
-3. đọc archive và chọn file nguồn phù hợp runtime ở root;
-4. lưu source cùng URL và commit SHA.
+Tên file bắt buộc khớp runtime:
 
-Repository private không được hỗ trợ trong luồng người dùng. `GITHUB_TOKEN` chỉ là cấu hình server tùy chọn để tăng hạn mức gọi GitHub; token không được gửi về client.
+- C++17: `main.cpp`;
+- Python 3: `main.py`.
+
+File nằm trong thư mục con, có tên khác hoặc không khớp runtime sẽ bị từ chối. Repository phải công khai, có nhánh mặc định và không yêu cầu đăng nhập. Source phải là UTF-8, không rỗng và tối đa 64 KiB; UI còn kiểm tra cú pháp cơ bản trước khi nạp vào trình soạn thảo.
+
+**Nạp mã** chỉ đưa nội dung vào trình soạn thảo. Bạn phải kiểm tra lại rồi chọn **Tạo Bot** hoặc **Lưu phiên bản** để tạo revision; thao tác nạp không tự đăng ký Bot vào giải. Revision lưu lại source cùng URL repository và commit SHA tương ứng. `GITHUB_TOKEN` là cấu hình server tùy chọn để tăng hạn mức gọi GitHub, không được gửi về client.
 
 ## 4. Chạy thử
 

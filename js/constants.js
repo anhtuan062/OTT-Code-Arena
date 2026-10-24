@@ -36,7 +36,7 @@ const REASON_LABELS = {
   bot_empty_output: 'Bot không trả về dữ liệu',
   bot_illegal_move: 'Bot thực hiện nước đi không hợp lệ',
   turn_limit: 'Đạt giới hạn lượt',
-  repetition: 'Lặp lại vị trí',
+  repetition: 'Thua do lặp vị trí',
   insufficient_material: 'Không đủ quân',
   agreed_draw: 'Hai bên đồng ý hòa',
 };

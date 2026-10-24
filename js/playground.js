@@ -373,7 +373,7 @@ async function runPlaygroundSingleTest() {
 
   const playerAPieces = playgroundPieces.filter(p => p.player === 'A');
   if (playerAPieces.length !== 1) {
-    setPlaygroundToast('Bạn cần đặt đúng 1 quân của Bot A (Quân bạn) trước khi test.', 'error');
+    setPlaygroundToast('Bạn cần đặt đúng 1 quân của Bot A (quân bạn) trước khi kiểm tra.', 'error');
     return;
   }
 
@@ -446,7 +446,7 @@ async function runPlaygroundSingleTest() {
       const captureLabel = result.capture ? ` · Ăn quân đối thủ (${result.capture})` : ' · Không ăn quân';
       const label = `${move.from} → ${move.to}${captureLabel}`;
 
-      if (statusText) statusText.textContent = 'Test thành công · Nước đi hợp lệ';
+      if (statusText) statusText.textContent = 'Kiểm tra thành công · Nước đi hợp lệ';
       if (moveText) moveText.textContent = label;
       if (resultBanner) {
         resultBanner.className = 'playground-result-banner';
@@ -472,7 +472,7 @@ async function runPlaygroundSingleTest() {
         : selectedBotId === 'sample-python3'
           ? 'Bot mẫu Python 3'
           : (state.bots?.find(b => b.id === selectedBotId)?.name || 'Bot');
-      setPlaygroundToast(`Test thành công! ${botLabel} đã chọn nước đi ${move.from} → ${move.to}.`, 'info');
+      setPlaygroundToast(`Kiểm tra thành công! ${botLabel} đã chọn nước đi ${move.from} → ${move.to}.`, 'info');
 
       // Kích hoạt animation nước đi trên bàn cờ
       animatePlaygroundMove(move.from, move.to, move.piece_id, result.capture);
@@ -518,7 +518,7 @@ async function runPlaygroundSingleTest() {
     playgroundBusy = false;
     if (runButton) {
       runButton.disabled = false;
-      runButton.textContent = 'Test 1 lượt';
+      runButton.textContent = 'Kiểm tra 1 lượt';
     }
   }
 }
@@ -596,7 +596,7 @@ function renderPlaygroundHistory() {
 
   clear(list);
   if (!playgroundHistory.length) {
-    list.appendChild(create('p', { className: 'practice-move-history-empty', text: 'Chưa có lần test nào.' }));
+    list.appendChild(create('p', { className: 'practice-move-history-empty', text: 'Chưa có lần kiểm tra nào.' }));
     return;
   }
 

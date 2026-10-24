@@ -1677,7 +1677,7 @@ function renderPhase1CreationLegacy(container, tournament) {
           : bestOf === 3
             ? 'Mỗi cặp đấu chơi tối đa 3 ván; Bot thắng 2 ván trước sẽ thắng cặp. Ván thứ hai đổi bên. Nếu ván 3 hòa, Bot còn nhiều quân hơn thắng ván 3; nếu bằng quân, phe A thua và phe B thắng.'
             : tournament.format === 'multi_stage'
-              ? 'Ở vòng bảng, mỗi cặp chơi 2 ván. Ở nhánh loại trực tiếp, mỗi cặp chơi tối đa 3 ván. Ván thứ hai đổi bên; nếu có ván thứ ba, bên đi trước được xác định cố định cho từng cặp.'
+            ? 'Ở vòng bảng, mỗi cặp chơi 2 ván. Ở nhánh loại trực tiếp, mỗi cặp chơi tối đa 3 ván. Ván thứ hai đổi bên; Nếu cần ván thứ ba, hệ thống xác định bên đi trước theo mã cặp đấu.'
               : `Mỗi cặp hiện chơi ${bestOf || 1} ván.`,
       },
       {

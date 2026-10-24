@@ -203,7 +203,7 @@ function renderBotList() {
     const actionIcons = ['icon-code-2', 'icon-activity', 'icon-trash-2'];
     const sourceBtn = actionButton('Mã nguồn', () => openSourceWorkspace(bot), `source-bot:${bot.id}`, 'primary-btn bot-action');
     sourceBtn.title = 'Mở trình soạn thảo mã nguồn';
-    const testBtn = actionButton('Test thế cờ', () => typeof openPlaygroundForBot === 'function' ? openPlaygroundForBot(bot) : navigate('bot-playground'), `playground-bot:${bot.id}`, 'secondary-btn bot-action');
+    const testBtn = actionButton('Kiểm tra thế cờ', () => typeof openPlaygroundForBot === 'function' ? openPlaygroundForBot(bot) : navigate('bot-playground'), `playground-bot:${bot.id}`, 'secondary-btn bot-action');
     testBtn.title = 'Kiểm tra thế cờ trong sa bàn thử nghiệm';
     const deleteBtn = actionButton('Xóa', () => openDeleteBotDialog(bot), `delete-bot:${bot.id}`, 'secondary-btn bot-action bot-delete');
     deleteBtn.title = 'Xóa Bot này';
@@ -519,7 +519,7 @@ function updatePracticeButton() {
   const button = $('#run-bot-practice');
   if (!button) return;
   button.disabled = false;
-  button.title = state.sourceDirty ? 'Hãy lưu phiên bản hiện tại trước khi chạy thử' : 'Đấu với Bot hệ thống cố định';
+  button.title = state.sourceDirty ? 'Hãy lưu phiên bản hiện tại trước khi chạy thử' : 'Kiểm tra một lượt trong môi trường sandbox';
 }
 
 function renderRevisionList() {

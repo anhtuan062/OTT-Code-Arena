@@ -7553,6 +7553,7 @@
   <link rel="stylesheet" href="styles/views/bots.css">
   <link rel="stylesheet" href="styles/components/editor.css">
   <link rel="stylesheet" href="styles/views/tournaments.css">
+  <link rel="stylesheet" href="styles/components/visual-system.css">
 </head>
 
 <body>
@@ -7571,7 +7572,7 @@
     <nav class="nav-links" aria-label="Không gian làm việc">
       <button class="nav-link active" type="button" data-target="dashboard" aria-current="page"><svg class="ui-icon" aria-hidden="true"><use href="#icon-dashboard"></use></svg>Tổng quan</button>
       <button class="nav-link role-nav competitor-nav" type="button" data-role="competitor" data-target="bots"><svg class="ui-icon" aria-hidden="true"><use href="#icon-users"></use></svg><span>Bot của tôi</span><span class="nav-badge" id="nav-badge-bots" hidden></span></button>
-      <button class="nav-link role-nav competitor-nav" type="button" data-role="competitor" data-target="bot-playground"><svg class="ui-icon" aria-hidden="true"><use href="#icon-activity"></use></svg><span>Test thế cờ</span></button>
+      <button class="nav-link role-nav competitor-nav" type="button" data-role="competitor" data-target="bot-playground"><svg class="ui-icon" aria-hidden="true"><use href="#icon-activity"></use></svg><span>Kiểm tra thế cờ</span></button>
 
       <button class="nav-link role-nav competitor-nav" type="button" data-role="competitor" data-target="tournaments"><svg class="ui-icon" aria-hidden="true"><use href="#icon-trophy"></use></svg><span>Giải đấu</span><span class="nav-badge" id="nav-badge-tourneys" hidden></span></button>
       <button class="nav-link role-nav competitor-nav" type="button" data-role="competitor" data-target="player-guide"><svg class="ui-icon" aria-hidden="true"><use href="#icon-file-code-2"></use></svg><span>Hướng dẫn</span></button>
@@ -7710,7 +7711,7 @@ return legal_moves[0]</pre>
         </section>
         <section class="bot-guide-section">
           <h3>Cách kiểm tra Bot</h3>
-          <p>Trong Không gian mã nguồn, nhập hoặc sửa mã rồi chọn <strong>Chạy thử</strong>. Hệ thống chạy Bot hiện tại đấu với Bot hệ thống cố định trong môi trường sandbox. Khi chạy xong, bạn được chuyển sang trang <strong>Xem lại trận đấu</strong> để xem bàn cờ, nước đi và kết quả.</p>
+          <p>Trong Không gian mã nguồn, nhập hoặc sửa mã rồi chọn <strong>Chạy thử</strong>. Hệ thống biên dịch Bot, chạy một lượt kiểm tra trong môi trường sandbox và kiểm tra nước đi trả về. Luồng này không đấu với Bot hệ thống và không tạo kết quả giải đấu.</p>
           <p class="bot-guide-help">Trận thử không lưu kết quả vào giải đấu và không tạo thay đổi cho phiên bản đã lưu.</p>
         </section>
         <section class="bot-guide-section">
@@ -7733,21 +7734,21 @@ return legal_moves[0]</pre>
       <p class="dialog-copy" id="practice-description">Kiểm tra chiến thuật trong Docker sandbox trước khi tham gia giải đấu.</p>
       <p class="practice-revision-meta" id="practice-revision-meta">Chưa chọn phiên bản</p>
       <div class="practice-toolbar">
-        <div class="practice-opponent"><svg class="practice-opponent-icon" aria-hidden="true"><use href="#icon-bot"></use></svg><div class="practice-opponent-copy"><span class="field-label">ĐỐI THỦ</span><strong>Bot hệ thống cố định</strong><span>Trận thử không lưu kết quả giải đấu.</span></div></div>
+        <div class="practice-opponent"><svg class="practice-opponent-icon" aria-hidden="true"><use href="#icon-bot"></use></svg><div class="practice-opponent-copy"><span class="field-label">PHẠM VI KIỂM TRA</span><strong>Một lượt kiểm tra</strong><span>Không đấu với Bot hệ thống và không lưu kết quả giải đấu.</span></div></div>
         <select id="practice-scenario" hidden aria-hidden="true">
           <option value="initial">Bàn cờ ban đầu</option>
           <option value="capture">Có cơ hội ăn quân</option>
           <option value="near-goal">Tiến gần ô đích</option>
         </select>
-        <span id="practice-scenario-help" hidden>Trận thử với Bot hệ thống cố định.</span>
+        <span id="practice-scenario-help" hidden>Kiểm tra một lượt trong môi trường sandbox.</span>
       </div>
-      <p id="practice-status" class="practice-status" role="status" aria-live="polite">Sẵn sàng đấu với Bot hệ thống.</p>
+      <p id="practice-status" class="practice-status" role="status" aria-live="polite">Sẵn sàng kiểm tra một lượt.</p>
       <p id="practice-error" class="form-error" role="alert" hidden></p>
       <details id="practice-error-details" class="practice-error-details" hidden>
         <summary>Chi tiết kỹ thuật</summary>
         <p id="practice-error-technical"></p>
       </details>
-      <div id="practice-replay-toolbar" class="practice-replay-toolbar" aria-label="Điều khiển diễn biến trận thử" hidden>
+      <div id="practice-replay-toolbar" class="practice-replay-toolbar" aria-label="Điều khiển bản ghi kiểm tra" hidden>
         <div class="practice-replay-controls">
           <button class="icon-btn replay-control" id="practice-replay-start" type="button" aria-label="Về đầu" title="Về đầu"><svg class="ui-icon" aria-hidden="true"><use href="#icon-skip-back"></use></svg></button>
           <button class="icon-btn replay-control" id="practice-replay-prev" type="button" aria-label="Lùi một nước" title="Lùi một nước"><svg class="ui-icon" aria-hidden="true"><use href="#icon-step-back"></use></svg></button>
@@ -7756,8 +7757,8 @@ return legal_moves[0]</pre>
           <button class="icon-btn replay-control" id="practice-replay-end" type="button" aria-label="Đến cuối" title="Đến cuối"><svg class="ui-icon" aria-hidden="true"><use href="#icon-skip-forward"></use></svg></button>
           <span id="practice-replay-turn" class="replay-step" aria-live="polite">0 / 0</span>
         </div>
-        <label class="practice-replay-scrubber-label" for="practice-replay-scrubber">Tiến độ trận thử</label>
-        <input id="practice-replay-scrubber" type="range" min="-1" value="-1" step="1" aria-label="Chọn lượt trận thử">
+        <label class="practice-replay-scrubber-label" for="practice-replay-scrubber">Tiến độ bản ghi kiểm tra</label>
+        <input id="practice-replay-scrubber" type="range" min="-1" value="-1" step="1" aria-label="Chọn lượt kiểm tra">
         <label class="practice-replay-speed" for="practice-replay-speed">Tốc độ phát<select id="practice-replay-speed"><option value="1200">Chậm</option><option value="800" selected>Bình thường</option><option value="400">Nhanh</option></select></label>
       </div>
       <div id="practice-output" class="practice-output" hidden>
@@ -7926,7 +7927,7 @@ return legal_moves[0]</pre>
   <nav class="bottom-nav" aria-label="Điều hướng chính" hidden>
     <button type="button" data-target="dashboard">Tổng quan</button>
     <button type="button" class="role-nav" data-role="competitor" data-target="bots">Bot</button>
-    <button type="button" class="role-nav" data-role="competitor" data-target="bot-playground">Test thế cờ</button>
+    <button type="button" class="role-nav" data-role="competitor" data-target="bot-playground">Kiểm tra thế cờ</button>
    
     <button type="button" class="role-nav" data-role="competitor" data-target="tournaments" data-scope="discoverable">Giải đấu</button>
     <button type="button" class="role-nav" data-role="competitor" data-target="player-guide">Hướng dẫn</button>

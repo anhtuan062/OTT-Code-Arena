@@ -325,7 +325,7 @@ function updateLiveHistory(snapshot) {
     if (previousGame !== null && game > previousGame) {
       if (state.liveTransitionTimer) clearTimeout(state.liveTransitionTimer);
       state.livePendingSnapshot = snapshot;
-      showLiveGameResultModal({ ...snapshot, status: 'finished' }, previousGame, state.liveCompletedSnapshot);
+      if (typeof showLiveGameResultModal === 'function') showLiveGameResultModal({ ...snapshot, status: 'finished' }, previousGame, state.liveCompletedSnapshot);
       const transitionToken = state.liveTransitionToken;
       state.liveTransitionTimer = setTimeout(() => {
         if (transitionToken !== state.liveTransitionToken || state.activeView !== 'replay-view') return;
@@ -360,7 +360,7 @@ function updateLiveHistory(snapshot) {
       if (state.liveTransitionTimer) clearTimeout(state.liveTransitionTimer);
       state.livePendingSnapshot = snapshot;
       const completedSnapshot = state.liveCompletedSnapshot;
-      showLiveGameResultModal({ ...snapshot, status: 'finished' }, previousGame, completedSnapshot);
+      if (typeof showLiveGameResultModal === 'function') showLiveGameResultModal({ ...snapshot, status: 'finished' }, previousGame, completedSnapshot);
       const resultText = $('#r-result-text');
       if (resultText) resultText.textContent = `Ván ${previousGame} hoàn tất · ${completedSnapshot?.winner === 'draw' ? 'Hòa' : completedSnapshot?.winner ? `${completedSnapshot.winner} thắng` : 'Đã có kết quả'} · Tỷ số ${snapshot.series?.winsA ?? 0}-${snapshot.series?.winsB ?? 0} · Đang chuyển sang Ván ${game}`;
       const transitionToken = state.liveTransitionToken;

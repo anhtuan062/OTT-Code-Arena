@@ -41,7 +41,7 @@ const REASON_LABELS = {
   bot_empty_output: 'Bot không trả về dữ liệu',
   bot_illegal_move: 'Bot thực hiện nước đi không hợp lệ',
   turn_limit: 'Đạt giới hạn lượt',
-  repetition: 'Lặp lại vị trí',
+  repetition: 'Thua do lặp vị trí',
   insufficient_material: 'Không đủ quân',
   agreed_draw: 'Hai bên đồng ý hòa',
 };
@@ -692,7 +692,7 @@ function navigate(view, options = {}) {
     link.setAttribute('aria-current', active ? 'page' : 'false');
   });
   const tournamentCache = Array.isArray(state.tournaments) ? state.tournaments : [];
-  const pageTitles = { dashboard: state.user?.role === 'organizer' ? 'Tổng quan giải đấu' : 'Tổng quan', bots: 'Bot của tôi', 'bot-workspace': 'Tạo Bot', 'bot-playground': 'Test thế cờ', 'player-guide': 'Hướng dẫn người chơi', tournaments: state.user?.role === 'organizer' ? 'Quản lý giải đấu' : 'Giải đấu', 'tournament-detail': state.currentTournament?.name || tournamentCache.find(tournament => tournament.tournamentId === state.tournamentId)?.name || 'Chi tiết giải đấu', 'replay-view': 'Xem lại trận đấu' };
+  const pageTitles = { dashboard: state.user?.role === 'organizer' ? 'Tổng quan giải đấu' : 'Tổng quan', bots: 'Bot của tôi', 'bot-workspace': 'Tạo Bot', 'bot-playground': 'Kiểm tra thế cờ', 'player-guide': 'Hướng dẫn người chơi', tournaments: state.user?.role === 'organizer' ? 'Quản lý giải đấu' : 'Giải đấu', 'tournament-detail': state.currentTournament?.name || tournamentCache.find(tournament => tournament.tournamentId === state.tournamentId)?.name || 'Chi tiết giải đấu', 'replay-view': 'Xem lại trận đấu' };
   const pageTitle = $('#page-title');
   if (pageTitle) pageTitle.textContent = pageTitles[view] || 'OTT Code Arena';
   const sectionTitle = state.user?.role === 'organizer' ? 'Quản lý' : 'Giải đấu';
@@ -1686,7 +1686,7 @@ function renderBotList() {
     const actionIcons = ['icon-code-2', 'icon-activity', 'icon-trash-2'];
     const sourceBtn = actionButton('Mã nguồn', () => openSourceWorkspace(bot), `source-bot:${bot.id}`, 'primary-btn bot-action');
     sourceBtn.title = 'Mở trình soạn thảo mã nguồn';
-    const testBtn = actionButton('Test thế cờ', () => typeof openPlaygroundForBot === 'function' ? openPlaygroundForBot(bot) : navigate('bot-playground'), `playground-bot:${bot.id}`, 'secondary-btn bot-action');
+    const testBtn = actionButton('Kiểm tra thế cờ', () => typeof openPlaygroundForBot === 'function' ? openPlaygroundForBot(bot) : navigate('bot-playground'), `playground-bot:${bot.id}`, 'secondary-btn bot-action');
     testBtn.title = 'Kiểm tra thế cờ trong sa bàn thử nghiệm';
     const deleteBtn = actionButton('Xóa', () => openDeleteBotDialog(bot), `delete-bot:${bot.id}`, 'secondary-btn bot-action bot-delete');
     deleteBtn.title = 'Xóa Bot này';
@@ -2002,7 +2002,7 @@ function updatePracticeButton() {
   const button = $('#run-bot-practice');
   if (!button) return;
   button.disabled = false;
-  button.title = state.sourceDirty ? 'Hãy lưu phiên bản hiện tại trước khi chạy thử' : 'Đấu với Bot hệ thống cố định';
+  button.title = state.sourceDirty ? 'Hãy lưu phiên bản hiện tại trước khi chạy thử' : 'Kiểm tra một lượt trong môi trường sandbox';
 }
 
 function renderRevisionList() {
@@ -2873,12 +2873,12 @@ function renderPracticeMatchResult(result) {
   state.practiceReplay = result;
   state.practiceReplayMoveIndex = -1;
   const details = $('#practice-result-details'); clear(details);
-  const winnerLabel = result.winner === 'A' ? 'Bot của bạn' : result.winner === 'B' ? result.opponentName || 'Bot hệ thống' : 'Hòa';
+  const winnerLabel = result.winner === 'A' ? 'Bot của bạn' : result.winner === 'B' ? result.opponentName || 'Đối thủ thử nghiệm' : 'Hòa';
   const reasonLabel = result.terminationReason === 'goal_reached' ? 'Đạt ô đích' : result.terminationReason === 'all_pieces_captured' ? 'Ăn hết quân đối thủ' : result.terminationReason === 'max_turns' ? 'Đạt giới hạn lượt' : 'Không còn nước đi';
-  $('#practice-result-title').textContent = result.winner === 'draw' ? 'Trận thử hòa' : `${winnerLabel} thắng`;
+  $('#practice-result-title').textContent = result.winner === 'draw' ? 'Phiên kiểm tra hòa' : `${winnerLabel} thắng`;
   $('#practice-result-move').textContent = `${result.moves?.length || 0} lượt · ${reasonLabel}`;
   const revision = state.practiceRevision;
-  [['Kết quả', winnerLabel], ['Đối thủ', result.opponentName || 'Bot hệ thống'], ['Số lượt', String(result.moves?.length || 0)], ['Lý do kết thúc', reasonLabel], ['Ngôn ngữ', result.runtimeId === 'cpp' ? 'C++17' : 'Python 3'], ['Phiên bản', revision?.revisionId ? revision.revisionId.slice(0, 12) : '—']]
+  [['Kết quả', winnerLabel], ['Đối thủ', result.opponentName || 'Đối thủ thử nghiệm'], ['Số lượt', String(result.moves?.length || 0)], ['Lý do kết thúc', reasonLabel], ['Ngôn ngữ', result.runtimeId === 'cpp' ? 'C++17' : 'Python 3'], ['Phiên bản', revision?.revisionId ? revision.revisionId.slice(0, 12) : '—']]
     .forEach(([label, value]) => details.append(create('dt', { text: label }), create('dd', { text: value })));
   $('#practice-result').hidden = false;
   $('#practice-output').hidden = false;
@@ -2992,7 +2992,7 @@ function openPracticeReplayPage(result, revision) {
     terminationReason: result.terminationReason,
     participantIdentities: {
       A: { participantName: state.sourceWorkspaceBot?.name || 'Bot của bạn', botName: state.sourceWorkspaceBot?.name || 'Bot của bạn', runtimeId: revision.runtimeId },
-      B: { participantName: result.opponentName || 'Bot hệ thống cố định', botName: result.opponentName || 'Bot hệ thống cố định' },
+      B: { participantName: result.opponentName || 'Đối thủ thử nghiệm', botName: result.opponentName || 'Đối thủ thử nghiệm' },
     },
     metadata: { sourceRevisions: [{ player: 'A', revisionId: revision.revisionId, runtimeId: revision.runtimeId }] },
   };
@@ -3003,7 +3003,7 @@ function openPracticeReplayPage(result, revision) {
   state.replayMoveIndex = -1;
   state.replayContext = { practice: true, tournamentId: state.tournamentId || '', matchId: replay.matchId, authRevision: state.authRevision, sourceViewRevision: state.viewRevision };
   $('#replay-view').classList.remove('live-match-view');
-  $('#replay-view-kicker').textContent = 'XEM LẠI TRẬN THỬ';
+  $('#replay-view-kicker').textContent = 'XEM LẠI PHIÊN KIỂM TRA';
   setReplayBackLabel('Quay lại Bot của tôi');
   $('#replay-error').hidden = true;
   navigate('replay-view');
@@ -3024,13 +3024,13 @@ function openPracticeRunner(revision) {
   $('#practice-title').textContent = 'Kiểm tra Bot';
   const runtimeLabel = revision.runtimeId === 'cpp' ? 'C++17' : revision.runtimeId === 'python3' ? 'Python 3' : revision.runtimeId;
   const practiceTitle = $('#practice-title');
-  if (practiceTitle) practiceTitle.textContent = 'Bot single-turn validation';
+  if (practiceTitle) practiceTitle.textContent = 'Kiểm tra một lượt';
   const checkNote = $('.practice-check-note');
-  if (checkNote) checkNote.textContent = 'Single-turn compile and move validation. The system Bot is not used.';
+  if (checkNote) checkNote.textContent = 'Biên dịch Bot và kiểm tra một nước đi trong môi trường sandbox. Không đấu với Bot hệ thống.';
   const opponent = document.querySelector('.practice-opponent');
   if (opponent) opponent.remove();
   const validationStage = document.querySelector('[data-progress-stage="match"]');
-  if (validationStage) validationStage.textContent = 'Validate move';
+  if (validationStage) validationStage.textContent = 'Kiểm tra nước đi';
   const modeLabel = revision.executionMode === 'strategy' ? 'Strategy SDK' : revision.executionMode === 'raw' ? 'Mã nguồn trực tiếp' : '';
   const revisionMeta = $('#practice-revision-meta');
   if (revisionMeta) {
@@ -3082,7 +3082,7 @@ async function testBotMatch() {
   clearPracticeResult();
   if (typeof startPracticeProgress === 'function') startPracticeProgress();
   $('#practice-output').hidden = false;
-  $('#practice-status').textContent = 'Đang chạy trận thử với Bot hệ thống…';
+  $('#practice-status').textContent = 'Đang kiểm tra Bot trong môi trường sandbox…';
   runButton.textContent = 'Đang chạy…';
   runButton.disabled = true;
   try {
@@ -4843,7 +4843,7 @@ function renderPhase1CreationLegacy(container, tournament) {
           : bestOf === 3
             ? 'Mỗi cặp đấu chơi tối đa 3 ván; Bot thắng 2 ván trước sẽ thắng cặp. Ván thứ hai đổi bên. Nếu ván 3 hòa, Bot còn nhiều quân hơn thắng ván 3; nếu bằng quân, phe A thua và phe B thắng.'
             : tournament.format === 'multi_stage'
-              ? 'Ở vòng bảng, mỗi cặp chơi 2 ván. Ở nhánh loại trực tiếp, mỗi cặp chơi tối đa 3 ván. Ván thứ hai đổi bên; nếu có ván thứ ba, bên đi trước được xác định cố định cho từng cặp.'
+            ? 'Ở vòng bảng, mỗi cặp chơi 2 ván. Ở nhánh loại trực tiếp, mỗi cặp chơi tối đa 3 ván. Ván thứ hai đổi bên; Nếu cần ván thứ ba, hệ thống xác định bên đi trước theo mã cặp đấu.'
               : `Mỗi cặp hiện chơi ${bestOf || 1} ván.`,
       },
       {
@@ -10938,7 +10938,7 @@ function updateLiveHistory(snapshot) {
     if (previousGame !== null && game > previousGame) {
       if (state.liveTransitionTimer) clearTimeout(state.liveTransitionTimer);
       state.livePendingSnapshot = snapshot;
-      showLiveGameResultModal({ ...snapshot, status: 'finished' }, previousGame, state.liveCompletedSnapshot);
+      if (typeof showLiveGameResultModal === 'function') showLiveGameResultModal({ ...snapshot, status: 'finished' }, previousGame, state.liveCompletedSnapshot);
       const transitionToken = state.liveTransitionToken;
       state.liveTransitionTimer = setTimeout(() => {
         if (transitionToken !== state.liveTransitionToken || state.activeView !== 'replay-view') return;
@@ -10973,7 +10973,7 @@ function updateLiveHistory(snapshot) {
       if (state.liveTransitionTimer) clearTimeout(state.liveTransitionTimer);
       state.livePendingSnapshot = snapshot;
       const completedSnapshot = state.liveCompletedSnapshot;
-      showLiveGameResultModal({ ...snapshot, status: 'finished' }, previousGame, completedSnapshot);
+      if (typeof showLiveGameResultModal === 'function') showLiveGameResultModal({ ...snapshot, status: 'finished' }, previousGame, completedSnapshot);
       const resultText = $('#r-result-text');
       if (resultText) resultText.textContent = `Ván ${previousGame} hoàn tất · ${completedSnapshot?.winner === 'draw' ? 'Hòa' : completedSnapshot?.winner ? `${completedSnapshot.winner} thắng` : 'Đã có kết quả'} · Tỷ số ${snapshot.series?.winsA ?? 0}-${snapshot.series?.winsB ?? 0} · Đang chuyển sang Ván ${game}`;
       const transitionToken = state.liveTransitionToken;
@@ -12266,7 +12266,7 @@ async function runPlaygroundSingleTest() {
 
   const playerAPieces = playgroundPieces.filter(p => p.player === 'A');
   if (playerAPieces.length !== 1) {
-    setPlaygroundToast('Bạn cần đặt đúng 1 quân của Bot A (Quân bạn) trước khi test.', 'error');
+    setPlaygroundToast('Bạn cần đặt đúng 1 quân của Bot A (quân bạn) trước khi kiểm tra.', 'error');
     return;
   }
 
@@ -12339,7 +12339,7 @@ async function runPlaygroundSingleTest() {
       const captureLabel = result.capture ? ` · Ăn quân đối thủ (${result.capture})` : ' · Không ăn quân';
       const label = `${move.from} → ${move.to}${captureLabel}`;
 
-      if (statusText) statusText.textContent = 'Test thành công · Nước đi hợp lệ';
+      if (statusText) statusText.textContent = 'Kiểm tra thành công · Nước đi hợp lệ';
       if (moveText) moveText.textContent = label;
       if (resultBanner) {
         resultBanner.className = 'playground-result-banner';
@@ -12365,7 +12365,7 @@ async function runPlaygroundSingleTest() {
         : selectedBotId === 'sample-python3'
           ? 'Bot mẫu Python 3'
           : (state.bots?.find(b => b.id === selectedBotId)?.name || 'Bot');
-      setPlaygroundToast(`Test thành công! ${botLabel} đã chọn nước đi ${move.from} → ${move.to}.`, 'info');
+      setPlaygroundToast(`Kiểm tra thành công! ${botLabel} đã chọn nước đi ${move.from} → ${move.to}.`, 'info');
 
       // Kích hoạt animation nước đi trên bàn cờ
       animatePlaygroundMove(move.from, move.to, move.piece_id, result.capture);
@@ -12411,7 +12411,7 @@ async function runPlaygroundSingleTest() {
     playgroundBusy = false;
     if (runButton) {
       runButton.disabled = false;
-      runButton.textContent = 'Test 1 lượt';
+      runButton.textContent = 'Kiểm tra 1 lượt';
     }
   }
 }
@@ -12489,7 +12489,7 @@ function renderPlaygroundHistory() {
 
   clear(list);
   if (!playgroundHistory.length) {
-    list.appendChild(create('p', { className: 'practice-move-history-empty', text: 'Chưa có lần test nào.' }));
+    list.appendChild(create('p', { className: 'practice-move-history-empty', text: 'Chưa có lần kiểm tra nào.' }));
     return;
   }
 

@@ -247,12 +247,12 @@ function renderPracticeMatchResult(result) {
   state.practiceReplay = result;
   state.practiceReplayMoveIndex = -1;
   const details = $('#practice-result-details'); clear(details);
-  const winnerLabel = result.winner === 'A' ? 'Bot của bạn' : result.winner === 'B' ? result.opponentName || 'Bot hệ thống' : 'Hòa';
+  const winnerLabel = result.winner === 'A' ? 'Bot của bạn' : result.winner === 'B' ? result.opponentName || 'Đối thủ thử nghiệm' : 'Hòa';
   const reasonLabel = result.terminationReason === 'goal_reached' ? 'Đạt ô đích' : result.terminationReason === 'all_pieces_captured' ? 'Ăn hết quân đối thủ' : result.terminationReason === 'max_turns' ? 'Đạt giới hạn lượt' : 'Không còn nước đi';
-  $('#practice-result-title').textContent = result.winner === 'draw' ? 'Trận thử hòa' : `${winnerLabel} thắng`;
+  $('#practice-result-title').textContent = result.winner === 'draw' ? 'Phiên kiểm tra hòa' : `${winnerLabel} thắng`;
   $('#practice-result-move').textContent = `${result.moves?.length || 0} lượt · ${reasonLabel}`;
   const revision = state.practiceRevision;
-  [['Kết quả', winnerLabel], ['Đối thủ', result.opponentName || 'Bot hệ thống'], ['Số lượt', String(result.moves?.length || 0)], ['Lý do kết thúc', reasonLabel], ['Ngôn ngữ', result.runtimeId === 'cpp' ? 'C++17' : 'Python 3'], ['Phiên bản', revision?.revisionId ? revision.revisionId.slice(0, 12) : '—']]
+  [['Kết quả', winnerLabel], ['Đối thủ', result.opponentName || 'Đối thủ thử nghiệm'], ['Số lượt', String(result.moves?.length || 0)], ['Lý do kết thúc', reasonLabel], ['Ngôn ngữ', result.runtimeId === 'cpp' ? 'C++17' : 'Python 3'], ['Phiên bản', revision?.revisionId ? revision.revisionId.slice(0, 12) : '—']]
     .forEach(([label, value]) => details.append(create('dt', { text: label }), create('dd', { text: value })));
   $('#practice-result').hidden = false;
   $('#practice-output').hidden = false;
@@ -366,7 +366,7 @@ function openPracticeReplayPage(result, revision) {
     terminationReason: result.terminationReason,
     participantIdentities: {
       A: { participantName: state.sourceWorkspaceBot?.name || 'Bot của bạn', botName: state.sourceWorkspaceBot?.name || 'Bot của bạn', runtimeId: revision.runtimeId },
-      B: { participantName: result.opponentName || 'Bot hệ thống cố định', botName: result.opponentName || 'Bot hệ thống cố định' },
+      B: { participantName: result.opponentName || 'Đối thủ thử nghiệm', botName: result.opponentName || 'Đối thủ thử nghiệm' },
     },
     metadata: { sourceRevisions: [{ player: 'A', revisionId: revision.revisionId, runtimeId: revision.runtimeId }] },
   };
@@ -377,7 +377,7 @@ function openPracticeReplayPage(result, revision) {
   state.replayMoveIndex = -1;
   state.replayContext = { practice: true, tournamentId: state.tournamentId || '', matchId: replay.matchId, authRevision: state.authRevision, sourceViewRevision: state.viewRevision };
   $('#replay-view').classList.remove('live-match-view');
-  $('#replay-view-kicker').textContent = 'XEM LẠI TRẬN THỬ';
+  $('#replay-view-kicker').textContent = 'XEM LẠI PHIÊN KIỂM TRA';
   setReplayBackLabel('Quay lại Bot của tôi');
   $('#replay-error').hidden = true;
   navigate('replay-view');
@@ -398,13 +398,13 @@ function openPracticeRunner(revision) {
   $('#practice-title').textContent = 'Kiểm tra Bot';
   const runtimeLabel = revision.runtimeId === 'cpp' ? 'C++17' : revision.runtimeId === 'python3' ? 'Python 3' : revision.runtimeId;
   const practiceTitle = $('#practice-title');
-  if (practiceTitle) practiceTitle.textContent = 'Bot single-turn validation';
+  if (practiceTitle) practiceTitle.textContent = 'Kiểm tra một lượt';
   const checkNote = $('.practice-check-note');
-  if (checkNote) checkNote.textContent = 'Single-turn compile and move validation. The system Bot is not used.';
+  if (checkNote) checkNote.textContent = 'Biên dịch Bot và kiểm tra một nước đi trong môi trường sandbox. Không đấu với Bot hệ thống.';
   const opponent = document.querySelector('.practice-opponent');
   if (opponent) opponent.remove();
   const validationStage = document.querySelector('[data-progress-stage="match"]');
-  if (validationStage) validationStage.textContent = 'Validate move';
+  if (validationStage) validationStage.textContent = 'Kiểm tra nước đi';
   const modeLabel = revision.executionMode === 'strategy' ? 'Strategy SDK' : revision.executionMode === 'raw' ? 'Mã nguồn trực tiếp' : '';
   const revisionMeta = $('#practice-revision-meta');
   if (revisionMeta) {
@@ -456,7 +456,7 @@ async function testBotMatch() {
   clearPracticeResult();
   if (typeof startPracticeProgress === 'function') startPracticeProgress();
   $('#practice-output').hidden = false;
-  $('#practice-status').textContent = 'Đang chạy trận thử với Bot hệ thống…';
+  $('#practice-status').textContent = 'Đang kiểm tra Bot trong môi trường sandbox…';
   runButton.textContent = 'Đang chạy…';
   runButton.disabled = true;
   try {

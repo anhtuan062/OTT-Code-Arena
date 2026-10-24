@@ -1,10 +1,10 @@
 <!-- BOT PLAYGROUND -->
-<div id="bot-playground" class="page bot-playground-page" aria-label="Khu vực kiểm thử Bot">
+<div id="bot-playground" class="page bot-playground-page" role="main" aria-label="Khu vực kiểm thử Bot">
   <!-- 1. COMPACT TOOLBAR HEADER -->
   <header class="playground-header">
     <div class="playground-heading">
       <div class="playground-title-row">
-        <h1>Test thế cờ</h1>
+        <h1>Kiểm tra thế cờ</h1>
         <span class="playground-badge">Sa bàn 9×9</span>
       </div>
       <p class="dialog-copy">Thử nghiệm nước đi của Bot với thế cờ tùy biến trước khi tham gia giải đấu.</p>
@@ -101,7 +101,7 @@
         <button id="playground-clear-board" class="secondary-btn" type="button">Xoá bàn cờ</button>
         <button id="playground-run-test" class="primary-btn" type="button">
           <svg class="ui-icon" aria-hidden="true"><use href="#icon-play"></use></svg>
-          <span>Test 1 lượt</span>
+          <span>Kiểm tra 1 lượt</span>
         </button>
       </div>
     </section>
@@ -173,7 +173,7 @@
         <div class="playground-inspector-nav" role="tablist" aria-label="Kết quả và lịch sử kiểm thử">
           <button type="button" class="playground-tab-btn active" role="tab" aria-selected="true" data-tab="result" id="tab-btn-result">
             <svg class="ui-icon" aria-hidden="true"><use href="#icon-activity"></use></svg>
-            <span>Kết quả lượt test</span>
+            <span>Kết quả lượt kiểm tra</span>
           </button>
           <button type="button" class="playground-tab-btn" role="tab" aria-selected="false" data-tab="history" id="tab-btn-history">
             <svg class="ui-icon" aria-hidden="true"><use href="#icon-clock"></use></svg>
@@ -184,11 +184,11 @@
         <!-- TAB CONTENT: KẾT QUẢ -->
         <section id="playground-result-card" class="playground-result-card playground-tab-pane" aria-labelledby="playground-result-title">
           <div class="playground-card-head visually-hidden">
-            <h2 id="playground-result-title">Kết quả lượt test</h2>
+            <h2 id="playground-result-title">Kết quả lượt kiểm tra</h2>
           </div>
           <div id="playground-result-empty" class="playground-empty-hint">
             <svg class="ui-icon" aria-hidden="true"><use href="#icon-play"></use></svg>
-            <p id="playground-result-subtitle">Chưa chạy kiểm thử. Nhấn "Test 1 lượt" để thực thi Bot.</p>
+            <p id="playground-result-subtitle">Chưa chạy kiểm tra. Nhấn "Kiểm tra 1 lượt" để chạy Bot.</p>
           </div>
           <div id="playground-result-body" class="playground-result-body" hidden>
             <div class="playground-result-banner" id="playground-result-banner">
@@ -203,13 +203,13 @@
         <section class="playground-history-card playground-tab-pane" aria-labelledby="playground-history-title" hidden>
           <div class="playground-card-head">
             <div>
-              <h3 id="playground-history-title">Lịch sử test trong phiên</h3>
+              <h3 id="playground-history-title">Lịch sử kiểm tra trong phiên</h3>
               <p class="field-help">Lưu tạm trên trình duyệt trong phiên làm việc hiện tại.</p>
             </div>
             <button id="playground-clear-history" type="button" class="secondary-btn btn-xs">Xoá lịch sử</button>
           </div>
           <div id="playground-history-list" class="playground-history-list">
-            <p class="practice-move-history-empty">Chưa có lần test nào.</p>
+            <p class="practice-move-history-empty">Chưa có lần kiểm tra nào.</p>
           </div>
         </section>
       </div>
