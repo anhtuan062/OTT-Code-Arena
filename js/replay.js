@@ -472,7 +472,7 @@ function renderReplayBoard(board, liveMove = null) {
   // incorrectly mark its old square. Standard captures remove the piece, so
   // fall back to the move destination (the square where the capture happened).
   const capturedPiece = lastMove?.captures && board?.pieces?.find(piece => piece.id === lastMove.captures);
-  const capturePosition = capturedPiece || lastMove?.to;
+  const capturePosition = lastMove?.captures ? (capturedPiece || lastMove.to) : null;
   const boardSize = Number(board.boardSize) === 9 ? 9 : 0;
   if (!boardSize) {
     element.appendChild(create('p', { className: 'ui-message', text: 'Bản xem lại này có kích thước bàn cờ không được hỗ trợ.' }));
