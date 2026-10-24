@@ -443,6 +443,7 @@ function startLiveMatchStream() {
 }
 
 async function pollLiveMatch() {
+  const localize = message => typeof localizeErrorMessage === 'function' ? localizeErrorMessage(message) : String(message || '');
   const context = state.liveMatchContext;
   if (!context || state.activeView !== 'replay-view') return;
   try {
@@ -472,7 +473,7 @@ async function pollLiveMatch() {
     $('#replay-loading').hidden = false;
     if (state.liveMatchContext !== context || state.activeView !== 'replay-view') return;
     if (error?.status === 429) state.livePollBackoffMs = Math.min(30_000, Math.max(3_000, (state.livePollBackoffMs || 1500) * 2));
-    const resultText = $('#r-result-text'); if (resultText) resultText.textContent = localizeErrorMessage(error.message || 'Không thể tải dữ liệu trực tiếp');
+    const resultText = $('#r-result-text'); if (resultText) resultText.textContent = localize(error.message || 'Không thể tải dữ liệu trực tiếp');
     scheduleLiveMatchPoll();
   }
 }
