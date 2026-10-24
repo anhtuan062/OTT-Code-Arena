@@ -1648,11 +1648,78 @@ function renderBotPagination(totalPages) {
   pagination.append(previous, pageLabel, next);
 }
 
+// ---- Centralized Bot workspace feedback (one toast, plain Vietnamese) ----
+const BOT_FEEDBACK_VI_PATTERN = /[àáạảãâầấậẩẫăằắặẳẵèéẹẻẽêềếệểễìíịỉĩòóọỏõôồốộổỗơờớợởỡùúụủũưừứựửữỳýỵỷỹđ]/i;
+const BOT_FEEDBACK_TECHNICAL_PATTERN = /\n\s*at\s|\bat\s+[\w$.<>]+\s*\(|(?:Type|Reference|Syntax|Range)Error|Exception|Traceback|\bstack\b|\bE(?:NOENT|CONN\w*|ACCES|PIPE|TIMEDOUT)\b|undefined|\[object|<\/?[a-z][^>]*>|\{\s*"|\.(?:ts|js|mjs|cjs):\d+/i;
+
+function friendlyBotMessage(input, fallback = 'Đã có lỗi xảy ra. Vui lòng thử lại.') {
+  const status = input && typeof input === 'object' ? Number(input.status) || 0 : 0;
+  let raw = typeof input === 'string' ? input : String(input?.message || '');
+  if (typeof localizeErrorMessage === 'function') raw = localizeErrorMessage(raw);
+  raw = String(raw || '').trim();
+  // Messages already written in Vietnamese by the UI/API are kept as-is.
+  if (raw && raw.length <= 240 && BOT_FEEDBACK_VI_PATTERN.test(raw) && !BOT_FEEDBACK_TECHNICAL_PATTERN.test(raw)) return raw;
+  const byStatus = {
+    401: 'Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.',
+    403: 'Bạn không có quyền thực hiện thao tác này.',
+    404: 'Không tìm thấy Bot hoặc phiên bản yêu cầu. Hãy tải lại trang rồi thử lại.',
+    409: 'Dữ liệu vừa được thay đổi ở nơi khác. Hãy tải lại trang rồi thử lại.',
+    413: 'Mã nguồn vượt quá giới hạn 64 KB. Hãy rút gọn rồi thử lại.',
+    429: 'Bạn thao tác quá nhanh. Vui lòng đợi một lát rồi thử lại.',
+  };
+  if (byStatus[status]) return byStatus[status];
+  if (status >= 500) return 'Máy chủ đang gặp sự cố. Vui lòng thử lại sau ít phút.';
+  const rules = [
+    [/failed to fetch|network|timed?\s?out|abort/i, 'Không thể kết nối tới máy chủ. Hãy kiểm tra mạng và thử lại.'],
+    [/too large|exceed|payload|size limit/i, 'Mã nguồn vượt quá giới hạn 64 KB. Hãy rút gọn rồi thử lại.'],
+    [/utf-?8|encoding|decode/i, 'Tệp phải được lưu với mã hóa UTF-8.'],
+    [/compil|syntax|g\+\+|clang|indentation/i, 'Mã nguồn chưa hợp lệ hoặc chưa biên dịch được. Hãy kiểm tra lại cú pháp rồi thử lại.'],
+    [/rate.?limit|too many/i, 'Bạn thao tác quá nhanh. Vui lòng đợi một lát rồi thử lại.'],
+    [/github|repository|raw\.githubusercontent/i, 'Không thể nạp mã nguồn từ GitHub. Hãy kiểm tra URL và đảm bảo repository ở chế độ công khai.'],
+  ];
+  const matched = rules.find(([pattern]) => pattern.test(raw));
+  return matched ? matched[1] : fallback;
+}
+
+function showBotFeedback(message, type = 'info') {
+  const text = type === 'error' ? friendlyBotMessage(message) : String(message || '').trim();
+  if (!text || typeof showToast !== 'function') return;
+  // Keep exactly one feedback box on screen: replace whatever is showing
+  // (including the raw toast api() may have just emitted for the same error).
+  $('#toast-container')?.replaceChildren();
+  showToast(text, type);
+}
+
+function markBotFeedbackShown(error) {
+  if (error && typeof error === 'object') { error.notified = true; error.botFeedbackShown = true; }
+  return error;
+}
+
 function setSourceError(message = '') {
   const error = $('#bot-source-error');
-  if (!error) return;
-  error.textContent = message;
-  error.hidden = !message;
+  const text = message ? friendlyBotMessage(message) : '';
+  if (error) { error.textContent = text; error.hidden = true; }
+  if (text) showBotFeedback(text, 'error');
+}
+
+function formatSourceFileSize(bytes) {
+  const kb = Math.max(0.1, (Number(bytes) || 0) / 1024);
+  return `${kb.toLocaleString('vi-VN', { maximumFractionDigits: 1 })} KB`;
+}
+
+function renderSourceFileInfo(file = null, status = 'selected') {
+  const info = $('#bot-source-file-info');
+  if (!info) return;
+  info.classList.remove('is-selected', 'is-invalid');
+  if (!file) {
+    const extension = $('#bot-source-runtime')?.value === 'python3' ? '.py' : '.cpp';
+    info.textContent = `Hỗ trợ ${extension} · tối đa 64 KB`;
+    info.removeAttribute('title');
+    return;
+  }
+  info.textContent = `${file.name} · ${formatSourceFileSize(file.size)}`;
+  info.title = file.name;
+  info.classList.add(status === 'invalid' ? 'is-invalid' : 'is-selected');
 }
 
 function updateSourceRuntimeMeta(runtimeId) {
@@ -1676,16 +1743,20 @@ async function importBotSourceFile(event) {
   const input = event?.target || $('#bot-source-file');
   const file = input?.files?.[0];
   if (!file) return;
+  const showFileInfo = (status) => { if (typeof renderSourceFileInfo === 'function') renderSourceFileInfo(file, status); };
+  showFileInfo('selected');
   const runtimeId = $('#bot-source-runtime')?.value;
   const extension = runtimeId === 'python3' ? '.py' : '.cpp';
   const runtimeLabel = runtimeId === 'python3' ? 'Python 3' : 'C++17';
   const resetInput = () => { if (input) input.value = ''; };
   if (!file.name.toLowerCase().endsWith(extension)) {
+    showFileInfo('invalid');
     setSourceError(`File không khớp với ngôn ngữ ${runtimeLabel}. Hãy chọn file ${extension}.`);
     resetInput();
     return;
   }
   if (file.size > 64 * 1024) {
+    showFileInfo('invalid');
     setSourceError('Mã nguồn không được vượt quá 64 KiB.');
     resetInput();
     return;
@@ -1715,8 +1786,11 @@ async function importBotSourceFile(event) {
     updateEditorMetrics();
     syncSourceEditorTools();
     setWorkspaceStatus(`Đã tải ${file.name}`);
+    showFileInfo('selected');
+    if (typeof showBotFeedback === 'function') showBotFeedback(`Đã nạp tệp ${file.name} vào trình soạn thảo. Hãy kiểm tra rồi bấm lưu.`, 'success');
   } catch (error) {
-    setSourceError(error?.message || 'Không thể đọc file mã nguồn.');
+    showFileInfo('invalid');
+    setSourceError(typeof friendlyBotMessage === 'function' ? friendlyBotMessage(error, 'Không thể đọc file mã nguồn.') : (error?.message || 'Không thể đọc file mã nguồn.'));
   } finally {
     resetInput();
   }
@@ -1738,6 +1812,7 @@ function switchSourceRuntime(runtimeId) {
   const draft = state.sourceRuntimeDrafts.get(runtimeId);
   editor.value = draft?.source ?? STRATEGY_TEMPLATES[runtimeId] ?? '';
   updateSourceRuntimeMeta(runtimeId);
+  renderSourceFileInfo();
   if (typeof updateEditorMetrics === 'function') updateEditorMetrics();
   setSourceDirty(draft?.dirty ?? Boolean(editor.value));
 }
@@ -2017,6 +2092,71 @@ async function deleteRevision() {
   }
 }
 
+<<<<<<< Updated upstream
+=======
+function syncBotWorkspaceNotice() {
+  const notice = $('#bot-workspace-notice');
+  const title = $('#bot-workspace-notice-title');
+  const text = $('#bot-workspace-notice-text');
+  const actions = $('#bot-workspace-notice-actions');
+  const shell = $('.bot-editor-panel .source-editor-shell');
+  const editor = $('#bot-source-editor');
+  if (!notice || !title || !text) return;
+  const mode = state.botWorkspaceMode;
+  const isReadOnly = Boolean(state.botWorkspaceReadOnly);
+  notice.classList.remove('is-readonly', 'is-draft');
+  if (shell) shell.classList.toggle('is-readonly', isReadOnly);
+  if (editor) editor.title = isReadOnly ? 'Nhấp vào khung mã nguồn để tạo bản nháp và bắt đầu chỉnh sửa' : '';
+  clear(text);
+  if (mode === 'create') {
+    title.textContent = 'Hướng dẫn tạo Bot mới';
+    text.append(
+      document.createTextNode('Nhập '),
+      create('strong', { text: 'Tên Bot' }),
+      document.createTextNode(', nhấp trực tiếp vào khung mã nguồn bên dưới để tùy biến chiến thuật (hoặc tải file / nạp từ GitHub), sau đó nhấn '),
+      create('strong', { text: 'Tạo Bot' }),
+      document.createTextNode('.')
+    );
+    if (actions) actions.hidden = true;
+  } else if (isReadOnly) {
+    notice.classList.add('is-readonly');
+    title.textContent = 'Phiên bản đã lưu (Chế độ chỉ đọc)';
+    text.append(
+      document.createTextNode('Phiên bản này đang ở chế độ chỉ đọc. '),
+      create('strong', { text: 'Nhấp vào khung mã nguồn' }),
+      document.createTextNode(' hoặc bấm nút bên phải để tạo bản nháp và bắt đầu chỉnh sửa.')
+    );
+    if (actions) actions.hidden = false;
+  } else {
+    notice.classList.add('is-draft');
+    title.textContent = 'Đang chỉnh sửa bản nháp';
+    text.append(
+      document.createTextNode('Bạn đang chỉnh sửa mã nguồn cho phiên bản tiếp theo. Nhấp vào khung soạn thảo để viết code. Khi hoàn tất, nhấn '),
+      create('strong', { text: 'Lưu phiên bản' }),
+      document.createTextNode(' ở góc trên.')
+    );
+    if (actions) actions.hidden = true;
+  }
+}
+async function unlockDraftFromNotice() {
+  const revision = typeof currentPracticeRevision === 'function' ? currentPracticeRevision() : null;
+  if (revision) {
+    await loadRevisionSource(revision, 'draft', false);
+    showBotFeedback('Đã kích hoạt chế độ tạo bản nháp. Bạn có thể chỉnh sửa mã nguồn ngay.', 'info');
+    $('#bot-source-editor')?.focus();
+  } else {
+    state.botWorkspaceReadOnly = false;
+    const editor = $('#bot-source-editor');
+    if (editor) {
+      editor.readOnly = false;
+      editor.focus();
+    }
+    setWorkspaceStatus('Bản nháp mới');
+    syncBotWorkspaceNotice();
+  }
+}
+
+>>>>>>> Stashed changes
 async function loadRevisionSource(revision, mode = 'view', confirmBeforeReplace = true) {
   if (confirmBeforeReplace && hasUnsavedBotWorkspaceChanges() && !window.confirm('Bạn có thay đổi chưa lưu. Tiếp tục sẽ thay thế nội dung hiện tại?')) return;
   setSourceError();
@@ -2038,7 +2178,7 @@ async function loadRevisionSource(revision, mode = 'view', confirmBeforeReplace 
     // Opening a revision as an editable draft does not itself change the
     // source. Mark it dirty only after the editor emits an input event.
     setSourceDirty(false);
-  } catch (error) { setSourceError(error.message || 'Không thể đọc phiên bản mã nguồn.'); }
+  } catch (error) { setSourceError(friendlyBotMessage(error, 'Không thể đọc phiên bản mã nguồn. Vui lòng thử lại.')); }
 }
 
 async function loadBotRevisions(bot) {
@@ -2135,6 +2275,7 @@ async function openBotWorkspace(bot = null) {
   updateEditorMetrics();
   $('#bot-source-editor').readOnly = false;
   const sourceFile = $('#bot-source-file'); if (sourceFile) sourceFile.disabled = false;
+  renderSourceFileInfo();
   setWorkspaceStatus(bot ? 'Đang chuẩn bị bản nháp' : 'Bản nháp mới');
   // A new workspace starts with a built-in template. Loading that template is
   // not a user change, so leaving immediately must not show an unsaved warning.
@@ -2150,7 +2291,7 @@ async function openBotWorkspace(bot = null) {
   setSourceError();
   if (bot) {
     try { await loadBotRevisions(bot); }
-    catch (error) { state.sourceRevisions = []; renderRevisionList(); setSourceError(error.message || 'Không thể tải lịch sử phiên bản.'); }
+    catch (error) { state.sourceRevisions = []; renderRevisionList(); setSourceError(friendlyBotMessage(error, 'Không thể tải lịch sử phiên bản. Vui lòng thử lại.')); }
   } else {
     state.sourceRevisions = [];
     renderRevisionList();
@@ -2188,8 +2329,8 @@ async function saveBotSource() {
       setSourceDirty(false);
       if (typeof clearBotWorkspaceDraft === 'function') clearBotWorkspaceDraft();
       await loadBotRevisions(bot);
-      showToast('Đã lưu phiên bản mã nguồn.', 'success');
-    } catch (error) { setSourceError(error.message || 'Không thể lưu phiên bản mã nguồn.'); setSourceDirty(true); setWorkspaceStatus('Lưu thất bại · Kiểm tra lỗi bên dưới'); throw error; }
+      showBotFeedback('Đã lưu phiên bản mã nguồn.', 'success');
+    } catch (error) { setSourceError(friendlyBotMessage(error, 'Không thể lưu phiên bản mã nguồn. Vui lòng thử lại.')); setSourceDirty(true); setWorkspaceStatus('Lưu thất bại'); throw markBotFeedbackShown(error); }
     return true;
   });
   return result === true;
@@ -2204,8 +2345,8 @@ async function selectRevision(revision) {
     bot.currentRevisionId = revision.revisionId;
     await loadBotRevisions(bot);
     await loadRevisionSource(revision, 'draft', false);
-    showToast('Đã chọn phiên bản mã nguồn.', 'success');
-  } catch (error) { setSourceError(error.message || 'Không thể chọn phiên bản mã nguồn.'); }
+    showBotFeedback('Đã chọn phiên bản mã nguồn.', 'success');
+  } catch (error) { setSourceError(friendlyBotMessage(error, 'Không thể chọn phiên bản mã nguồn. Vui lòng thử lại.')); }
 }
 
 
@@ -2213,12 +2354,14 @@ function showBotFormError(message, field = null) {
   const error = field === 'bot-workspace-name' ? $('#bot-name-error') : $('#bot-source-error');
   const nameError = $('#bot-name-error');
   const sourceError = $('#bot-source-error');
+  const text = friendlyBotMessage(message, 'Không thể lưu Bot. Vui lòng kiểm tra lại thông tin.');
   ['bot-workspace-name', 'bot-source-runtime', 'bot-source-editor', 'bot-github-url', 'bot-source-file'].forEach(id => document.getElementById(id)?.removeAttribute('aria-invalid'));
   if (field) document.getElementById(field)?.setAttribute('aria-invalid', 'true');
   if (nameError && nameError !== error) { nameError.textContent = ''; nameError.hidden = true; }
   if (sourceError && sourceError !== error) { sourceError.textContent = ''; sourceError.hidden = true; }
-  error.textContent = message;
-  error.hidden = false;
+  if (error) { error.textContent = text; error.hidden = true; }
+  showBotFeedback(text, 'error');
+  if (field) document.getElementById(field)?.focus();
 }
 function clearBotFormError() {
   const error = $('#bot-source-error');
@@ -2281,18 +2424,23 @@ async function loadGitHubSourceIntoEditor() {
   if (sourceInput.error) return showBotFormError(sourceInput.error, sourceInput.field);
   const button = $('#load-github-source');
   await runPending('load-github-source', button, async () => {
-    if (state.botWorkspaceReadOnly && state.botWorkspaceMode !== 'create') {
-      const revision = currentPracticeRevision();
-      if (revision) await loadRevisionSource(revision, 'draft', false);
+    try {
+      if (state.botWorkspaceReadOnly && state.botWorkspaceMode !== 'create') {
+        const revision = currentPracticeRevision();
+        if (revision) await loadRevisionSource(revision, 'draft', false);
+      }
+      const { source, selected } = await resolveGitHubSource(sourceInput);
+      $('#bot-source-editor').value = source;
+      setSourceError('');
+      setSourceDirty(true);
+      updateEditorMetrics();
+      syncSourceEditorTools();
+      setWorkspaceStatus(`Đã nạp ${selected.filename} từ GitHub · Chưa lưu`);
+      showBotFeedback('Đã nạp mã nguồn từ GitHub vào trình soạn thảo. Hãy kiểm tra trước khi lưu.', 'success');
+    } catch (error) {
+      showBotFormError(friendlyBotMessage(error, 'Không thể nạp mã nguồn từ GitHub. Hãy kiểm tra URL rồi thử lại.'), 'bot-github-url');
+      throw markBotFeedbackShown(error);
     }
-    const { source, selected } = await resolveGitHubSource(sourceInput);
-    $('#bot-source-editor').value = source;
-    setSourceError('');
-    setSourceDirty(true);
-    updateEditorMetrics();
-    syncSourceEditorTools();
-    setWorkspaceStatus(`Đã nạp ${selected.filename} từ GitHub · Chưa lưu`);
-    showToast('Đã nạp mã nguồn vào editor. Hãy kiểm tra trước khi lưu.', 'success');
   });
 }
 
@@ -2339,11 +2487,11 @@ async function submitBot() {
           setSourceDirty(false);
           await loadBotRevisions(editingBot);
           const revisionLabel = revision.githubCommitSha ? ` ${revision.githubCommitSha.slice(0, 8)}` : '';
-          showToast(`Đã nhập revision${revisionLabel} từ GitHub.`, 'success');
-        } else if (state.sourceDirty && !(await saveBotSource())) throw new Error('Không thể hoàn tất việc chọn phiên bản mã nguồn.');
+          showBotFeedback(`Đã nhập phiên bản${revisionLabel} từ GitHub.`, 'success');
+        } else if (state.sourceDirty && !(await saveBotSource())) throw markBotFeedbackShown(new Error('Không thể hoàn tất việc chọn phiên bản mã nguồn.'));
       } catch (error) {
-        if (isBotView()) showBotFormError(error.message || 'Không thể lưu Bot hoặc phiên bản mã nguồn.');
-        throw error;
+        if (isBotView() && !error?.botFeedbackShown) showBotFormError(friendlyBotMessage(error, 'Không thể lưu Bot hoặc phiên bản mã nguồn. Vui lòng thử lại.'));
+        throw markBotFeedbackShown(error);
       }
     } else {
       let bot = state.pendingInitialRevision?.bot;
@@ -2371,14 +2519,14 @@ async function submitBot() {
             $('#save-bot-source').textContent = 'Thử lưu mã nguồn';
           }
         } else if (isBotView()) {
-          showBotFormError(error.message || 'Không thể tạo Bot.');
+          showBotFormError(friendlyBotMessage(error, 'Không thể tạo Bot. Vui lòng thử lại.'));
         }
-        throw error;
+        throw markBotFeedbackShown(error);
       }
     }
     if (!isBotView()) return;
     operationSucceeded = true;
-    showToast(editingBot ? 'Đã cập nhật tên Bot.' : 'Đã tạo Bot và lưu phiên bản mã nguồn.', 'success');
+    showBotFeedback(editingBot ? 'Đã lưu thay đổi của Bot thành công.' : 'Đã tạo Bot và lưu phiên bản mã nguồn thành công.', 'success');
     state.sourceDirty = false;
     state.pendingInitialRevision = null;
     if (typeof clearBotWorkspaceDraft === 'function') clearBotWorkspaceDraft();

@@ -32,8 +32,14 @@
             id="bot-github-url" class="input-shell" type="url" inputmode="url" autocomplete="url"
             placeholder="https://github.com/owner/repository" aria-describedby="bot-source-error"><button id="load-github-source"
             class="secondary-btn github-source-load" type="button">Nạp mã</button></label>
-        <label class="source-file-picker" for="bot-source-file"><span>Tải file mã nguồn <small>(.cpp hoặc .py)</small></span><input
-            id="bot-source-file" class="input-shell" type="file" accept=".cpp,text/x-c++" aria-describedby="bot-source-error"></label>
+        <div class="source-file-picker"><span>Tải file mã nguồn <small>(.cpp hoặc .py)</small></span>
+          <div class="source-file-control">
+            <input id="bot-source-file" class="source-file-native" type="file" accept=".cpp,text/x-c++"
+              aria-describedby="bot-source-file-info bot-source-error">
+            <label class="source-file-button" for="bot-source-file">Chọn tệp</label>
+            <span id="bot-source-file-info" class="source-file-info" aria-live="polite">Hỗ trợ .cpp · tối đa 64 KB</span>
+          </div>
+        </div>
       </div>
       <div class="bot-source-grid">
           <div class="bot-editor-panel">

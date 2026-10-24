@@ -171,7 +171,7 @@ describe('Practice view runtime behavior', () => {
       $: (selector: string) => selector === '#bot-source-runtime' ? runtimeSelect : editor,
       state, TextEncoder,
       STRATEGY_TEMPLATES: { cpp: 'cpp starter', python3: 'python starter' },
-      updateSourceRuntimeMeta: () => {}, renderSourceReference: () => {},
+      updateSourceRuntimeMeta: () => {}, renderSourceReference: () => {}, renderSourceFileInfo: () => {},
       setSourceDirty: (dirty: boolean) => { state.sourceDirty = dirty; },
     });
     functions.switchSourceRuntime('python3');
@@ -274,6 +274,9 @@ describe('Practice view runtime behavior', () => {
       setWorkspaceStatus: () => {},
       loadBotRevisions: async () => {},
       showToast: (message: string) => notices.push(message),
+      showBotFeedback: (message: string) => notices.push(message),
+      friendlyBotMessage: (error: { message?: string } | string, fallback: string) => (typeof error === 'string' ? error : error?.message) || fallback,
+      markBotFeedbackShown: (error: unknown) => error,
       navigate: (view: string) => navigations.push(view),
       loadBots: async () => {},
     });
