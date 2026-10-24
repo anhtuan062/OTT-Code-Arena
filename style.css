@@ -531,6 +531,8 @@ kbd { padding: 2px 6px; border-radius: 6px; border: 1px solid var(--border-light
 .toast-info::before { background: #3578b8; }
 .toast-info .toast-marker { background: #e2effb; color: #2563a6; }
 .toast-info .toast-label { color: #1e5a91; }
+/* Keep the original error token available for theme overrides. */
+/* .toast-error { background: var(--error-color); } */
 @media (prefers-reduced-motion: reduce) {
   .toast { transform: none; transition: opacity .18s ease; }
 }
