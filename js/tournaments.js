@@ -8,7 +8,7 @@ function preflightDiagnosticText(preflight = {}) {
   const diagnostic = preflight?.diagnostic && typeof preflight.diagnostic === 'object' ? preflight.diagnostic : {};
   const parts = [];
   if (diagnostic.stage) parts.push(`Giai đoạn: ${diagnostic.stage}`);
-  if (diagnostic.message) parts.push(String(diagnostic.message));
+  if (diagnostic.message) parts.push(localizeErrorMessage(String(diagnostic.message)));
   const compiler = diagnostic.compilerDiagnostic || diagnostic.compilerDiagnostics;
   const runtime = diagnostic.runtimeDiagnostic;
   if (compiler) parts.push(`Trình biên dịch: ${compiler}`);
@@ -7004,7 +7004,7 @@ function renderScheduleLegacy(tournament) {
       }
       const cardFooter = create('div', { className: 'schedule-card-footer' });
       cardFooter.appendChild(create('span', { className: 'schedule-card-winner', text: `Người thắng: ${winnerName}` }));
-      if (pairing.status === 'failed') cardFooter.appendChild(create('small', { className: 'schedule-card-error', text: pairing.failureReason || 'Có thể thử lại; kết quả chưa được ghi nhận.' }));
+      if (pairing.status === 'failed') cardFooter.appendChild(create('small', { className: 'schedule-card-error', text: localizeErrorMessage(pairing.failureReason || 'Có thể thử lại; kết quả chưa được ghi nhận.') }));
       if (pairing.matchId && pairing.status === 'in_progress' && (state.user?.role === 'organizer' || state.spectatorMode)) {
         cardFooter.appendChild(actionButton('Xem trực tiếp', () => openLiveMatch(tournament.tournamentId, pairing.matchId), `live:${pairing.matchId}`));
       } else if (pairing.status === 'failed' && state.user?.role === 'organizer') {

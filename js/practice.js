@@ -1,15 +1,16 @@
 function formatPracticeError(error) {
+  const localize = message => typeof localizeErrorMessage === 'function' ? localizeErrorMessage(message) : String(message || '');
   const payload = error?.payload || error || {};
-  if (error?.status === 429) return payload.error || 'Yêu cầu chạy thử đang bị giới hạn. Hãy thử lại sau.';
-  if (payload.code === 'EXECUTOR_ERROR' || payload.code === 'EXECUTOR_UNAVAILABLE' || payload.code === 'SANDBOX_REQUIRED') return payload.error || 'Không thể chuẩn bị môi trường chạy thử. Vui lòng thử lại.';
-  if (payload.code === 'COMPILATION_TIMEOUT') return payload.error || 'Biên dịch C++ quá thời gian cho phép.';
-  if (payload.code === 'RUNTIME_TIMEOUT' || payload.code === 'TIMEOUT') return payload.error || 'Bot thực thi quá thời gian cho phép.';
-  if (payload.code === 'PROCESS_CRASHED') return payload.error || 'Bot đã kết thúc với lỗi trong môi trường chạy thử.';
-  if (payload.code === 'INVALID_JSON' || payload.code === 'INVALID_RESPONSE') return payload.error || 'Bot trả về dữ liệu không đúng giao thức.';
-  if (payload.code === 'EMPTY_OUTPUT' || payload.code === 'MISSING_MOVE') return payload.error || 'Bot không trả về nước đi.';
-  if (payload.code === 'INVALID_MOVE') return payload.error || 'Nước đi của Bot không nằm trong danh sách hợp lệ.';
-  if (payload.code === 'RESOURCE_LIMIT_EXCEEDED') return payload.error || 'Bot vượt quá giới hạn tài nguyên.';
-  return localizeErrorMessage(payload.error || error?.message || 'Không thể chạy thử Bot.');
+  if (error?.status === 429) return localize(payload.error || 'Yêu cầu chạy thử đang bị giới hạn. Hãy thử lại sau.');
+  if (payload.code === 'EXECUTOR_ERROR' || payload.code === 'EXECUTOR_UNAVAILABLE' || payload.code === 'SANDBOX_REQUIRED') return localize(payload.error || 'Không thể chuẩn bị môi trường chạy thử. Vui lòng thử lại.');
+  if (payload.code === 'COMPILATION_TIMEOUT') return localize(payload.error || 'Biên dịch C++ quá thời gian cho phép.');
+  if (payload.code === 'RUNTIME_TIMEOUT' || payload.code === 'TIMEOUT') return localize(payload.error || 'Bot thực thi quá thời gian cho phép.');
+  if (payload.code === 'PROCESS_CRASHED') return localize(payload.error || 'Bot đã kết thúc với lỗi trong môi trường chạy thử.');
+  if (payload.code === 'INVALID_JSON' || payload.code === 'INVALID_RESPONSE') return localize(payload.error || 'Bot trả về dữ liệu không đúng giao thức.');
+  if (payload.code === 'EMPTY_OUTPUT' || payload.code === 'MISSING_MOVE') return localize(payload.error || 'Bot không trả về nước đi.');
+  if (payload.code === 'INVALID_MOVE') return localize(payload.error || 'Nước đi của Bot không nằm trong danh sách hợp lệ.');
+  if (payload.code === 'RESOURCE_LIMIT_EXCEEDED') return localize(payload.error || 'Bot vượt quá giới hạn tài nguyên.');
+  return localize(payload.error || error?.message || 'Không thể chạy thử Bot.');
 }
 
 function practiceErrorTitle(error) {

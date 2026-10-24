@@ -2728,17 +2728,18 @@ async function loadTournaments() {
 
 /* ==================== MODULE: practice.js ==================== */
 function formatPracticeError(error) {
+  const localize = message => typeof localizeErrorMessage === 'function' ? localizeErrorMessage(message) : String(message || '');
   const payload = error?.payload || error || {};
-  if (error?.status === 429) return payload.error || 'Yêu cầu chạy thử đang bị giới hạn. Hãy thử lại sau.';
-  if (payload.code === 'EXECUTOR_ERROR' || payload.code === 'EXECUTOR_UNAVAILABLE' || payload.code === 'SANDBOX_REQUIRED') return payload.error || 'Không thể chuẩn bị môi trường chạy thử. Vui lòng thử lại.';
-  if (payload.code === 'COMPILATION_TIMEOUT') return payload.error || 'Biên dịch C++ quá thời gian cho phép.';
-  if (payload.code === 'RUNTIME_TIMEOUT' || payload.code === 'TIMEOUT') return payload.error || 'Bot thực thi quá thời gian cho phép.';
-  if (payload.code === 'PROCESS_CRASHED') return payload.error || 'Bot đã kết thúc với lỗi trong môi trường chạy thử.';
-  if (payload.code === 'INVALID_JSON' || payload.code === 'INVALID_RESPONSE') return payload.error || 'Bot trả về dữ liệu không đúng giao thức.';
-  if (payload.code === 'EMPTY_OUTPUT' || payload.code === 'MISSING_MOVE') return payload.error || 'Bot không trả về nước đi.';
-  if (payload.code === 'INVALID_MOVE') return payload.error || 'Nước đi của Bot không nằm trong danh sách hợp lệ.';
-  if (payload.code === 'RESOURCE_LIMIT_EXCEEDED') return payload.error || 'Bot vượt quá giới hạn tài nguyên.';
-  return localizeErrorMessage(payload.error || error?.message || 'Không thể chạy thử Bot.');
+  if (error?.status === 429) return localize(payload.error || 'Yêu cầu chạy thử đang bị giới hạn. Hãy thử lại sau.');
+  if (payload.code === 'EXECUTOR_ERROR' || payload.code === 'EXECUTOR_UNAVAILABLE' || payload.code === 'SANDBOX_REQUIRED') return localize(payload.error || 'Không thể chuẩn bị môi trường chạy thử. Vui lòng thử lại.');
+  if (payload.code === 'COMPILATION_TIMEOUT') return localize(payload.error || 'Biên dịch C++ quá thời gian cho phép.');
+  if (payload.code === 'RUNTIME_TIMEOUT' || payload.code === 'TIMEOUT') return localize(payload.error || 'Bot thực thi quá thời gian cho phép.');
+  if (payload.code === 'PROCESS_CRASHED') return localize(payload.error || 'Bot đã kết thúc với lỗi trong môi trường chạy thử.');
+  if (payload.code === 'INVALID_JSON' || payload.code === 'INVALID_RESPONSE') return localize(payload.error || 'Bot trả về dữ liệu không đúng giao thức.');
+  if (payload.code === 'EMPTY_OUTPUT' || payload.code === 'MISSING_MOVE') return localize(payload.error || 'Bot không trả về nước đi.');
+  if (payload.code === 'INVALID_MOVE') return localize(payload.error || 'Nước đi của Bot không nằm trong danh sách hợp lệ.');
+  if (payload.code === 'RESOURCE_LIMIT_EXCEEDED') return localize(payload.error || 'Bot vượt quá giới hạn tài nguyên.');
+  return localize(payload.error || error?.message || 'Không thể chạy thử Bot.');
 }
 
 function practiceErrorTitle(error) {
@@ -3277,7 +3278,7 @@ function preflightDiagnosticText(preflight = {}) {
   const diagnostic = preflight?.diagnostic && typeof preflight.diagnostic === 'object' ? preflight.diagnostic : {};
   const parts = [];
   if (diagnostic.stage) parts.push(`Giai đoạn: ${diagnostic.stage}`);
-  if (diagnostic.message) parts.push(String(diagnostic.message));
+  if (diagnostic.message) parts.push(localizeErrorMessage(String(diagnostic.message)));
   const compiler = diagnostic.compilerDiagnostic || diagnostic.compilerDiagnostics;
   const runtime = diagnostic.runtimeDiagnostic;
   if (compiler) parts.push(`Trình biên dịch: ${compiler}`);
@@ -10273,7 +10274,7 @@ function renderScheduleLegacy(tournament) {
       }
       const cardFooter = create('div', { className: 'schedule-card-footer' });
       cardFooter.appendChild(create('span', { className: 'schedule-card-winner', text: `Người thắng: ${winnerName}` }));
-      if (pairing.status === 'failed') cardFooter.appendChild(create('small', { className: 'schedule-card-error', text: pairing.failureReason || 'Có thể thử lại; kết quả chưa được ghi nhận.' }));
+      if (pairing.status === 'failed') cardFooter.appendChild(create('small', { className: 'schedule-card-error', text: localizeErrorMessage(pairing.failureReason || 'Có thể thử lại; kết quả chưa được ghi nhận.') }));
       if (pairing.matchId && pairing.status === 'in_progress' && (state.user?.role === 'organizer' || state.spectatorMode)) {
         cardFooter.appendChild(actionButton('Xem trực tiếp', () => openLiveMatch(tournament.tournamentId, pairing.matchId), `live:${pairing.matchId}`));
       } else if (pairing.status === 'failed' && state.user?.role === 'organizer') {
@@ -10915,7 +10916,7 @@ function renderLiveMatchSnapshot(snapshot) {
   const resultText = $('#r-result-text'); if (resultText) resultText.textContent = `${gameText} · ${scoreText} · ${statusText}${snapshot.error ? ` · ${snapshot.error}` : ''}`;
   const matchId = $('#r-match-id'); if (matchId) matchId.textContent = String(snapshot.matchId || '—');
   const winner = $('#r-winner'); if (winner) winner.textContent = snapshot.status === 'in_progress' ? 'Chưa có' : snapshot.status === 'failed' ? 'Không xác định' : 'Đang cập nhật';
-  const termination = $('#r-termination'); if (termination) termination.textContent = snapshot.error || (snapshot.status === 'in_progress' ? 'Đang thực thi' : 'Đã kết thúc');
+  const termination = $('#r-termination'); if (termination) termination.textContent = localizeErrorMessage(snapshot.error || (snapshot.status === 'in_progress' ? 'Đang thực thi' : 'Đã kết thúc'));
   const protocol = $('#r-protocol'); if (protocol) protocol.textContent = 'Dữ liệu trực tiếp';
   const participants = snapshot.participants || {};
   const currentParticipants = snapshot.currentParticipants || participants;

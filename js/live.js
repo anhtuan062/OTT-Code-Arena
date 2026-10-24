@@ -199,7 +199,7 @@ function renderLiveMatchSnapshot(snapshot) {
   const resultText = $('#r-result-text'); if (resultText) resultText.textContent = `${gameText} · ${scoreText} · ${statusText}${snapshot.error ? ` · ${snapshot.error}` : ''}`;
   const matchId = $('#r-match-id'); if (matchId) matchId.textContent = String(snapshot.matchId || '—');
   const winner = $('#r-winner'); if (winner) winner.textContent = snapshot.status === 'in_progress' ? 'Chưa có' : snapshot.status === 'failed' ? 'Không xác định' : 'Đang cập nhật';
-  const termination = $('#r-termination'); if (termination) termination.textContent = snapshot.error || (snapshot.status === 'in_progress' ? 'Đang thực thi' : 'Đã kết thúc');
+  const termination = $('#r-termination'); if (termination) termination.textContent = localizeErrorMessage(snapshot.error || (snapshot.status === 'in_progress' ? 'Đang thực thi' : 'Đã kết thúc'));
   const protocol = $('#r-protocol'); if (protocol) protocol.textContent = 'Dữ liệu trực tiếp';
   const participants = snapshot.participants || {};
   const currentParticipants = snapshot.currentParticipants || participants;
