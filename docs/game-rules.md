@@ -10,12 +10,32 @@ Tài liệu này mô tả luật đang được `engine/`, Match Runner và seri
 - Mỗi bên bắt đầu với 9 quân: 3 quân mỗi loại.
 - A ở phía trên và nhắm ô đích `i9`; B ở phía dưới và nhắm ô đích `a1`.
 
-### Vị trí mặc định
+### Bố cục quân cờ lúc bắt đầu
+
+Engine có ba bố cục seeded được dùng cho các ván tournament; Bố cục 1 cũng là bố cục mặc định/lịch sử. Mỗi bố cục vẫn có 9 quân mỗi bên; B là ảnh đối xứng của A qua tâm bàn cờ. Tọa độ dưới đây dùng đúng quy ước cột `a`–`i`, hàng `1`–`9`.
+
+#### Bố cục 1 — bố cục lịch sử/mặc định
 
 | Phía | Đấm | Lá | Kéo |
 | --- | --- | --- | --- |
 | A | `c1`, `g2`, `h3` | `f1`, `i2`, `b3` | `i1`, `d2`, `e3` |
 | B | `g9`, `c8`, `b7` | `d9`, `a8`, `h7` | `a9`, `f8`, `e7` |
+
+#### Bố cục 2
+
+| Phía | Đấm (`dam`) | Lá (`la`) | Kéo (`keo`) |
+| --- | --- | --- | --- |
+| A | `b1`, `e2`, `h3` | `d1`, `h2`, `b3` | `g1`, `c2`, `f3` |
+| B | `h9`, `e8`, `b7` | `f9`, `b8`, `h7` | `c9`, `g8`, `d7` |
+
+#### Bố cục 3
+
+| Phía | Đấm (`dam`) | Lá (`la`) | Kéo (`keo`) |
+| --- | --- | --- | --- |
+| A | `b1`, `f2`, `i3` | `e1`, `a2`, `g3` | `h1`, `d2`, `c3` |
+| B | `h9`, `d8`, `a7` | `e9`, `i8`, `c7` | `b9`, `f8`, `g7` |
+
+Trong tournament, hệ thống chọn một trong ba bố cục bằng `seed` ổn định của series và `gameNumber`. Vì vậy không được giả định ván 1 luôn dùng Bố cục 1; cùng một series sẽ giữ nguyên lựa chọn khi retry hoặc xem Replay, còn các ván khác trong series có thể có vị trí xuất phát khác. Chế độ kiểm tra Bot dùng kịch bản riêng và không đại diện cho bố cục tournament.
 
 ## 2. Di chuyển
 

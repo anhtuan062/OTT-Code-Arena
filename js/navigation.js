@@ -160,7 +160,8 @@ function navigate(view, options = {}) {
     link.setAttribute('aria-current', active ? 'page' : 'false');
   });
   const tournamentCache = Array.isArray(state.tournaments) ? state.tournaments : [];
-  const pageTitles = { dashboard: state.user?.role === 'organizer' ? 'Tổng quan giải đấu' : 'Tổng quan', bots: 'Bot của tôi', 'bot-workspace': 'Tạo Bot', 'bot-playground': 'Kiểm tra thế cờ', 'player-guide': 'Hướng dẫn người chơi', tournaments: state.user?.role === 'organizer' ? 'Quản lý giải đấu' : 'Giải đấu', 'tournament-detail': state.currentTournament?.name || tournamentCache.find(tournament => tournament.tournamentId === state.tournamentId)?.name || 'Chi tiết giải đấu', 'replay-view': 'Xem lại trận đấu' };
+  const replayPageTitle = state.liveMatchContext ? 'Trận đấu trực tiếp' : 'Xem lại trận đấu';
+  const pageTitles = { dashboard: state.user?.role === 'organizer' ? 'Tổng quan giải đấu' : 'Tổng quan', bots: 'Bot của tôi', 'bot-workspace': 'Tạo Bot', 'bot-playground': 'Kiểm tra thế cờ', 'player-guide': 'Hướng dẫn người chơi', tournaments: state.user?.role === 'organizer' ? 'Quản lý giải đấu' : 'Giải đấu', 'tournament-detail': state.currentTournament?.name || tournamentCache.find(tournament => tournament.tournamentId === state.tournamentId)?.name || 'Chi tiết giải đấu', 'replay-view': replayPageTitle };
   const pageTitle = $('#page-title');
   if (pageTitle) pageTitle.textContent = pageTitles[view] || 'OTT Code Arena';
   const sectionTitle = state.user?.role === 'organizer' ? 'Quản lý' : 'Giải đấu';
