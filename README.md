@@ -90,6 +90,13 @@ Một số bộ kiểm thử Docker/stress có điều kiện và không nằm t
 
 ## Tài liệu
 
+### Tài khoản demo để kiểm thử
+
+- `admin` / `1`: tài khoản quản trị giải (`organizer`).
+- `1` / `1`: tài khoản người dùng Bot (`competitor`).
+- Tạo hoặc khôi phục hai tài khoản bằng `npm.cmd run build` rồi `npm.cmd run seed:demo-accounts`.
+- Chi tiết và cảnh báo phạm vi sử dụng: [Tài khoản demo](docs/demo-accounts.md).
+
 ### Dành cho người dùng
 
 - [Hướng dẫn sử dụng](docs/user-guide.md)
