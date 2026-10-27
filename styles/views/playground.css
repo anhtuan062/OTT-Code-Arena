@@ -987,8 +987,12 @@
     gap: 4px;
   }
   .playground-preset-buttons .preset-btn {
-    padding: 4px 6px;
+    padding: 6px 6px;
     font-size: 0.68rem;
     gap: 4px;
+  }
+  .playground-preset-buttons .preset-btn span {
+    white-space: normal;
+    line-height: 1.2;
   }
 }

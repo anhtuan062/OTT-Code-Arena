@@ -99,6 +99,7 @@
     .phase-indicator-label {
       display: inline-flex;
       align-items: center;
+      padding: 4px 12px;
       font-size: .84rem;
       color: #5d6c63;
       font-weight: 500;
@@ -297,8 +298,26 @@
       }
 
       .tournament-card-footer {
-        align-items: flex-start;
-        flex-direction: column;
+        align-items: stretch;
+        flex-direction: row;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+
+      /* Các nút thao tác nằm cùng một hàng, co đều; nhãn đã được rút gọn. */
+      .tournament-card-footer .tournament-view-btn,
+      .tournament-card-footer .detail-register {
+        flex: 1 1 0;
+        width: auto;
+        min-width: 0;
+        min-height: 40px;
+        padding: 8px 10px;
+        white-space: nowrap;
+      }
+
+      .tournament-card-footer .tournament-action-danger {
+        flex: 0 0 auto;
+        margin-left: 0;
       }
 
       .tournament-filter-row {
@@ -313,6 +332,11 @@
       .tournament-view-btn,
       .detail-register {
         width: 100%;
+      }
+
+      .tournament-card-footer .tournament-view-btn,
+      .tournament-card-footer .detail-register {
+        width: auto;
       }
     }
 
@@ -524,6 +548,8 @@
       background: #fff;
       color: var(--text-primary);
     }
+
+    .tournament-toolbar-row { display: contents; }
 
     .tournament-toolbar .bots-count {
       flex: 0 0 auto;
@@ -791,15 +817,42 @@
          stacked mobile toolbar so the control keeps its intrinsic height. */
       .tournament-toolbar .bot-search {
         flex: 0 0 auto;
+        min-height: 48px;
+      }
+
+      .tournament-toolbar .bot-search input {
+        min-height: 48px;
+        font-size: 16px;
+      }
+
+      .tournament-toolbar .tournament-filter select {
+        min-height: 48px;
+        font-size: 16px;
+      }
+
+      .tournament-toolbar-row {
+        display: flex;
+        flex: 0 0 auto;
+        align-items: center;
+        gap: 10px;
       }
 
       .tournament-toolbar .bots-count {
-        align-self: flex-start;
+        align-self: center;
+        width: fit-content;
+        padding: 6px 12px;
+        border: 1px solid #dce8df;
+        border-radius: 999px;
+        background: #eef6f0;
+        color: #176f4f;
+        font-size: .72rem;
+        font-weight: 700;
       }
 
       .tournament-toolbar .workspace-primary-action {
-        width: 100%;
-        margin-left: 0;
+        flex: 1 1 auto;
+        min-height: 48px;
+        justify-content: center;
       }
 
       .tournaments-page .tournament-grid {
@@ -1092,9 +1145,12 @@
     .tournament-detail-redesign .podium-meta { color:#819087; font-size:.7rem; }
     @media (max-width: 820px) {
       .tournament-detail-redesign { width:100%; max-width:none !important; margin-left:0; padding:22px 16px 30px; }
-      .tournament-detail-redesign .tournament-detail-hero { align-items:stretch; flex-direction:column; gap:18px; }
+      .tournament-detail-redesign .tournament-detail-hero { align-items:stretch; flex-direction:column; gap:14px; }
       .tournament-detail-redesign .tournament-actions { justify-content:flex-start; max-width:none; flex-wrap:wrap; }
       .tournament-detail-redesign .tournament-actions .tournament-action { flex:1 1 145px; }
+      /* Nút Cập nhật: thu gọn thay vì chiếm cả hàng trên mobile. */
+      .tournament-detail-redesign #td-actions { justify-content:flex-end; }
+      .tournament-detail-redesign #td-actions .tournament-action { flex:0 0 auto; min-width:0; padding:9px 16px; min-height:40px; font-size:.82rem; }
       .tournament-detail-redesign .tournament-lifecycle { display:flex; overflow:visible; margin:20px 0 30px; padding:0 2px 3px; min-height:61px; }
       .tournament-detail-redesign .tournament-lifecycle::before, .tournament-detail-redesign .tournament-lifecycle::after { left:16px; right:16px; top:15px; width:auto; }
       .tournament-detail-redesign .tournament-lifecycle::after { right:auto; width:calc((100% - 32px) * var(--progress, 0) / 100); }
@@ -1428,10 +1484,9 @@
   .group-stage-grid { grid-template-columns:1fr; }
   .knockout-round-options { display:none; }
   .knockout-round-select { display:block; }
-  .knockout-bracket { display:block; min-height:0; overflow:visible; padding:0; }
+  .knockout-bracket { display:grid; grid-auto-flow:column; grid-auto-columns:minmax(230px, 260px); width:100%; min-width:0; gap:32px; min-height:var(--knockout-bracket-height,220px); overflow-x:auto; -webkit-overflow-scrolling:touch; padding:8px 10px 18px; }
   .knockout-connectors { display:none; }
-  .knockout-round { display:flex; min-width:0; }
-  .knockout-champion-column { display:none; }
+  .knockout-round { display:flex; flex-direction:column; min-width:0; }
   .knockout-match-node { width:100%; }
   .group-pairing-row { align-items:flex-start; flex-wrap:wrap; }
   .group-pairing-row .regional-pairing-names { flex:1 1 100%; }
@@ -1858,6 +1913,49 @@
   font-size: 0.84rem;
   color: #64748b;
   line-height: 1.5;
+}
+
+/* Mobile: xếp gọn khối live trống — badge nằm dưới tiêu đề, bỏ dòng mô tả
+   trùng với empty-state, và viền hoá khối trống cho nhẹ nhàng. */
+@media (max-width: 767px) {
+  .competitor-public-live-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 14px 16px;
+  }
+
+  .competitor-public-live-title-group p {
+    display: none;
+  }
+
+  .competitor-public-live-badge {
+    padding: 4px 10px;
+    font-size: 0.7rem;
+  }
+
+  .competitor-public-live-empty-state {
+    margin: 14px 16px 16px;
+    padding: 28px 18px;
+    border: 1px dashed #cbd5e1;
+    border-radius: 12px;
+    background: #ffffff;
+  }
+
+  .competitor-public-empty-icon {
+    display: grid;
+    place-items: center;
+    width: 52px;
+    height: 52px;
+    margin: 0 auto 10px;
+    border-radius: 50%;
+    background: #eff6ff;
+    font-size: 1.5rem;
+  }
+
+  .competitor-public-live-empty-state h4 {
+    font-size: 0.95rem;
+  }
 }
 .competitor-public-tabs {
   display: flex;
@@ -4841,6 +4939,7 @@
 
   .tournament-detail-redesign .lifecycle-mobile-count {
     display: block;
+    margin: 0;
     color: #8a998f;
     font-size: .68rem;
     line-height: 1.2;

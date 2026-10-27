@@ -355,15 +355,49 @@
        .dashboard-list-toolbar {
          align-items: stretch;
          flex-direction: column;
+         gap: 10px;
        }
 
        .dashboard-list-toolbar .bot-search {
          max-width: none;
+         min-height: 48px;
+       }
+
+       .dashboard-list-toolbar .bot-search input {
+         min-height: 48px;
+         font-size: 16px;
        }
 
        .dashboard-filter,
        .dashboard-filter select {
          width: 100%;
+       }
+
+       .dashboard-filter select {
+         min-height: 48px;
+         font-size: 16px;
+       }
+
+       #dashboard.dashboard-page .toolbar-left {
+         flex-direction: column;
+         align-items: stretch;
+         gap: 10px;
+       }
+
+       #dashboard.dashboard-page .toolbar-right {
+         margin-left: 0;
+       }
+
+       #dashboard.dashboard-page .toolbar-count {
+         align-self: flex-start;
+         width: fit-content;
+         padding: 6px 12px;
+         border: 1px solid #dce8df;
+         border-radius: 999px;
+         background: #eef6f0;
+         color: #176f4f;
+         font-size: .72rem;
+         font-weight: 700;
        }
 
       .section-header {
@@ -920,6 +954,79 @@
       border-radius: 12px;
       background: #fff;
     }
+
+/* Dashboard tournament table: use readable mobile cards instead of forcing
+   seven desktop columns wider than the viewport. All cells remain visible. */
+@media (max-width: 640px) {
+  #dashboard.dashboard-page .recent-tournaments-card {
+    overflow: visible;
+    border: 0;
+    background: transparent;
+    box-shadow: none;
+  }
+
+  #dashboard.dashboard-page .recent-tournaments-card .data-table {
+    display: block;
+    width: 100%;
+    min-width: 0;
+    background: transparent;
+  }
+
+  #dashboard.dashboard-page .recent-tournaments-card .data-table thead {
+    display: none;
+  }
+
+  #dashboard.dashboard-page .recent-tournaments-card .data-table tbody {
+    display: grid;
+    gap: 10px;
+  }
+
+  #dashboard.dashboard-page .recent-tournaments-card .data-table tr {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 8px 12px;
+    min-width: 0;
+    padding: 14px;
+    border: 1px solid #dfe7e1;
+    border-radius: 12px;
+    background: #fff;
+  }
+
+  #dashboard.dashboard-page .recent-tournaments-card .data-table td {
+    display: flex;
+    min-width: 0;
+    align-items: flex-start;
+    gap: 8px;
+    padding: 0;
+    border: 0;
+    overflow-wrap: anywhere;
+  }
+
+  #dashboard.dashboard-page .recent-tournaments-card .data-table td::before {
+    flex: 0 0 43%;
+    color: #7a897f;
+    content: '';
+    font-size: .64rem;
+    font-weight: 700;
+    line-height: 1.35;
+  }
+
+  #dashboard.dashboard-page .recent-tournaments-card .data-table td:nth-child(1)::before { content: 'Giải đấu'; }
+  #dashboard.dashboard-page .recent-tournaments-card .data-table td:nth-child(2)::before { content: 'Thể thức'; }
+  #dashboard.dashboard-page .recent-tournaments-card .data-table td:nth-child(3)::before { content: 'Trạng thái'; }
+  #dashboard.dashboard-page .recent-tournaments-card .data-table td:nth-child(4)::before { content: 'Mở đăng ký'; }
+  #dashboard.dashboard-page .recent-tournaments-card .data-table td:nth-child(5)::before { content: 'Đóng đăng ký'; }
+  #dashboard.dashboard-page .recent-tournaments-card .data-table td:nth-child(6)::before { content: 'Tham gia'; }
+  #dashboard.dashboard-page .recent-tournaments-card .data-table td:nth-child(7) {
+    grid-column: 1 / -1;
+    justify-content: flex-end;
+    padding-top: 4px;
+  }
+
+  #dashboard.dashboard-page .recent-tournaments-card .data-table td:nth-child(7)::before {
+    display: none;
+  }
+}
     #dashboard.dashboard-page:not(.player-dashboard) .dashboard-empty-icon {
       display: block;
       width: 30px;
@@ -1875,3 +1982,176 @@
 
 /* Shared caption scale for dashboard section links. */
 #dashboard.dashboard-page .dashboard-section-link { font-size: var(--font-size-caption); line-height: 1.3; }
+
+/* Player dashboard: the tournament table is intentionally wide so users can
+   compare all columns side by side. Keep the scroll inside its card. */
+@media (max-width: 640px) {
+  #dashboard.player-dashboard #dash-recent-table {
+    max-width: 100%;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  #dashboard.player-dashboard #dash-recent-table .data-table {
+    display: table;
+    width: 100%;
+    min-width: 860px;
+    background: #fff;
+  }
+
+  /* Bỏ table-layout: fixed của desktop để min-width của cột có hiệu lực khi
+     cuộn ngang trên mobile. */
+  #dashboard.player-dashboard #dash-recent-tourneys {
+    table-layout: auto;
+  }
+
+  #dashboard.player-dashboard #dash-recent-table .data-table thead {
+    display: table-header-group;
+  }
+
+  #dashboard.player-dashboard #dash-recent-table .data-table th {
+    display: table-cell;
+    padding: 12px 15px;
+  }
+
+  #dashboard.player-dashboard #dash-recent-table .data-table tbody {
+    display: table-row-group;
+  }
+
+  #dashboard.player-dashboard #dash-recent-table .data-table tr {
+    display: table-row;
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+  }
+
+  #dashboard.player-dashboard #dash-recent-table .data-table td {
+    display: table-cell;
+    padding: 14px 15px;
+    border-bottom: 1px solid var(--dash-line, #dfe7e1);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  #dashboard.player-dashboard #dash-recent-table .data-table th {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  #dashboard.player-dashboard #dash-recent-table .data-table td:first-child {
+    max-width: 260px;
+  }
+
+  /* Trạng thái, Mở/Đóng đăng ký: đủ chỗ cho badge và ngày, không cắt giữa chữ. */
+  #dashboard.player-dashboard #dash-recent-table .data-table th:nth-child(2),
+  #dashboard.player-dashboard #dash-recent-table .data-table td:nth-child(2),
+  #dashboard.player-dashboard #dash-recent-table .data-table th:nth-child(3),
+  #dashboard.player-dashboard #dash-recent-table .data-table td:nth-child(3) {
+    min-width: 165px;
+  }
+
+  #dashboard.player-dashboard #dash-recent-table .data-table th:nth-child(4),
+  #dashboard.player-dashboard #dash-recent-table .data-table td:nth-child(4),
+  #dashboard.player-dashboard #dash-recent-table .data-table th:nth-child(5),
+  #dashboard.player-dashboard #dash-recent-table .data-table td:nth-child(5) {
+    min-width: 140px;
+  }
+
+  #dashboard.player-dashboard #dash-recent-table .data-table td .status-badge,
+  #dashboard.player-dashboard #dash-recent-table .data-table td button {
+    white-space: nowrap;
+  }
+
+  #dashboard.player-dashboard #dash-recent-table .data-table td::before {
+    display: none;
+  }
+
+  /* Organizer dashboard: keep the tournament list as a full table and let it
+     scroll horizontally inside its card, same as the player dashboard. */
+  #dashboard.organizer-dashboard #dash-recent-table {
+    max-width: 100%;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  #dashboard.organizer-dashboard #dash-recent-table .data-table {
+    display: table;
+    width: 100%;
+    min-width: 720px;
+    background: #fff;
+  }
+
+  #dashboard.organizer-dashboard #dash-recent-table .data-table thead {
+    display: table-header-group;
+  }
+
+  #dashboard.organizer-dashboard #dash-recent-table .data-table th {
+    display: table-cell;
+    padding: 12px 15px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  #dashboard.organizer-dashboard #dash-recent-table .data-table tbody {
+    display: table-row-group;
+  }
+
+  #dashboard.organizer-dashboard #dash-recent-table .data-table tr {
+    display: table-row;
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+  }
+
+  #dashboard.organizer-dashboard #dash-recent-table .data-table td {
+    display: table-cell;
+    padding: 12px 15px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  #dashboard.organizer-dashboard #dash-recent-table .data-table td .status-badge,
+  #dashboard.organizer-dashboard #dash-recent-table .data-table td button {
+    white-space: nowrap;
+  }
+
+  #dashboard.organizer-dashboard #dash-recent-table .data-table td::before {
+    display: none;
+  }
+}
+
+/* Danh sách giải đấu quản lý: chip đếm nằm trái, đồng bộ với toolbar trang Bots. */
+@media (max-width: 640px) {
+  #dashboard.dashboard-page .dashboard-list-toolbar .toolbar-right {
+    margin-left: 0;
+    justify-content: flex-start;
+  }
+
+  #dashboard.dashboard-page .dashboard-list-toolbar .toolbar-count {
+    align-self: flex-start;
+    width: fit-content;
+    padding: 6px 12px;
+    border: 1px solid #dce8df;
+    border-radius: 999px;
+    background: #eef6f0;
+    color: #176f4f;
+    font-size: .72rem;
+    font-weight: 700;
+  }
+}
+@media (max-width: 640px) {
+  #dashboard.dashboard-page .dashboard-list-toolbar {
+    align-items: stretch;
+  }
+}
+@media (max-width: 640px) {
+  #dashboard.dashboard-page {
+    padding-bottom: calc(76px + env(safe-area-inset-bottom));
+  }
+}

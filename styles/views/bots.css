@@ -44,6 +44,8 @@
   box-shadow: 0 0 0 3px rgba(23, 107, 77, .1);
 }
 
+#bots.bots-page .bots-toolbar-row { display: contents; }
+
 #bots.bots-page .bots-count {
   margin-left: auto;
   color: var(--bots-muted);
@@ -457,12 +459,17 @@
 
 @media (max-width: 640px) {
   #bots.bots-page { padding: 18px 16px 36px; }
-  #bots.bots-page .bots-toolbar { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 10px; padding: 10px; }
-  #bots.bots-page .bots-toolbar .bot-search { grid-column: 1 / -1; max-width: none; }
-  #bots.bots-page .bots-count { margin-left: 0; }
-  #bots.bots-page .workspace-primary-action { justify-self: end; margin-left: 0; }
+  body #bots.bots-page .bots-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 12px; border-radius: 14px; }
+  body #bots.bots-page .bots-toolbar .bot-search { flex: 1 1 100%; max-width: none; min-height: 48px; }
+  body #bots.bots-page .bots-toolbar .bot-search input { min-height: 48px; font-size: 16px; }
+  body #bots.bots-page .bots-toolbar-row { display: flex; flex: 1 1 100%; align-items: center; gap: 10px; }
+  body #bots.bots-page .bots-count { width: fit-content; margin-left: 0; padding: 6px 12px; border: 1px solid #dce8df; border-radius: 999px; background: #eef6f0; color: #176f4f; font-size: .72rem; font-weight: 700; }
+  body #bots.bots-page .workspace-primary-action { margin-left: 0; min-height: 48px; flex: 1 1 auto; justify-content: center; }
   #bots.bots-page .bot-grid { grid-template-columns: 1fr; gap: 12px; }
   #bots.bots-page .bot-card { min-height: 238px; padding: 19px; }
+  #bots.bots-page .bot-card-header { flex-wrap: wrap; }
+  #bots.bots-page .bot-card-badges { justify-content: flex-start; margin-left: 36px; flex-wrap: wrap; white-space: normal; }
+  #bots.bots-page .bot-card-title { white-space: normal; overflow-wrap: anywhere; }
   #bots.bots-page .bot-card-footer { align-items: stretch; flex-direction: column; }
   #bots.bots-page .bot-actions { grid-template-columns: minmax(0, 1fr) auto; width: 100%; }
   #bots.bots-page .bot-actions .bot-action:first-child { grid-column: 1 / -1; }
@@ -529,9 +536,15 @@
     margin-left: 0;
   }
   .bot-workspace-page .bot-workspace-selector {
+    flex: 0 0 auto;
     width: 100%;
     max-width: none;
     align-self: stretch;
+  }
+  .bot-workspace-page .bot-workspace-selector .input-shell {
+    min-height: 44px;
+    height: 44px;
+    font-size: .95rem;
   }
   .bot-workspace-page .bot-source-actions { justify-content: stretch; }
 }

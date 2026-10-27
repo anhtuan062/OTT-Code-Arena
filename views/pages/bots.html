@@ -3,8 +3,10 @@
     <div class="bots-toolbar" id="bots-toolbar" hidden>
       <label class="bot-search" for="bot-search"><svg class="ui-icon search-icon" aria-hidden="true"><use href="#icon-search"></use></svg><span class="visually-hidden">Tìm Bot theo tên</span><input
           id="bot-search" type="search" placeholder="Tìm Bot theo tên" autocomplete="off"></label>
-      <span id="bots-count" class="bots-count">Đang tải danh sách Bot</span>
-      <button class="primary-btn workspace-primary-action" id="open-bot-modal" type="button"><svg class="ui-icon" aria-hidden="true"><use href="#icon-plus"></use></svg>Tạo Bot</button>
+      <div class="bots-toolbar-row">
+        <span id="bots-count" class="bots-count">Đang tải danh sách Bot</span>
+        <button class="primary-btn workspace-primary-action" id="open-bot-modal" type="button"><svg class="ui-icon" aria-hidden="true"><use href="#icon-plus"></use></svg>Tạo Bot</button>
+      </div>
     </div>
     <section id="bots-list" class="bot-grid" aria-live="polite" aria-label="Các Bot của bạn"></section>
     <nav id="bot-pagination" class="bot-pagination" aria-label="Phân trang Bot" hidden></nav>

@@ -5,8 +5,10 @@
         <label class="bot-search" for="tournament-search"><svg class="ui-icon search-icon" aria-hidden="true"><use href="#icon-search"></use></svg><span class="visually-hidden">Tìm giải đấu theo tên</span><input id="tournament-search" type="search" placeholder="Tìm giải đấu theo tên" autocomplete="off"></label>
         <label class="tournament-filter" for="tournament-status-filter"><svg class="ui-icon" aria-hidden="true"><use href="#icon-filter"></use></svg><span class="visually-hidden">Lọc trạng thái</span><select id="tournament-status-filter" class="input-shell"><option value="all">Tất cả trạng thái</option><option value="draft">Bản nháp</option><option value="registration_open">Đang mở đăng ký</option><option value="registration_closed">Đã đóng đăng ký</option><option value="running">Đang diễn ra</option><option value="completed">Đã hoàn thành</option><option value="cancelled">Đã hủy</option></select></label>
       </div>
-      <span id="tournaments-count" class="bots-count">Đang tải danh sách giải đấu</span>
-      <button class="primary-btn workspace-primary-action" id="open-tournament-modal" type="button"><svg class="ui-icon" aria-hidden="true"><use href="#icon-plus"></use></svg>Tạo giải đấu</button>
+      <div class="tournament-toolbar-row">
+        <span id="tournaments-count" class="bots-count">Đang tải danh sách giải đấu</span>
+        <button class="primary-btn workspace-primary-action" id="open-tournament-modal" type="button"><svg class="ui-icon" aria-hidden="true"><use href="#icon-plus"></use></svg>Tạo giải đấu</button>
+      </div>
     </div>
     <section id="tournaments-list" class="tournament-grid" aria-live="polite" aria-label="Các giải đấu của bạn">
     </section>

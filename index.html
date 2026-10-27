@@ -5132,12 +5132,15 @@
       }
 
       body[data-role] .bottom-nav button {
+        overflow: hidden;
         min-height: 44px;
         border: 0;
         border-radius: 8px;
         background: transparent;
         color: var(--text-secondary);
-        font: 600 .72rem 'Be Vietnam Pro', system-ui, sans-serif;
+        font: 600 .7rem 'Be Vietnam Pro', system-ui, sans-serif;
+        text-overflow: ellipsis;
+        white-space: nowrap;
       }
 
       body[data-role] .bottom-nav button.active {
@@ -5147,10 +5150,6 @@
 
       body[data-role] .page {
         padding-bottom: 88px;
-      }
-
-      body[data-role="competitor"] #mobile-menu-toggle {
-        display: none;
       }
     }
   /* Tournament management page: spacious SaaS card grid. */
@@ -7927,8 +7926,8 @@ return legal_moves[0]</pre>
   <nav class="bottom-nav" aria-label="Điều hướng chính" hidden>
     <button type="button" data-target="dashboard">Tổng quan</button>
     <button type="button" class="role-nav" data-role="competitor" data-target="bots">Bot</button>
-    <button type="button" class="role-nav" data-role="competitor" data-target="bot-playground">Kiểm tra thế cờ</button>
-   
+    <button type="button" class="role-nav" data-role="competitor" data-target="bot-playground">Thử cờ</button>
+ 
     <button type="button" class="role-nav" data-role="competitor" data-target="tournaments" data-scope="discoverable">Giải đấu</button>
     <button type="button" class="role-nav" data-role="competitor" data-target="player-guide">Hướng dẫn</button>
     <button type="button" class="role-nav" data-role="organizer" data-target="tournaments" data-scope="managed">Quản lý giải đấu</button>

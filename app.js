@@ -3860,10 +3860,10 @@ function renderTournamentList() {
     const meta = create('div', { className: 'tournament-card-meta' });
     meta.append(tournamentMetaItem('icon-git-branch', tournamentFormatLabel(tournament.format)), tournamentMetaItem('icon-users', `${tournament.participants?.length || tournament.participantCount || 0} người tham gia`)); card.appendChild(meta);
     const footer = create('div', { className: 'tournament-card-footer' });
-    const viewButton = actionButton('Xem chi tiết', () => viewTournament(tournament.tournamentId), `view:${tournament.tournamentId}`, 'secondary-btn tournament-view-btn');
+    const viewButton = actionButton('Chi tiết', () => viewTournament(tournament.tournamentId), `view:${tournament.tournamentId}`, 'secondary-btn tournament-view-btn');
     const viewIcon = icon('icon-arrow-up-right'); viewIcon.classList.add('tournament-action-icon'); viewButton.prepend(viewIcon);
     footer.appendChild(viewButton);
-    if (tournament.status === 'draft' || tournament.status === 'registration_open') footer.appendChild(actionButton('Chỉnh sửa', () => openEditTournamentDialog(tournament), `edit:${tournament.tournamentId}`, 'secondary-btn tournament-view-btn'));
+    if (tournament.status === 'draft' || tournament.status === 'registration_open') footer.appendChild(actionButton('Sửa', () => openEditTournamentDialog(tournament), `edit:${tournament.tournamentId}`, 'secondary-btn tournament-view-btn'));
     footer.appendChild(actionButton('Xóa', () => confirmTournamentAction(tournament.tournamentId, state.authRevision, state.viewRevision, 'delete', 'Xóa giải đấu', tournament.name), `delete:${tournament.tournamentId}`, 'secondary-btn tournament-action tournament-action-danger'));
     card.appendChild(footer); list.appendChild(card);
   });
@@ -3925,7 +3925,7 @@ function renderDiscoverableTournamentCards(list, tournaments) {
       : tournament.status === 'running'
         ? 'Đang diễn ra — mở chi tiết để xem lịch và trực tiếp.'
         : 'Mở chi tiết để xem nội dung giải đấu.';
-    footer.appendChild(tournamentViewButton('Xem chi tiết', () => viewTournament(tournament.tournamentId), `view:${tournament.tournamentId}`));
+    footer.appendChild(tournamentViewButton('Chi tiết', () => viewTournament(tournament.tournamentId), `view:${tournament.tournamentId}`));
     card.appendChild(footer);
     list.appendChild(card);
   });
@@ -11950,6 +11950,20 @@ function replayHistoryPlayerName(player) {
   const name = $(`#r-p${player === 'A' ? '1' : '2'}-name`)?.textContent?.trim();
   return name || `Người chơi ${player}`;
 }
+function keepReplayTimelineItemVisible(list, item) {
+  if (!list || !item) return;
+  const itemTop = Number(item.offsetTop);
+  const itemHeight = Number(item.offsetHeight);
+  const viewportHeight = Number(list.clientHeight);
+  if (![itemTop, itemHeight, viewportHeight].every(Number.isFinite) || viewportHeight <= 0) return;
+
+  const itemBottom = itemTop + itemHeight;
+  const viewTop = Number(list.scrollTop) || 0;
+  const viewBottom = viewTop + viewportHeight;
+  if (itemTop < viewTop) list.scrollTop = itemTop;
+  else if (itemBottom > viewBottom) list.scrollTop = itemBottom - viewportHeight;
+}
+
 function renderReplayTimeline() {
   const list = $('#replay-timeline'); clear(list);
   const moves = state.replay?.moves || [];
@@ -11974,7 +11988,7 @@ function renderReplayTimeline() {
     list.appendChild(item);
   });
   const active = list.querySelector('.replay-move.active');
-  if (active) active.scrollIntoView({ block: 'nearest' });
+  keepReplayTimelineItemVisible(list, active);
 }
 
 function toggleReplayPlayback() {
