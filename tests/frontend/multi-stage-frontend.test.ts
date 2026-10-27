@@ -131,7 +131,7 @@ describe('Multi-stage frontend foundation', () => {
     const css = await source('styles/views/tournaments.css');
     expect(css).toContain('.knockout-bracket');
     expect(css).toContain('.knockout-match-node');
-    expect(css).toContain('.knockout-round { display:flex; min-width:0; }');
+    expect(css).toMatch(/\.knockout-round\s*\{[^}]*display:\s*flex;[^}]*min-width:\s*0;/);
     expect(css).toContain('.knockout-match-pending_tiebreaker');
     expect(css).toContain('@media (prefers-reduced-motion: reduce)');
   });
